@@ -578,7 +578,7 @@ const api = fakeApi({
 
 it("renders history and opens cite drawer without extra request", async () => {
   render(<ChatApp api={api} />);
-  await userEvent.click(screen.getByText("退货政策"));
+  await userEvent.click(await screen.findByText("退货政策"));
   expect(await screen.findByText(/退货需7天响应/)).toBeInTheDocument();
   await userEvent.click(screen.getByRole("button", { name: /\[1\] 运维手册\.md/ }));
   expect(await screen.findByText("退货窗口为 7 个自然日")).toBeInTheDocument();
@@ -937,7 +937,7 @@ export default function KbAdmin({ api }: { api: Client }) {
           {(kbs.data ?? []).map((k) => (
             <li key={k.id}>
               <button className={`w-full rounded px-2 py-1 text-left text-sm hover:bg-accent ${k.id === kbId ? "bg-accent" : ""}`}
-                      onClick={() => { setKbId(k.id); setChunks(null); }}>
+                      onClick={() => { setKbId(k.id); setChunks(null); docs.reload(); /* usePolling deps=[tick,enabled] 不感知 fn——切库必须 reload 换轮询目标（任务3评审裁决） */ }}>
                 {k.name}
               </button>
             </li>
