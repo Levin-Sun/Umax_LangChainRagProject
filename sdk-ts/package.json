@@ -1,0 +1,20 @@
+{
+  "name": "@umax/sdk-ts",
+  "version": "1.0.0",
+  "description": "Umax RAG 契约驱动 TS 类型化客户端（schema.d.ts 由 contracts/openapi.json 生成）",
+  "type": "module",
+  "main": "src/client.ts",
+  "scripts": {
+    "gen": "openapi-typescript ../contracts/openapi.json -o src/schema.d.ts",
+    "typecheck": "tsc --noEmit",
+    "test": "npm run gen && npm run typecheck"
+  },
+  "license": "ISC",
+  "devDependencies": {
+    "openapi-typescript": "^7.13.0",
+    "typescript": "^5.9.3"
+  },
+  "dependencies": {
+    "openapi-fetch": "^0.17.0"
+  }
+}

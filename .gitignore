@@ -6,6 +6,7 @@ venv/
 
 # Node
 node_modules/
+sdk-ts/node_modules/
 .next/
 dist/
 
