@@ -66,6 +66,13 @@ class ModelPatchIn(BaseModel):
 
 SCENARIOS = {"chat", "embedding", "rerank", "vision"}
 
+# 契约 fuzz 前提：真实错误码必须写进 spec，否则 schemathesis 判合法响应为违约
+class ErrorOut(BaseModel):
+    detail: str
+
+
+_ERR = lambda code, msg: {code: {"model": ErrorOut, "description": msg}}  # noqa: E731
+
 MISS_ANSWER = "资料里没有相关内容，无法回答。"
 
 
@@ -112,7 +119,8 @@ def create_app(
                 for k in session.query(KnowledgeBase).order_by(KnowledgeBase.id)]
 
     # ---- 文档与入库 ----
-    @app.post("/api/v1/kb/{kb_id}/documents", status_code=201)
+    @app.post("/api/v1/kb/{kb_id}/documents", status_code=201,
+              responses={**_ERR(404, "知识库不存在"), **_ERR(415, "不支持的文件类型")})
     def upload_document(kb_id: int, file: UploadFile = File(...),
                         session: Session = Depends(get_session)):
         kb = session.get(KnowledgeBase, kb_id)
@@ -139,7 +147,8 @@ def create_app(
                               chunk_target=s.chunk_target, chunk_min=s.chunk_min)
         return _doc_json(doc)
 
-    @app.get("/api/v1/documents/{doc_id}")
+    @app.get("/api/v1/documents/{doc_id}",
+             responses=_ERR(404, "文档不存在"))
     def get_document(doc_id: int, session: Session = Depends(get_session)):
         doc = session.get(Document, doc_id)
         if not doc:
@@ -155,7 +164,8 @@ def create_app(
                 for c in session.query(Chunk).filter_by(document_id=doc_id)
                 .order_by(Chunk.chunk_index)]
 
-    @app.patch("/api/v1/documents/{doc_id}")
+    @app.patch("/api/v1/documents/{doc_id}",
+               responses=_ERR(404, "文档不存在"))
     def patch_document(doc_id: int, body: DocPatchIn, session: Session = Depends(get_session)):
         doc = session.get(Document, doc_id)
         if not doc:
@@ -166,7 +176,8 @@ def create_app(
         session.commit()
         return _doc_json(doc)
 
-    @app.post("/api/v1/documents/{doc_id}/reprocess", status_code=202)
+    @app.post("/api/v1/documents/{doc_id}/reprocess", status_code=202,
+              responses=_ERR(404, "文档不存在"))
     def reprocess(doc_id: int, session: Session = Depends(get_session)):
         doc = session.get(Document, doc_id)
         if not doc:
@@ -228,7 +239,8 @@ def create_app(
         return [{"id": c.id, "title": c.title, "kb_ids": c.kb_ids}
                 for c in session.query(Conversation).order_by(Conversation.id)]
 
-    @app.get("/api/v1/conversations/{conv_id}/messages")
+    @app.get("/api/v1/conversations/{conv_id}/messages",
+             responses=_ERR(404, "会话不存在"))
     def list_messages(conv_id: int, session: Session = Depends(get_session)):
         if not session.get(Conversation, conv_id):
             raise HTTPException(404, "会话不存在")
@@ -250,7 +262,8 @@ def create_app(
                 "fallback_rank": m.fallback_rank, "enabled": m.enabled,
                 "api_key_masked": ("****" + plain[-4:]) if plain else ""}
 
-    @app.post("/api/v1/models", status_code=201)
+    @app.post("/api/v1/models", status_code=201,
+              responses={**_ERR(400, "scenario 非法"), **_ERR(503, "未配置 GATEWAY_SECRET")})
     def create_model(body: ModelIn, session: Session = Depends(get_session)):
         if body.scenario not in SCENARIOS:
             raise HTTPException(400, f"scenario 仅支持 {'/'.join(sorted(SCENARIOS))}")
@@ -269,7 +282,9 @@ def create_app(
                                                    ModelConfig.fallback_rank, ModelConfig.id)
         return [_model_json(m) for m in rows]
 
-    @app.patch("/api/v1/models/{model_id}")
+    @app.patch("/api/v1/models/{model_id}",
+               responses={**_ERR(400, "scenario 非法"), **_ERR(404, "模型配置不存在"),
+                          **_ERR(503, "未配置 GATEWAY_SECRET")})
     def patch_model(model_id: int, body: ModelPatchIn, session: Session = Depends(get_session)):
         m = session.get(ModelConfig, model_id)
         if not m:
@@ -284,7 +299,8 @@ def create_app(
         session.commit()
         return _model_json(m)
 
-    @app.delete("/api/v1/models/{model_id}", status_code=204)
+    @app.delete("/api/v1/models/{model_id}", status_code=204,
+                responses=_ERR(503, "未配置 GATEWAY_SECRET"))
     def delete_model(model_id: int, session: Session = Depends(get_session)):
         m = session.get(ModelConfig, model_id)
         if m:
