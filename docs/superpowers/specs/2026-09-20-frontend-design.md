@@ -50,7 +50,7 @@
 - `lib/hooks.ts`：
   - `useAsync<T>(fn, deps)` → `{data, error, loading, reload}`；
   - `usePolling<T>(fn, {intervalMs, stopWhen})` → 同上，命中停止条件即清定时器。
-- 错误处理：openapi-fetch 返回 `{data, error}`；error 体为契约声明的 `ErrorOut {code, message}` → 统一渲染 toast/错误条；网络层失败（error 体缺失）降级为通用错误文案。禁止吞错。
+- 错误处理：openapi-fetch 返回 `{data, error}`；error 体为契约声明的 `ErrorOut {detail: string}`（422 的 detail 为数组 → 通用文案），网络层失败（error 体缺失）降级为通用错误文案，统一渲染错误条；禁止吞错。（2026-09-20 对照 spec 实况修订：字段是 `detail`，非 code/message。）
 
 ## 4. 测试（Vitest 为主）
 
