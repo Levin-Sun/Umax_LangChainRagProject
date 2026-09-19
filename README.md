@@ -23,3 +23,18 @@
 - 用法：`docker compose up -d` → `cd backend && ../.venv/Scripts/python.exe -m pytest`（回归）/ `python -m app.main`（起服务）；stage0 验证脚本已归档至 `archive/stage0/`（勿再对真库跑其 ingest）
 - 当前配置：百炼已放行全部模型，`EMBED_PROVIDER=bailian`（qwen3.7-text-embedding 1024 维 + qwen3.7-text-rerank），已重新入库；chat 间歇性 403 已内置重试
 - 下一步：阶段 1 剩余——模型网关（分场景路由/fallback/用量台账）→ 前端 Next.js；MinerU 镜像与 redis 容器按需启动（`QUEUE_BACKEND=arq` 切换异步入库）
+
+## 契约工作流
+
+唯一事实源：`contracts/openapi.json`（入库，由漂移测试守护）。**改端点必须走这四步**：
+
+1. 先改/加测试（红）——在 `backend/tests/` 契约相关测试里先锁定新行为
+2. 实现端点变更（后端代码）
+3. 重新导出 spec：`cd backend && ../.venv/Scripts/python.exe scripts/export_openapi.py`
+4. 双端验证：`cd backend && ../.venv/Scripts/python.exe -m pytest` + `cd sdk-ts && npm test`（gen + tsc）
+
+前端一律经 `@umax/sdk-ts`（`sdk-ts/`，openapi-fetch 强类型客户端）访问接口，**禁止裸 fetch `/api/v1`**——URL、参数、响应类型全部在编译期由 `schema.d.ts` 校验。
+
+可选拦截 breaking change：安装 [oasdiff](https://github.com/oasdiff/oasdiff) 后执行 `oasdiff breaking <上个提交的 contracts/openapi.json> contracts/openapi.json`（个人项目一期以 git diff 评审 spec 变更为主，不强制装二进制）。
+
+已知取舍：`scenario` 字段在 spec 中以 `pattern` 约束，TS SDK 里呈现为 `string` 而非字面量联合类型——刻意为之，SDK v1 时再收紧。
