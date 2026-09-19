@@ -19,3 +19,4 @@ pypdf>=5.1
 pytest>=8.3
 httpx>=0.27
 cryptography>=44
+schemathesis>=4.27  # 契约 fuzz（实测 4.27.4：from_fixture + call_and_validate）

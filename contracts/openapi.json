@@ -20,6 +20,8 @@
           "conversation_id": {
             "anyOf": [
               {
+                "maximum": 2147483647.0,
+                "minimum": -2147483648.0,
                 "type": "integer"
               },
               {
@@ -32,6 +34,8 @@
             "anyOf": [
               {
                 "items": {
+                  "maximum": 2147483647.0,
+                  "minimum": -2147483648.0,
                   "type": "integer"
                 },
                 "type": "array"
@@ -154,6 +158,8 @@
           },
           "fallback_rank": {
             "default": 0,
+            "maximum": 2147483647.0,
+            "minimum": -2147483648.0,
             "title": "Fallback Rank",
             "type": "integer"
           },
@@ -171,6 +177,7 @@
             "type": "string"
           },
           "scenario": {
+            "pattern": "^(chat|embedding|rerank|vision)$",
             "title": "Scenario",
             "type": "string"
           }
@@ -235,6 +242,8 @@
           "fallback_rank": {
             "anyOf": [
               {
+                "maximum": 2147483647.0,
+                "minimum": -2147483648.0,
                 "type": "integer"
               },
               {
@@ -279,6 +288,7 @@
           "scenario": {
             "anyOf": [
               {
+                "pattern": "^(chat|embedding|rerank|vision)$",
                 "type": "string"
               },
               {
@@ -297,6 +307,8 @@
             "anyOf": [
               {
                 "items": {
+                  "maximum": 2147483647.0,
+                  "minimum": -2147483648.0,
                   "type": "integer"
                 },
                 "type": "array"
@@ -399,6 +411,16 @@
             },
             "description": "Successful Response"
           },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            },
+            "description": "请求体解析失败"
+          },
           "422": {
             "content": {
               "application/json": {
@@ -438,6 +460,8 @@
             "name": "conv_id",
             "required": true,
             "schema": {
+              "maximum": 2147483647,
+              "minimum": -2147483648,
               "title": "Conv Id",
               "type": "integer"
             }
@@ -485,6 +509,8 @@
             "name": "doc_id",
             "required": true,
             "schema": {
+              "maximum": 2147483647,
+              "minimum": -2147483648,
               "title": "Doc Id",
               "type": "integer"
             }
@@ -530,6 +556,8 @@
             "name": "doc_id",
             "required": true,
             "schema": {
+              "maximum": 2147483647,
+              "minimum": -2147483648,
               "title": "Doc Id",
               "type": "integer"
             }
@@ -553,6 +581,16 @@
               }
             },
             "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            },
+            "description": "请求体解析失败"
           },
           "404": {
             "content": {
@@ -587,6 +625,8 @@
             "name": "doc_id",
             "required": true,
             "schema": {
+              "maximum": 2147483647,
+              "minimum": -2147483648,
               "title": "Doc Id",
               "type": "integer"
             }
@@ -634,6 +674,8 @@
             "name": "doc_id",
             "required": true,
             "schema": {
+              "maximum": 2147483647,
+              "minimum": -2147483648,
               "title": "Doc Id",
               "type": "integer"
             }
@@ -724,6 +766,16 @@
             },
             "description": "Successful Response"
           },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            },
+            "description": "请求体解析失败"
+          },
           "422": {
             "content": {
               "application/json": {
@@ -747,6 +799,8 @@
             "name": "kb_id",
             "required": true,
             "schema": {
+              "maximum": 2147483647,
+              "minimum": -2147483648,
               "title": "Kb Id",
               "type": "integer"
             }
@@ -770,6 +824,16 @@
               }
             },
             "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            },
+            "description": "请求体解析失败"
           },
           "404": {
             "content": {
@@ -884,6 +948,8 @@
             "name": "model_id",
             "required": true,
             "schema": {
+              "maximum": 2147483647,
+              "minimum": -2147483648,
               "title": "Model Id",
               "type": "integer"
             }
@@ -924,6 +990,8 @@
             "name": "model_id",
             "required": true,
             "schema": {
+              "maximum": 2147483647,
+              "minimum": -2147483648,
               "title": "Model Id",
               "type": "integer"
             }
@@ -1013,6 +1081,16 @@
               }
             },
             "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            },
+            "description": "请求体解析失败"
           },
           "422": {
             "content": {

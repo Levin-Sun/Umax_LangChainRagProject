@@ -19,6 +19,9 @@ data/
 uploads/
 logs/
 
+# 测试运行产物（hypothesis/schemathesis 反例库缓存）
+.hypothesis/
+
 # 系统文件
 .DS_Store
 Thumbs.db
