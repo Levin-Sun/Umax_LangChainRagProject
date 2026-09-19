@@ -1,0 +1,17 @@
+services:
+  postgres:
+    image: pgvector/pgvector:pg16
+    container_name: umaxrag-pg
+    environment:
+      POSTGRES_USER: rag
+      POSTGRES_PASSWORD: rag_dev_2026
+      POSTGRES_DB: umaxrag
+    ports:
+      - "5432:5432"
+    volumes:
+      - ./data/pg:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U rag -d umaxrag"]
+      interval: 5s
+      timeout: 3s
+      retries: 30

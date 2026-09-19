@@ -17,4 +17,7 @@
 
 ## 当前进度
 
-阶段 0（技术验证）筹备中。
+- 阶段 0 技术验证进行中：`stage0/` 已搭建完整链路（切块 → text-embedding-v4 向量化 → pgvector 存储 → BM25+向量 RRF 混合检索 → gte-rerank 重排 → qwen-plus 带引用生成）
+- 金标准评测集 20 题（`stage0/eval/golden_qa.json`），覆盖错别字、版本冲突、同义术语、私人噪声、中英混杂、作废内容识别等考察点
+- 用法：`docker compose up -d` → `python ingest.py` → `python query.py "问题"` → `python eval.py`
+- 当前阻塞：百炼 API key 被限制（Access denied by API-Key restrictions），待账户侧解除后跑基线评测
