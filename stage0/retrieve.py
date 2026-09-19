@@ -51,7 +51,7 @@ _cross_encoder = None  # 本地重排模型懒加载缓存
 
 
 def _rerank(query: str, candidates: list[dict], top_n: int) -> list[dict]:
-    """重排：优先百炼 gte-rerank API，不可用且配置了本地模型时用 CrossEncoder。"""
+    """重排：优先百炼 rerank API，不可用且配置了本地模型时用 CrossEncoder。"""
     try:
         resp = httpx.post(
             f"{config.NATIVE_BASE}/services/rerank/text-rerank/text-rerank",

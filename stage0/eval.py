@@ -57,7 +57,7 @@ def main() -> None:
         "# 阶段 0 基线评测报告",
         f"\n- 时间：{datetime.now():%Y-%m-%d %H:%M}",
         f"- 模型：chat={config.CHAT_MODEL}, embedding={config.EMBEDDING_MODEL}, rerank={config.RERANK_MODEL}",
-        f"- 检索：BM25 + 向量 RRF 融合 → gte-rerank 重排 Top{config.RERANK_TOP_N}",
+        f"- 检索：BM25 + 向量 RRF 融合 → {config.RERANK_MODEL} 重排 Top{config.RERANK_TOP_N}",
         f"- 语料：DirtyDocs {20} 份电商脏文档（错别字/重复/版本冲突/噪声/中英混杂）",
         f"\n## 总分：{n_pass}/{len(results)}（{n_pass / len(results):.0%}）\n",
         "| 考察点 | 通过 | 小计 |", "|---|---|---|",
