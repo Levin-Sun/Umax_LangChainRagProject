@@ -3,3 +3,5 @@ jieba>=0.42.1
 rank-bm25>=0.2.2
 python-dotenv>=1.0
 pg8000>=1.31
+# 本地嵌入/重排（百炼向量未放行期间的对照方案）
+sentence-transformers>=3.0

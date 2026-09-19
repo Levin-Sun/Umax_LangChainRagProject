@@ -1,9 +1,13 @@
 # 阶段 0：带引用的答案生成
 import re
+import time
 
 import httpx
 
 import config
+
+# 重试退避（秒）：应对专属端点的间歇性 403 / 断连
+RETRY_BACKOFF = [2, 5, 10]
 
 SYSTEM_PROMPT = """你是企业电商知识库助手。回答规则：
 1. 只依据【资料】回答，禁止使用资料之外的知识。
@@ -17,21 +21,33 @@ def generate(query: str, hits: list[dict]) -> dict:
     corpus = "\n\n".join(
         f"[{i}] （来源：{h['doc_name']}）\n{h['content']}" for i, h in enumerate(hits, 1)
     )
-    resp = httpx.post(
-        f"{config.COMPAT_BASE}/chat/completions",
-        headers={"Authorization": f"Bearer {config.DASHSCOPE_API_KEY}"},
-        json={
-            "model": config.CHAT_MODEL,
-            "temperature": 0.2,
-            "messages": [
-                {"role": "system", "content": SYSTEM_PROMPT},
-                {"role": "user", "content": f"【资料】\n{corpus}\n\n【问题】{query}"},
-            ],
-        },
-        timeout=120,
-    )
-    resp.raise_for_status()
-    data = resp.json()
+    payload = {
+        "model": config.CHAT_MODEL,
+        "temperature": 0.2,
+        "messages": [
+            {"role": "system", "content": SYSTEM_PROMPT},
+            {"role": "user", "content": f"【资料】\n{corpus}\n\n【问题】{query}"},
+        ],
+    }
+    last_err: Exception | None = None
+    for attempt, wait in enumerate([0] + RETRY_BACKOFF, 1):
+        time.sleep(wait)
+        try:
+            resp = httpx.post(
+                f"{config.COMPAT_BASE}/chat/completions",
+                headers={"Authorization": f"Bearer {config.DASHSCOPE_API_KEY}"},
+                json=payload,
+                timeout=120,
+            )
+            resp.raise_for_status()
+            data = resp.json()
+            break
+        except Exception as e:
+            last_err = e
+            if attempt <= len(RETRY_BACKOFF):
+                print(f"⚠️ 生成调用失败（第{attempt}次，{e.__class__.__name__}），退避后重试")
+    else:
+        raise last_err  # type: ignore[misc]
     answer = data["choices"][0]["message"]["content"]
     usage = data.get("usage", {})
     cited_docs = sorted({hits[int(n) - 1]["doc_name"] for n in re.findall(r"\[(\d+)\]", answer)

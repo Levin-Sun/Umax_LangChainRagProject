@@ -17,8 +17,8 @@
 
 ## 当前进度
 
-- ✅ **阶段 0 基线已达标**：金标准 20 题 **20/20（100%）**，报告见 `stage0/eval/report_20260919_1819.md`
-- 链路：切块 → pgvector 存储 → BM25 + 向量 RRF 混合检索 → gte-rerank 重排 → qwen3.7-flash 带引用生成
-- 用法：`docker compose up -d` → `python ingest.py` → `python query.py "问题"` → `python eval.py`
-- 说明：当前百炼专属端点仅放行 `qwen3.7-flash`（chat），向量与重排暂不可用，本次为**纯 BM25 基线**；接入 embedding/rerank 后需重跑对比，验证混合检索的增益
-- 评测集校准记录：前两轮 95%/90% 的失败项均为"回答未包含题目未问及的延伸细节"，属评测标准过严，已校准（延伸细节降级为加分项，见 golden_qa.json 备注）
+- ✅ **阶段 0 完成（2026-09-19）**：金标准 20 题，纯 BM25 基线 20/20，混合检索（本地 bge-small-zh-v1.5 向量 + bge-reranker-base 重排）20/20；执行记录与交接说明见[产品需求与开发方案.md](./产品需求与开发方案.md)第六章
+- 链路：切块 → pgvector → BM25+向量 RRF → 重排 → qwen3.7-flash 带引用生成；嵌入/重排支持百炼 API 与本地双 provider，可 `.env` 切换
+- 用法：`docker compose up -d` → `python ingest.py` → `python query.py "问题"` → `python eval.py` → `python compare_retrieval.py`
+- 已知：百炼专属端点暂仅放行 qwen3.7-flash（embedding/rerank 403，控制台开通未生效），向量走本地模型；chat 有间歇性 403 已内置重试
+- 下一步：阶段 1 MVP（MinerU 解析 → FastAPI 服务化 → 模型网关 → 前端）

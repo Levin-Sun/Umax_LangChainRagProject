@@ -5,6 +5,7 @@ import pg8000.native
 from rank_bm25 import BM25Okapi
 
 import config
+import embed_provider
 
 
 def _conn() -> pg8000.native.Connection:
@@ -25,15 +26,7 @@ def _load_chunks(con) -> list[dict]:
 
 def _embed_query(query: str) -> list[float] | None:
     try:
-        resp = httpx.post(
-            f"{config.COMPAT_BASE}/embeddings",
-            headers={"Authorization": f"Bearer {config.DASHSCOPE_API_KEY}"},
-            json={"model": config.EMBEDDING_MODEL, "input": [query],
-                  "dimensions": config.EMBEDDING_DIM, "encoding_format": "float"},
-            timeout=60,
-        )
-        resp.raise_for_status()
-        return resp.json()["data"][0]["embedding"]
+        return embed_provider.embed([query])[0]
     except Exception as e:
         print(f"⚠️ 向量化不可用（{e.__class__.__name__}），退回纯 BM25 检索")
         return None
@@ -54,8 +47,11 @@ def _rrf_fuse(rankings: list[list[int]]) -> dict[int, float]:
     return scores
 
 
+_cross_encoder = None  # 本地重排模型懒加载缓存
+
+
 def _rerank(query: str, candidates: list[dict], top_n: int) -> list[dict]:
-    """百炼原生 gte-rerank-v2（兼容模式不提供 rerank 端点）；不可用时退回融合排序。"""
+    """重排：优先百炼 gte-rerank API，不可用且配置了本地模型时用 CrossEncoder。"""
     try:
         resp = httpx.post(
             f"{config.NATIVE_BASE}/services/rerank/text-rerank/text-rerank",
@@ -71,9 +67,19 @@ def _rerank(query: str, candidates: list[dict], top_n: int) -> list[dict]:
             {**candidates[r["index"]], "rerank_score": r["relevance_score"]}
             for r in results
         ]
-    except Exception as e:
-        print(f"⚠️ 重排不可用（{e.__class__.__name__}），使用 RRF 融合排序")
-        return candidates[:top_n]
+    except Exception as api_err:
+        if not config.LOCAL_RERANK_MODEL:
+            print(f"⚠️ 重排不可用（{api_err.__class__.__name__}），使用 RRF 融合排序")
+            return candidates[:top_n]
+        global _cross_encoder
+        if _cross_encoder is None:
+            from sentence_transformers import CrossEncoder
+
+            print(f"加载本地重排模型 {config.LOCAL_RERANK_MODEL} ...")
+            _cross_encoder = CrossEncoder(config.LOCAL_RERANK_MODEL)
+        scores = _cross_encoder.predict([(query, c["content"]) for c in candidates])
+        ranked = sorted(range(len(candidates)), key=lambda i: scores[i], reverse=True)[:top_n]
+        return [{**candidates[i], "rerank_score": float(scores[i])} for i in ranked]
 
 
 def retrieve(query: str, use_rerank: bool = True) -> tuple[list[dict], list[dict]]:

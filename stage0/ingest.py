@@ -2,12 +2,12 @@
 import sys
 from pathlib import Path
 
-import httpx
 import pg8000.native
 
 sys.stdout.reconfigure(encoding="utf-8")
 
 import config
+import embed_provider
 
 
 def read_docs() -> dict[str, str]:
@@ -49,21 +49,8 @@ def chunk_text(text: str) -> list[str]:
 
 
 def embed(texts: list[str]) -> list[list[float]]:
-    """百炼兼容模式 embeddings；text-embedding-v4 每批最多 10 条。"""
-    out: list[list[float]] = []
-    for i in range(0, len(texts), 10):
-        batch = texts[i : i + 10]
-        resp = httpx.post(
-            f"{config.COMPAT_BASE}/embeddings",
-            headers={"Authorization": f"Bearer {config.DASHSCOPE_API_KEY}"},
-            json={"model": config.EMBEDDING_MODEL, "input": batch,
-                  "dimensions": config.EMBEDDING_DIM, "encoding_format": "float"},
-            timeout=60,
-        )
-        resp.raise_for_status()
-        data = sorted(resp.json()["data"], key=lambda d: d["index"])
-        out.extend(d["embedding"] for d in data)
-    return out
+    """统一嵌入入口：按 EMBED_PROVIDER 走百炼 API 或本地模型。"""
+    return embed_provider.embed(texts)
 
 
 def main() -> None:
@@ -79,7 +66,8 @@ def main() -> None:
     if no_embed:
         print("跳过向量化（纯 BM25 基线模式）")
     else:
-        print(f"调用百炼 {config.EMBEDDING_MODEL} 生成向量 ...")
+        provider = "本地 sentence-transformers" if config.EMBED_PROVIDER == "local" else f"百炼 {config.EMBEDDING_MODEL}"
+        print(f"嵌入提供方：{provider} ...")
         vectors = embed([r[2] for r in rows])
         print(f"向量维度：{len(vectors[0])}")
 
@@ -89,9 +77,10 @@ def main() -> None:
     )
     con.run("CREATE EXTENSION IF NOT EXISTS vector")
     con.run("DROP TABLE IF EXISTS chunks")
+    dim = len(vectors[0]) if vectors else config.EMBEDDING_DIM
     con.run(
         f"CREATE TABLE chunks (id serial primary key, doc_name text, chunk_index int,"
-        f" content text, embedding vector({config.EMBEDDING_DIM}))"
+        f" content text, embedding vector({dim}))"
     )
     for i, ((name, idx, content), vec) in enumerate(zip(rows, vectors or [None] * len(rows))):
         con.run(

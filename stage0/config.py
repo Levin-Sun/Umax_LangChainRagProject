@@ -6,6 +6,9 @@ from dotenv import load_dotenv
 
 load_dotenv(Path(__file__).parent / ".env")
 
+# 本地嵌入走 HuggingFace 镜像（国内网络）
+os.environ.setdefault("HF_ENDPOINT", "https://hf-mirror.com")
+
 # ---- 阿里云百炼（DashScope）----
 DASHSCOPE_API_KEY = os.getenv("DASHSCOPE_API_KEY", "")
 # OpenAI 兼容入口（chat / embeddings）
@@ -19,6 +22,12 @@ EMBEDDING_MODEL = os.getenv("EMBEDDING_MODEL", "text-embedding-v4")
 EMBEDDING_DIM = int(os.getenv("EMBEDDING_DIM", "1024"))
 CHAT_MODEL = os.getenv("CHAT_MODEL", "qwen-plus")
 RERANK_MODEL = os.getenv("RERANK_MODEL", "gte-rerank-v2")
+
+# 嵌入提供方：bailian（API）/ local（本机 sentence-transformers）
+EMBED_PROVIDER = os.getenv("EMBED_PROVIDER", "bailian")
+LOCAL_EMBED_MODEL = os.getenv("LOCAL_EMBED_MODEL", "BAAI/bge-small-zh-v1.5")
+# 本地重排（CrossEncoder），空字符串=不用本地重排
+LOCAL_RERANK_MODEL = os.getenv("LOCAL_RERANK_MODEL", "BAAI/bge-reranker-base")
 
 # ---- PostgreSQL (pgvector) ----
 PG = {
