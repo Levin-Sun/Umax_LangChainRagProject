@@ -44,6 +44,9 @@ export default function ChatApp({ api }: { api: Client }) {
     [activeConv]);
 
   function openConversation(id: number | null) {
+    // 任务7欠账①：点击当前已打开会话 = no-op（旧实现无条件 setTurns([]) 把本地
+    // 追加的答案清空，历史又要靠后端重取，出现空白窗口）。"新建会话"（null）仍重置。
+    if (id !== null && id === convId) return;
     setConvId(id);
     setActiveConv(id);
     setTurns([]);

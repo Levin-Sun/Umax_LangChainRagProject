@@ -1,6 +1,6 @@
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { describe, expect, it } from "vitest";
+import { expect, it } from "vitest";
 import ChatApp from "@/components/ChatApp";
 import { fail, fakeApi, ok } from "@/lib/testkit";
 import { P } from "@/lib/paths";
@@ -62,4 +62,20 @@ it("renders backend detail in banner when list fails", async () => {
   const api3 = fakeApi({ GET: async () => fail("知识库不存在", 404) });
   render(<ChatApp api={api3} />);
   expect(await screen.findByRole("alert")).toHaveTextContent("知识库不存在");
+});
+
+// 任务7欠账①回归：点击当前已打开会话 = no-op，本地追加的答案不能被 setTurns([]) 抹掉
+it("re-clicking the currently open conversation keeps the local answer on screen", async () => {
+  const api4 = fakeApi({
+    GET: async (url) => (url === P.conversations ? ok(convs)
+      : url === P.convMessages ? ok([] as MessageOut[]) : undefined),
+    POST: async () => ok(chatOut),
+  });
+  render(<ChatApp api={api4} />);
+  await userEvent.type(screen.getByLabelText("提问"), "售后多久响应？");
+  await userEvent.click(screen.getByRole("button", { name: "发送" }));
+  // send 返回 conversation_id=1 → convId=1，与侧栏"退货政策"同 id
+  expect(await screen.findByText(/需24小时响应/)).toBeInTheDocument();
+  await userEvent.click(await screen.findByText("退货政策"));
+  expect(screen.getByText(/需24小时响应/)).toBeInTheDocument(); // 修复前此处查不到（turns 被清空）
 });

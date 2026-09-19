@@ -29,6 +29,7 @@ export default function KbAdmin({ api }: { api: Client }) {
 
   async function createKb() {
     if (!newName.trim()) return;
+    setActionErr(null);  // 任务7欠账③：入口先清残留旧错，否则新一次失败前横幅一直挂着上次的错
     try {
       await call(api.POST(P.kb, { body: { name: newName } }));
       setNewName("");
@@ -77,7 +78,9 @@ export default function KbAdmin({ api }: { api: Client }) {
           <Input aria-label="新知识库名" placeholder="新知识库名" value={newName} onChange={(e) => setNewName(e.target.value)} />
           <Button type="submit" disabled={!newName.trim()}>建库</Button>
         </form>
-        <ErrorBanner error={kbs.error} />
+        {/* 任务7欠账③：actionErr 挪到左栏常驻横幅——建库失败时往往还没选库，
+            旧版藏在 kbId!==null 块里根本看不见 */}
+        <ErrorBanner error={kbs.error ?? actionErr} />
         <ul className="space-y-1">
           {(kbs.data ?? []).map((k) => (
             <li key={k.id}>
@@ -118,7 +121,7 @@ export default function KbAdmin({ api }: { api: Client }) {
               </tbody>
             </table>
             {docs.loading && !docs.data && <p className="text-sm text-muted-foreground">载入…</p>}
-            <ErrorBanner error={docs.error ?? actionErr} />
+            <ErrorBanner error={docs.error} />
           </>
         )}
       </section>

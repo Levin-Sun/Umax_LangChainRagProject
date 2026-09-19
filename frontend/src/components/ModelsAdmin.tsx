@@ -18,6 +18,9 @@ export default function ModelsAdmin({ api }: { api: Client }) {
   const [form, setForm] = useState({ ...emptyForm });
   const [formErr, setFormErr] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  // 任务7欠账②：行内操作（启停/删除）独立 busy 防双击竞态，错误经 ErrorBanner 呈现
+  const [rowBusy, setRowBusy] = useState(false);
+  const [rowErr, setRowErr] = useState<unknown>(null);
   const list = useAsync(() => call(api.GET(P.models)) as Promise<ModelOut[]>);
 
   async function register() {
@@ -41,18 +44,36 @@ export default function ModelsAdmin({ api }: { api: Client }) {
   }
 
   async function toggle(m: ModelOut) {
-    await call(api.PATCH(P.model, { params: { path: { model_id: m.id } }, body: { enabled: !m.enabled } }));
-    list.reload();
+    if (rowBusy) return;
+    setRowBusy(true);
+    setRowErr(null);
+    try {
+      await call(api.PATCH(P.model, { params: { path: { model_id: m.id } }, body: { enabled: !m.enabled } }));
+      list.reload();
+    } catch (e) {
+      setRowErr(e);
+    } finally {
+      setRowBusy(false);
+    }
   }
 
   async function remove(m: ModelOut) {
-    await callVoid(api.DELETE(P.model, { params: { path: { model_id: m.id } } }));
-    list.reload();
+    if (rowBusy) return;
+    setRowBusy(true);
+    setRowErr(null);
+    try {
+      await callVoid(api.DELETE(P.model, { params: { path: { model_id: m.id } } }));
+      list.reload();
+    } catch (e) {
+      setRowErr(e);
+    } finally {
+      setRowBusy(false);
+    }
   }
 
   return (
     <div className="space-y-6 p-6">
-      <ErrorBanner error={list.error} />
+      <ErrorBanner error={list.error ?? rowErr} />
       <table className="w-full text-sm">
         <thead><tr className="border-b text-left"><th className="py-1">场景</th><th>模型</th><th>API Key</th><th>fallback</th><th>操作</th></tr></thead>
         <tbody>

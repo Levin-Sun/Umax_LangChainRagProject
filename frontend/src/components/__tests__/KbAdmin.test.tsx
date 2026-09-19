@@ -1,10 +1,10 @@
-import { render, screen } from "@testing-library/react";
+import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { act } from "react";
 import { describe, expect, it, vi } from "vitest";
 import KbAdmin from "@/components/KbAdmin";
 import { P } from "@/lib/paths";
-import { fakeApi, ok } from "@/lib/testkit";
+import { fail, fakeApi, ok } from "@/lib/testkit";
 import type { DocOut } from "@/lib/types";
 
 const pending: DocOut = { id: 1, kb_id: 1, name: "ops.txt", status: "pending", error: null, size_bytes: 5 };
@@ -52,5 +52,26 @@ describe("KbAdmin 轮询", () => {
     expect(await screen.findByText("解析炸了")).toBeInTheDocument();
     await userEvent.click(screen.getByRole("button", { name: "重试入库" }));
     expect(reprocess).toHaveBeenCalled();
+  });
+
+  // 任务7欠账③回归：建库报错须在"未选库"状态下可见（旧版横幅藏在 kbId!==null 块里），
+  // 且重试入口清残留旧错（成功一次后横幅消失）
+  it("createKb error is visible with no kb selected and clears after a successful retry", async () => {
+    let firstAttempt = true;
+    const api = fakeApi({
+      GET: async (url) => (url === P.kb ? ok(firstAttempt ? [] : [{ id: 2, name: "新库", description: null }])
+        : undefined),
+      POST: async (url) => {
+        if (url !== P.kb) return undefined;
+        if (firstAttempt) { firstAttempt = false; return fail("库名已存在", 409); }
+        return ok({ id: 2, name: "新库", description: null });
+      },
+    });
+    render(<KbAdmin api={api} />);
+    await userEvent.type(screen.getByLabelText("新知识库名"), "新库");
+    await userEvent.click(screen.getByRole("button", { name: "建库" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent("库名已存在");
+    await userEvent.click(screen.getByRole("button", { name: "建库" }));  // 第二次成功
+    await waitFor(() => expect(screen.queryByRole("alert")).not.toBeInTheDocument());
   });
 });

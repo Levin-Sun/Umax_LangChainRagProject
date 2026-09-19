@@ -4,7 +4,7 @@ import ModelsAdmin from "@/components/ModelsAdmin";
 import { P } from "@/lib/paths";
 import { fail, fakeApi, ok } from "@/lib/testkit";
 import type { ModelOut } from "@/lib/types";
-import { describe, expect, it, vi } from "vitest";
+import { expect, it, vi } from "vitest";
 
 const m: ModelOut = { id: 3, scenario: "chat", provider: "bailian", base_url: "https://x",
   model_name: "qwen3.7-max", capabilities: {}, is_default: true, fallback_rank: 0,
@@ -42,4 +42,19 @@ it("renders 503 detail from backend (gateway secret missing)", async () => {
   const api = fakeApi({ GET: async () => fail("未配置主密钥 GATEWAY_SECRET，无法管理模型 key", 503) });
   render(<ModelsAdmin api={api} />);
   expect(await screen.findByRole("alert")).toHaveTextContent("GATEWAY_SECRET");
+});
+
+// 任务7欠账②回归：启停/删除失败要进 ErrorBanner（旧实现裸 await——rejection 无人接，
+// UI 静默失败）；busy 防重入由同一次点击只发一请求间接锁定
+it("surfaces toggle failure in banner instead of failing silently", async () => {
+  const patch = vi.fn(async (..._args: unknown[]) => fail("网关写库炸了", 500));
+  const api = fakeApi({
+    GET: async (url) => (url === P.models ? ok([m]) : undefined),
+    PATCH: async (url, init) => (url === P.model ? patch(url, init) : undefined),
+  });
+  render(<ModelsAdmin api={api} />);
+  const sw = await screen.findByRole("switch", { name: "启用 qwen3.7-max" });
+  await userEvent.click(sw);
+  expect(await screen.findByRole("alert")).toHaveTextContent("网关写库炸了");
+  expect(patch).toHaveBeenCalledTimes(1);
 });
