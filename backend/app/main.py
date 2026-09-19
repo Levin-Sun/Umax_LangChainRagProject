@@ -221,6 +221,14 @@ def create_app(
         return [{"id": k.id, "name": k.name, "description": k.description}
                 for k in session.query(KnowledgeBase).order_by(KnowledgeBase.id)]
 
+    @app.get("/api/v1/kb/{kb_id}/documents",
+             responses=_ERR(404, "知识库不存在"))
+    def list_documents(kb_id: PathId, session: Session = Depends(get_session)):
+        if not session.get(KnowledgeBase, kb_id):
+            raise HTTPException(404, "知识库不存在")
+        return [_doc_json(d) for d in session.query(Document)
+                .filter_by(kb_id=kb_id).order_by(Document.id)]
+
     # ---- 文档与入库 ----
     @app.post("/api/v1/kb/{kb_id}/documents", status_code=201,
               responses={**_ERR(404, "知识库不存在"), **_ERR(415, "不支持的文件类型"),

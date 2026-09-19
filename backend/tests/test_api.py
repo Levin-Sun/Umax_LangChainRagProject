@@ -149,3 +149,20 @@ def test_chat_writes_usage_record(app_client, db: Session):
     app_client.post("/api/v1/chat", json={"question": "生鲜 退货 政策", "kb_ids": [kb["id"]]})
     rec = db.query(UsageRecord).one()
     assert (rec.scenario, rec.prompt_tokens, rec.completion_tokens) == ("chat", 100, 20)
+
+
+def test_list_documents_per_kb(app_client):
+    kb, r = app_client.post("/api/v1/kb", json={"name": "库A"}), None
+    kb_id = kb.json()["id"]
+    kb2 = app_client.post("/api/v1/kb", json={"name": "库B"}).json()["id"]
+    for i in range(2):
+        r = app_client.post(f"/api/v1/kb/{kb_id}/documents",
+                            files={"file": (f"n{i}.txt", b"hello world content", "text/plain")})
+        assert r.status_code == 201
+    listed = app_client.get(f"/api/v1/kb/{kb_id}/documents")
+    assert listed.status_code == 200
+    rows = listed.json()
+    assert [d["name"] for d in rows] == ["n0.txt", "n1.txt"]
+    assert rows[0]["kb_id"] == kb_id and rows[0]["status"] == "ready"
+    assert app_client.get(f"/api/v1/kb/{kb2}/documents").json() == []
+    assert app_client.get("/api/v1/kb/99999/documents").status_code == 404

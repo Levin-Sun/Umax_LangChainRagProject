@@ -8,6 +8,7 @@ SPEC = json.loads((Path(__file__).resolve().parents[2] / "contracts/openapi.json
 
 EXPECTED = {
     ("/api/v1/kb/{kb_id}/documents", "post"): {"404", "415"},
+    ("/api/v1/kb/{kb_id}/documents", "get"): {"404"},
     ("/api/v1/documents/{doc_id}", "get"): {"404"},
     ("/api/v1/documents/{doc_id}", "patch"): {"404"},
     ("/api/v1/documents/{doc_id}/reprocess", "post"): {"404"},
