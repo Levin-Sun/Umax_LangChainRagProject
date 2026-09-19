@@ -25,6 +25,8 @@ class Settings(BaseSettings):
     rerank_model: str = "qwen3.7-text-rerank"
     # MinerU 解析服务（空=未启用，扫描件解析将明确报错提示需启用）
     mineru_base_url: str = ""
+    # 模型网关主密钥：加密 model_configs.encrypted_api_key（§C BYO-key）
+    gateway_secret: str = ""
     # 入库调度：sync（开发默认）/ arq（生产，需 Redis）
     queue_backend: str = "sync"
     redis_host: str = "localhost"

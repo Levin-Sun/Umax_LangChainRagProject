@@ -17,7 +17,7 @@
 
 ## 当前进度
 
-- 🚧 **阶段 1 进行中（TDD）**：`backend/` 已完成 数据模型 9 表（§3.3）、检索内核、百炼 provider、FastAPI 服务层（知识库/上传入库/分块预览/检索/带引用问答+未命中兜底/会话历史/用量落账）、**多格式解析与异步流水线**（txt/md/docx/xlsx/pptx/pdf 按扩展名注册，扫描件路由 MinerU，ARQ 队列可选、默认同步）——`cd backend && pytest` 60/60 绿，`pytest -m smoke` 真机全链路通过
+- 🚧 **阶段 1 进行中（TDD）**：`backend/` 已完成 数据模型 9 表（§3.3）、检索内核、FastAPI 服务层（知识库/上传入库/分块预览/检索/带引用问答+未命中兜底/会话历史）、多格式解析与异步流水线（txt/md/docx/xlsx/pptx/pdf，扫描件路由 MinerU，ARQ 可选）、**模型网关**（`model_configs` 分场景路由+fallback 链、BYO-key Fernet 加密存储打码不回传、`/api/models` 后台 CRUD、用量台账与 `/api/usage/summary` 看板简版）——`cd backend && pytest` 80/80 绿，`pytest -m smoke` 真机全链路通过
 - ✅ **阶段 0 完成（2026-09-19）**：金标准 20 题，纯 BM25 基线 20/20，混合检索 20/20（百炼 API 与本地 bge 双 provider 各验一轮）；执行记录与交接说明见[产品需求与开发方案.md](./产品需求与开发方案.md)第六章
 - 链路：切块 → pgvector → BM25+向量 RRF → 重排 → qwen3.7-flash 带引用生成；嵌入/重排支持百炼 API 与本地双 provider，可 `.env` 切换
 - 用法：`docker compose up -d` → `cd backend && ../.venv/Scripts/python.exe -m pytest`（回归）/ `python -m app.main`（起服务）；stage0 验证脚本已归档至 `archive/stage0/`（勿再对真库跑其 ingest）

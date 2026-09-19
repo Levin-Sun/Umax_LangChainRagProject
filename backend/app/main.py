@@ -5,13 +5,15 @@ from uuid import uuid4
 
 from fastapi import Depends, FastAPI, File, HTTPException, UploadFile
 from pydantic import BaseModel
-from sqlalchemy import text as sa_text
+from sqlalchemy import func, text as sa_text
 from sqlalchemy.engine import Engine
 from sqlalchemy.orm import Session
 
 from app.core.config import get_settings
-from app.models import Chunk, Conversation, Document, KnowledgeBase, Message, UsageRecord
+from app.models import (Chunk, Conversation, Document, KnowledgeBase, Message,
+                        ModelConfig, UsageRecord)
 from app.services.citations import parse_citations
+from app.services.crypto import decrypt_secret, encrypt_secret
 from app.services.ingest import ingest_document, read_stored, supported_ext
 from app.services.retrieval import retrieve
 
@@ -38,6 +40,32 @@ class DocPatchIn(BaseModel):
     error: str | None = None
 
 
+class ModelIn(BaseModel):
+    scenario: str
+    provider: str
+    base_url: str
+    api_key: str
+    model_name: str
+    capabilities: dict = {}
+    is_default: bool = False
+    fallback_rank: int = 0
+    enabled: bool = True
+
+
+class ModelPatchIn(BaseModel):
+    scenario: str | None = None
+    provider: str | None = None
+    base_url: str | None = None
+    api_key: str | None = None
+    model_name: str | None = None
+    capabilities: dict | None = None
+    is_default: bool | None = None
+    fallback_rank: int | None = None
+    enabled: bool | None = None
+
+
+SCENARIOS = {"chat", "embedding", "rerank", "vision"}
+
 MISS_ANSWER = "资料里没有相关内容，无法回答。"
 
 
@@ -54,9 +82,11 @@ def create_app(
     upload_dir: str = "uploads",
     queue=None,          # ImportQueue 协议；None=同步入库
     mineru=None,         # MinerUClient；None=扫描件解析直接失败并说明原因
+    secret: str | None = None,  # 网关主密钥（GATEWAY_SECRET），None=读配置
 ) -> FastAPI:
     app = FastAPI(title="Umax RAG", version="0.1.0")
     s = get_settings()
+    gateway_secret = s.gateway_secret if secret is None else secret
 
     def get_session() -> Iterator[Session]:
         with Session(engine) as session:
@@ -180,10 +210,12 @@ def create_app(
                      "completion_tokens": out.get("completion_tokens", 0)}
             citations = [{"n": i, "doc_name": h["doc_name"], "chunk_id": h["id"],
                           "excerpt": h["content"][:80]} for i, h in enumerate(hits, 1)]
-            session.add(UsageRecord(tenant_id="default", user_email="default@local",
-                                    scenario="chat", model=s.chat_model,
-                                    prompt_tokens=usage["prompt_tokens"],
-                                    completion_tokens=usage["completion_tokens"]))
+            if not out.get("logged"):  # 网关 make_chat_fn 已自行记账，避免双记
+                session.add(UsageRecord(tenant_id="default", user_email="default@local",
+                                        scenario="chat", model=out.get("model") or s.chat_model,
+                                        prompt_tokens=usage["prompt_tokens"],
+                                        completion_tokens=usage["completion_tokens"],
+                                        latency_ms=out.get("latency_ms")))
         session.add(Message(tenant_id="default", conversation_id=conv.id, role="assistant",
                             content=[{"type": "text", "text": answer}], citations=citations))
         session.commit()
@@ -204,30 +236,108 @@ def create_app(
                 for m in session.query(Message).filter_by(conversation_id=conv_id)
                 .order_by(Message.id)]
 
+    # ---- 模型后台（§C：改表即生效；key 加密存储、打码、不回传明文）----
+    def _require_secret() -> str:
+        if not gateway_secret:
+            raise HTTPException(503, "未配置主密钥 GATEWAY_SECRET，无法管理模型 key")
+        return gateway_secret
+
+    def _model_json(m: ModelConfig) -> dict:
+        plain = decrypt_secret(m.encrypted_api_key, _require_secret())
+        return {"id": m.id, "scenario": m.scenario, "provider": m.provider,
+                "base_url": m.base_url, "model_name": m.model_name,
+                "capabilities": m.capabilities, "is_default": m.is_default,
+                "fallback_rank": m.fallback_rank, "enabled": m.enabled,
+                "api_key_masked": ("****" + plain[-4:]) if plain else ""}
+
+    @app.post("/api/models", status_code=201)
+    def create_model(body: ModelIn, session: Session = Depends(get_session)):
+        if body.scenario not in SCENARIOS:
+            raise HTTPException(400, f"scenario 仅支持 {'/'.join(sorted(SCENARIOS))}")
+        m = ModelConfig(tenant_id="default", scenario=body.scenario, provider=body.provider,
+                        base_url=body.base_url, model_name=body.model_name,
+                        encrypted_api_key=encrypt_secret(body.api_key, _require_secret()),
+                        capabilities=body.capabilities, is_default=body.is_default,
+                        fallback_rank=body.fallback_rank, enabled=body.enabled)
+        session.add(m)
+        session.commit()
+        return _model_json(m)
+
+    @app.get("/api/models")
+    def list_models(session: Session = Depends(get_session)):
+        rows = session.query(ModelConfig).order_by(ModelConfig.scenario,
+                                                   ModelConfig.fallback_rank, ModelConfig.id)
+        return [_model_json(m) for m in rows]
+
+    @app.patch("/api/models/{model_id}")
+    def patch_model(model_id: int, body: ModelPatchIn, session: Session = Depends(get_session)):
+        m = session.get(ModelConfig, model_id)
+        if not m:
+            raise HTTPException(404, "模型配置不存在")
+        data = body.model_dump(exclude_none=True)
+        if "scenario" in data and data["scenario"] not in SCENARIOS:
+            raise HTTPException(400, f"scenario 仅支持 {'/'.join(sorted(SCENARIOS))}")
+        if "api_key" in data:
+            data["encrypted_api_key"] = encrypt_secret(data.pop("api_key"), _require_secret())
+        for k, v in data.items():
+            setattr(m, k, v)
+        session.commit()
+        return _model_json(m)
+
+    @app.delete("/api/models/{model_id}", status_code=204)
+    def delete_model(model_id: int, session: Session = Depends(get_session)):
+        m = session.get(ModelConfig, model_id)
+        if m:
+            session.delete(m)
+            session.commit()
+
+    # ---- 用量看板简版（§C：成本折算的事实来源）----
+    @app.get("/api/usage/summary")
+    def usage_summary(session: Session = Depends(get_session)):
+        rows = (session.query(UsageRecord.scenario, UsageRecord.model,
+                              func.count().label("calls"),
+                              func.coalesce(func.sum(UsageRecord.prompt_tokens), 0),
+                              func.coalesce(func.sum(UsageRecord.completion_tokens), 0))
+                .group_by(UsageRecord.scenario, UsageRecord.model).all())
+        return [{"scenario": r[0], "model": r[1], "calls": r[2],
+                 "prompt_tokens": int(r[3]), "completion_tokens": int(r[4])} for r in rows]
+
     return app
 
 
 def build_production_app(upload_dir: str = "uploads",
                          engine: Engine | None = None) -> FastAPI:
-    """真依赖装配：百炼 embedder + chat（任务 6 网关就绪后改走 model_configs 表）。"""
+    """真依赖装配：配了 GATEWAY_SECRET 且表里有对应场景模型 → 走网关（后台改表即生效）；
+    否则退回 .env 里的百炼直连（阶段 0 链路，冒烟可跑）。"""
     from sqlalchemy import create_engine
 
     from app.db.base import Base
     from app.services.chat import ChatClient, make_chat_fn
     from app.services.embeddings import BailianEmbedder
+    from app.services.parsers import MinerUClient
 
     s = get_settings()
     if engine is None:
         engine = create_engine(s.sqlalchemy_url(), pool_pre_ping=True)
         import app.models  # noqa: F401  一键部署：启动即建表（正式迁移方案后续以 Alembic 接管）
         Base.metadata.create_all(engine)
-    embedder = BailianEmbedder(api_key=s.dashscope_api_key, base_url=s.dashscope_compat_base,
-                               model=s.embedding_model, dimensions=s.embedding_dim) \
-        if s.dashscope_api_key else None
-    chat_fn = make_chat_fn(ChatClient(api_key=s.dashscope_api_key, base_url=s.dashscope_compat_base,
-                                      model=s.chat_model)) if s.dashscope_api_key else None
-    from app.services.parsers import MinerUClient
+    chat_fn = embedder = None
+    if s.gateway_secret:
+        from app.services.gateway import ModelGateway
 
+        gw = ModelGateway(engine, secret=s.gateway_secret)
+        if gw.providers("chat"):
+            chat_fn = gw.make_chat_fn()
+        if gw.providers("embedding"):
+            embedder = gw.make_embedder()
+    if (chat_fn is None or embedder is None) and s.dashscope_api_key:
+        chat_fn = chat_fn or make_chat_fn(ChatClient(api_key=s.dashscope_api_key,
+                                                     base_url=s.dashscope_compat_base,
+                                                     model=s.chat_model))
+        embedder = embedder or BailianEmbedder(api_key=s.dashscope_api_key,
+                                               base_url=s.dashscope_compat_base,
+                                               model=s.embedding_model,
+                                               dimensions=s.embedding_dim)
     mineru = MinerUClient(s.mineru_base_url) if s.mineru_base_url else None
     queue = None
     if s.queue_backend == "arq":
