@@ -14,7 +14,7 @@
 
 - 禁裸 fetch：网络出口只有 `lib/api.ts` 的 openapi-fetch client；组件一律通过 props 接收 `Client`，测试注入假 client。
 - 契约边界：只用现有端点 + 任务 1 新增的 `GET /api/v1/kb/{kb_id}/documents`；任务 1 必须走 README 契约工作流四步（实现+测试 → 错误声明 → `python scripts/export_openapi.py` 重导 → `cd sdk-ts && npm test`）。
-- openapi-fetch 调用规范（全计划一致，假 client 的 URL 存根按此匹配）：路径参数一律传**模板串 + params**，如 `api.GET("/kb/{kb_id}/documents", { params: { path: { kb_id } } })`；fakeApi 收到的 url 是模板字面量（`"/kb/{kb_id}/documents"`），不是拼装后的路径。
+- openapi-fetch 调用规范（全计划一致，假 client 的 URL 存根按此匹配）：schema 的路径键带 `/api/v1` 前缀（生成类型要求实参逐字匹配），故 URL 一律取 `@/lib/paths` 的 `P` 常量 + **模板串 + params**（`P` 在 `lib/types.ts` 之后单独建文件 `lib/paths.ts`），如 `api.GET(P.kbDocs, { params: { path: { kb_id } } })`，`P.kbDocs = "/api/v1/kb/{kb_id}/documents"`；fakeApi 收到的 url 是带前缀的模板字面量，不是拼装后的路径。（2026-09-20 任务 3 BLOCKED 后修订：原"短路径"写法与 `Pick<createApiClient 返回值>` 冻结签名互斥——schema 键带前缀，短路径 TS 报错。）
 - 后端 200 响应在 spec 里是 `unknown`（未建 response_model）：前端 DTO 类型集中在 `lib/types.ts`，出口处 `as` 一次；错误体读 `detail`（`ErrorOut = {detail: string}`；422 的 detail 是数组 → 通用文案）。
 - 文档状态机：`pending → parsing → ready / failed`（backend/app/models）。轮询停止条件 = 无 pending/parsing。
 - chat 响应 `citations` 自带 `{n, doc_name, chunk_id, excerpt}`，引用抽屉零额外请求。模型 key 恒为 `api_key_masked`（`****后4位`），前端不尝试还原。一期无鉴权、无流式。
@@ -35,6 +35,7 @@ frontend/                                新建（Next 脚手架 + 下列手写�
   next.config.ts                         rewrite + transpilePackages
   vitest.config.ts / vitest.setup.ts
   src/lib/types.ts                       全部 DTO
+  src/lib/paths.ts                       P 常量（带 /api/v1 前缀的模板 URL，逐字对齐 schema 键）
   src/lib/api.ts                         Client 类型 / call / callVoid / errText / uploadDocument
   src/lib/hooks.ts                       useAsync / usePolling
   src/components/ErrorBanner.tsx
@@ -123,7 +124,8 @@ Expected: 93 passed + 17 fuzz 子测试（新端点自动进 fuzz/drift 面）
 import createClient, { type ClientOptions } from "openapi-fetch";
 import type { paths } from "./schema.js";
 
-export function createApiClient(baseUrl = "/api/v1", options?: Partial<ClientOptions>) {
+// baseUrl 默认为空：路径键自带 /api/v1 前缀（唯一事实源），浏览器相对同源路径经 Next rewrite 代理
+export function createApiClient(baseUrl = "", options?: Partial<ClientOptions>) {
   return createClient<paths>({ baseUrl, ...options });
 }
 export type { paths };
@@ -251,13 +253,14 @@ git commit -m "stage1 任务7-2: Next.js 15 前端脚手架（rewrite 代理 + V
 ### Task 3: 数据层 `lib/`（types / api / hooks / ErrorBanner，TDD）
 
 **Files:**
-- Create: `frontend/src/lib/types.ts`、`frontend/src/lib/api.ts`、`frontend/src/lib/hooks.ts`、`frontend/src/components/ErrorBanner.tsx`
-- Test: `frontend/src/components/__tests__/api-hooks.test.tsx`
+- Create: `frontend/src/lib/types.ts`、`frontend/src/lib/paths.ts`、`frontend/src/lib/api.ts`、`frontend/src/lib/hooks.ts`、`frontend/src/components/ErrorBanner.tsx`
+- Test: `frontend/src/components/__tests__/api-hooks.test.tsx`、`frontend/src/components/__tests__/multipart.test.ts`（node realm，见 Step 1b）
 
 **Interfaces:**
 - Consumes: `createApiClient`（Task 1 版）
 - Produces（后续所有组件依赖，签名冻结）：
-  - `type Client`（GET/POST/PATCH/DELETE 四方法）；`api: Client` 单例
+  - `type Client = Pick<createApiClient 返回值, "GET"|"POST"|"PATCH"|"DELETE">`（强类型，URL 实参必须是 schema 路径键逐字）；`api: Client` 单例
+  - `P`（`lib/paths.ts`：全部模板 URL 常量，键见 Task 3 Step 3）
   - `call<T>(p): Promise<T>`（error→throw ApiError）、`callVoid(p)`、`errText(body): string`
   - `uploadDocument(client: Client, kbId: number, file: File): Promise<DocOut>`
   - `useAsync<T>(fn, deps?) → {data?, error?, loading, reload()}`
@@ -269,9 +272,9 @@ git commit -m "stage1 任务7-2: Next.js 15 前端脚手架（rewrite 代理 + V
 ```tsx
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { createApiClient } from "@umax/sdk-ts";
 import { describe, expect, it, vi } from "vitest";
-import { call, errText, uploadDocument, type Client } from "@/lib/api";
+import { call, errText } from "@/lib/api";
+import { P } from "@/lib/paths";
 import { useAsync, usePolling } from "@/lib/hooks";
 import { fakeApi, ok } from "@/lib/testkit";
 
@@ -280,23 +283,6 @@ describe("errText", () => {
     expect(errText({ detail: "知识库不存在" })).toBe("知识库不存在");
     expect(errText({ detail: [{ loc: ["body"] }] })).toContain("字段校验");
     expect(errText(undefined)).toContain("网络");
-  });
-});
-
-describe("uploadDocument", () => {
-  it("sends real FormData (multipart), not JSON", async () => {
-    let captured: RequestInit | undefined;
-    const fakeFetch = (async (_url: string, init?: RequestInit) => {
-      captured = init ?? {};
-      return new Response(JSON.stringify({ id: 7, kb_id: 1, name: "a.txt",
-        status: "pending", error: null, size_bytes: 3 }),
-        { status: 201, headers: { "content-type": "application/json" } });
-    }) as unknown as typeof fetch;
-    const client = createApiClient("/api/v1", { fetch: fakeFetch }) as Client;
-    const doc = await uploadDocument(client, 1, new File(["abc"], "a.txt", { type: "text/plain" }));
-    expect(captured!.body).toBeInstanceOf(FormData);
-    expect((captured!.body as FormData).get("file")).toBeInstanceOf(File);
-    expect(doc.id).toBe(7);
   });
 });
 
@@ -336,8 +322,39 @@ it("usePolling stops at terminal value", async () => {
 });
 
 it("fakeApi routes through call() unwrapping", async () => {
-  const api = fakeApi({ GET: async (url: string) => (url === "/kb" ? ok([{ id: 1 }]) : undefined) });
-  await expect(call(api.GET("/kb"))).resolves.toEqual([{ id: 1 }]);
+  const api = fakeApi({ GET: async (url: string) => (url === P.kb ? ok([{ id: 1 }]) : undefined) });
+  await expect(call(api.GET(P.kb))).resolves.toEqual([{ id: 1 }]);
+});
+```
+
+- [ ] **Step 1b: multipart 用例独立文件（node realm）** —— `src/components/__tests__/multipart.test.ts`
+
+（修订记录：2026-09-20 Ruling-realm——vitest jsdom 环境下 FormData/File 被 jsdom 覆盖而 Request 仍是 Node undici 原生实现，跨 realm 品牌校验失败使 multipart 体被字符串化，断言必红；故该用例移入独立文件并以 `// @vitest-environment node` 做 realm 隔离，断言逐字不变，不改全局、不动其余用例。）
+
+```ts
+// @vitest-environment node
+import { createApiClient } from "@umax/sdk-ts";
+import { describe, expect, it } from "vitest";
+import { uploadDocument, type Client } from "@/lib/api";
+
+describe("uploadDocument", () => {
+  // openapi-fetch 0.17 实调 fetch(request, requestInitExt)（dist/index.mjs:123），
+  // FormData 体不手设 Content-Type（:60-63，boundary 由 Request 生成）——断言捕获第一参 Request。
+  it("sends real FormData (multipart), not JSON", async () => {
+    let captured: Request | undefined;
+    const fakeFetch = (async (req: Request) => {
+      captured = req;
+      return new Response(JSON.stringify({ id: 7, kb_id: 1, name: "a.txt",
+        status: "pending", error: null, size_bytes: 3 }),
+        { status: 201, headers: { "content-type": "application/json" } });
+    }) as unknown as typeof fetch;
+    const client = createApiClient("http://test.local", { fetch: fakeFetch }) as Client;
+    const doc = await uploadDocument(client, 1, new File(["abc"], "a.txt", { type: "text/plain" }));
+    expect(captured!.url).toBe("http://test.local/api/v1/kb/1/documents");
+    const form = await captured!.formData();
+    expect(form.get("file")).toBeInstanceOf(File);
+    expect(doc.id).toBe(7);
+  });
 });
 ```
 
@@ -361,10 +378,28 @@ export interface ModelOut { id: number; scenario: string; provider: string; base
 export interface UsageOut { scenario: string; model: string; calls: number; prompt_tokens: number; completion_tokens: number }
 ```
 
+`src/lib/paths.ts`（同一步落盘；键与 sdk-ts/src/schema.d.ts 的路径键逐字一致——schema 带 `/api/v1` 前缀，强类型 Client 要求实参逐字匹配，故全站经 P 引用，改前缀只动一处）：
+
+```ts
+export const P = {
+  chat: "/api/v1/chat",
+  conversations: "/api/v1/conversations",
+  convMessages: "/api/v1/conversations/{conv_id}/messages",
+  kb: "/api/v1/kb",
+  kbDocs: "/api/v1/kb/{kb_id}/documents",
+  docReprocess: "/api/v1/documents/{doc_id}/reprocess",
+  docChunks: "/api/v1/documents/{doc_id}/chunks",
+  models: "/api/v1/models",
+  model: "/api/v1/models/{model_id}",
+  usageSummary: "/api/v1/usage/summary",
+} as const;
+```
+
 - [ ] **Step 4: 实现 `src/lib/api.ts`**
 
 ```ts
 import { createApiClient } from "@umax/sdk-ts";
+import { P } from "./paths";
 import type { DocOut } from "./types";
 
 export type Client = Pick<ReturnType<typeof createApiClient>, "GET" | "POST" | "PATCH" | "DELETE">;
@@ -400,7 +435,7 @@ export async function uploadDocument(client: Client, kbId: number, file: File): 
   const form = new FormData();
   form.append("file", file, file.name);
   // 后端 200 未建 response_model（spec 里是 unknown），DTO 断言集中在此
-  return (await call(client.POST("/kb/{kb_id}/documents",
+  return (await call(client.POST(P.kbDocs,
     { params: { path: { kb_id: kbId } }, body: form as never }))) as unknown as DocOut;
 }
 ```
@@ -409,6 +444,7 @@ export async function uploadDocument(client: Client, kbId: number, file: File): 
 
 ```ts
 import { useEffect, useState } from "react";
+import { flushSync } from "react-dom";
 
 export interface AsyncState<T> { data?: T; error?: unknown; loading: boolean }
 
@@ -439,10 +475,12 @@ export function usePolling<T>(fn: () => Promise<T>,
       try {
         const v = await fn();
         if (!alive) return;
-        setState({ data: v, loading: false });
+        // flushSync：React 19 测试环境（fake timers）下普通 setState 会滞留 act 队列，
+        // advanceTimersByTimeAsync 不会冲刷 → 断言看不到中间值（任务 3 实测）。
+        flushSync(() => setState({ data: v, loading: false }));
         if (!stopWhen(v)) timer = setTimeout(run, intervalMs);
       } catch (error) {
-        if (alive) setState({ error, loading: false });
+        if (alive) flushSync(() => setState({ error, loading: false }));
       }
     };
     setState({ loading: true });
@@ -507,7 +545,7 @@ git commit -m "stage1 任务7-3: 前端数据层（契约 DTO/错误映射/useAs
 
 **Interfaces:**
 - Consumes: Task 3 全部
-- Produces: `<ChatApp api={Client} />`；`GET/POST /chat`、`/conversations`、`/conversations/{id}/messages` 的调用形态（URL 串以 `/conversations`、`/chat`、`/conversations/${id}/messages` 为准，Task 5-6 同模式）。
+- Produces: `<ChatApp api={Client} />`；聊天/会话调用形态（URL 一律 `P.chat` / `P.conversations` / `P.convMessages`，Task 5-6 同模式）。
 
 - [ ] **Step 1: 写失败测试** —— `ChatApp.test.tsx`
 
@@ -517,6 +555,7 @@ import userEvent from "@testing-library/user-event";
 import { describe, expect, it } from "vitest";
 import ChatApp from "@/components/ChatApp";
 import { fail, fakeApi, ok } from "@/lib/testkit";
+import { P } from "@/lib/paths";
 import type { ChatOut, ConversationOut, MessageOut } from "@/lib/types";
 
 const convs: ConversationOut[] = [{ id: 1, title: "退货政策", kb_ids: [] }];
@@ -532,8 +571,8 @@ const chatOut: ChatOut = {
 };
 
 const api = fakeApi({
-  GET: async (url) => (url === "/conversations" ? ok(convs)
-    : url === "/conversations/{conv_id}/messages" ? ok(history) : undefined),
+  GET: async (url) => (url === P.conversations ? ok(convs)
+    : url === P.convMessages ? ok(history) : undefined),
   POST: async () => ok(chatOut),
 });
 
@@ -548,8 +587,8 @@ it("renders history and opens cite drawer without extra request", async () => {
 it("asks question, shows inline citation chip, allows second question", async () => {
   const asked: unknown[] = [];
   const api2 = fakeApi({
-    GET: async (url) => (url === "/conversations" ? ok(convs)
-      : url === "/conversations/{conv_id}/messages" ? ok(history) : undefined),
+    GET: async (url) => (url === P.conversations ? ok(convs)
+      : url === P.convMessages ? ok(history) : undefined),
     POST: async (url, init) => {
       asked.push((init as { body: { question: string } }).body.question);
       return ok(chatOut);
@@ -590,6 +629,7 @@ import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { ErrorBanner } from "@/components/ErrorBanner";
 import { call, type Client } from "@/lib/api";
+import { P } from "@/lib/paths";
 import { useAsync } from "@/lib/hooks";
 import type { ChatOut, Citation, ConversationOut, MessageOut } from "@/lib/types";
 
@@ -618,10 +658,10 @@ export default function ChatApp({ api }: { api: Client }) {
   const [cite, setCite] = useState<Citation | null>(null);
   // activeConv 仅由点击设置——useAsync deps 变化 = 用户点了某个会话 = 拉历史
   const [activeConv, setActiveConv] = useState<number | null>(null);
-  const convs = useAsync(() => call(api.GET("/conversations")) as Promise<ConversationOut[]>);
+  const convs = useAsync(() => call(api.GET(P.conversations)) as Promise<ConversationOut[]>);
   const msgs = useAsync(
     () => (activeConv === null ? Promise.resolve([] as MessageOut[])
-      : call(api.GET("/conversations/{conv_id}/messages", { params: { path: { conv_id: activeConv } } })) as Promise<MessageOut[]>),
+      : call(api.GET(P.convMessages, { params: { path: { conv_id: activeConv } } })) as Promise<MessageOut[]>),
     [activeConv]);
 
   function openConversation(id: number | null) {
@@ -638,7 +678,7 @@ export default function ChatApp({ api }: { api: Client }) {
     setSending(true);
     setSendErr(null);
     try {
-      const out = (await call(api.POST("/chat", {
+      const out = (await call(api.POST(P.chat, {
         body: { question: q, conversation_id: convId },
       }))) as unknown as ChatOut;
       setConvId(out.conversation_id);
@@ -760,6 +800,7 @@ import userEvent from "@testing-library/user-event";
 import { act } from "react";
 import { describe, expect, it, vi } from "vitest";
 import KbAdmin from "@/components/KbAdmin";
+import { P } from "@/lib/paths";
 import { fakeApi, ok } from "@/lib/testkit";
 import type { DocOut } from "@/lib/types";
 
@@ -771,8 +812,8 @@ describe("KbAdmin 轮询", () => {
     let calls = 0;
     const api = fakeApi({
       GET: async (url) => {
-        if (url === "/kb") return ok([{ id: 1, name: "运营库", description: null }]);
-        if (url === "/kb/{kb_id}/documents") {
+        if (url === P.kb) return ok([{ id: 1, name: "运营库", description: null }]);
+        if (url === P.kbDocs) {
           calls += 1;
           return ok(calls === 1 ? [pending] : [ready]);
         }
@@ -795,9 +836,9 @@ describe("KbAdmin 轮询", () => {
     const failed: DocOut = { ...pending, status: "failed", error: "解析炸了" };
     const reprocess = vi.fn(async () => ok(pending));
     const api = fakeApi({
-      GET: async (url) => (url === "/kb" ? ok([{ id: 1, name: "库", description: null }])
-        : url === "/kb/{kb_id}/documents" ? ok([failed]) : undefined),
-      POST: async (url) => (url === "/documents/{doc_id}/reprocess" ? reprocess() : undefined),
+      GET: async (url) => (url === P.kb ? ok([{ id: 1, name: "库", description: null }])
+        : url === P.kbDocs ? ok([failed]) : undefined),
+      POST: async (url) => (url === P.docReprocess ? reprocess() : undefined),
     });
     render(<KbAdmin api={api} />);
     expect(await screen.findByText("解析炸了")).toBeInTheDocument();
@@ -820,6 +861,7 @@ import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { ErrorBanner } from "@/components/ErrorBanner";
 import { call, uploadDocument, type Client } from "@/lib/api";
+import { P } from "@/lib/paths";
 import { useAsync, usePolling } from "@/lib/hooks";
 import type { ChunkOut, DocOut, KbOut } from "@/lib/types";
 
@@ -834,16 +876,16 @@ export default function KbAdmin({ api }: { api: Client }) {
   const [busy, setBusy] = useState(false);
   const [actionErr, setActionErr] = useState<unknown>(null);
   const [chunks, setChunks] = useState<{ doc: DocOut; rows: ChunkOut[] } | null>(null);
-  const kbs = useAsync(() => call(api.GET("/kb")) as Promise<KbOut[]>);
+  const kbs = useAsync(() => call(api.GET(P.kb)) as Promise<KbOut[]>);
   const docs = usePolling(
     () => (kbId === null ? Promise.resolve([] as DocOut[])
-      : call(api.GET("/kb/{kb_id}/documents", { params: { path: { kb_id: kbId } } })) as Promise<DocOut[]>),
+      : call(api.GET(P.kbDocs, { params: { path: { kb_id: kbId } } })) as Promise<DocOut[]>),
     { intervalMs: 3000, stopWhen: terminal, enabled: kbId !== null });
 
   async function createKb() {
     if (!newName.trim()) return;
     try {
-      await call(api.POST("/kb", { body: { name: newName } }));
+      await call(api.POST(P.kb, { body: { name: newName } }));
       setNewName("");
       kbs.reload();
     } catch (e) {
@@ -867,7 +909,7 @@ export default function KbAdmin({ api }: { api: Client }) {
 
   async function reprocess(d: DocOut) {
     try {
-      await call(api.POST("/documents/{doc_id}/reprocess", { params: { path: { doc_id: d.id } } }));
+      await call(api.POST(P.docReprocess, { params: { path: { doc_id: d.id } } }));
       docs.reload();
     } catch (e) {
       setActionErr(e);
@@ -876,7 +918,7 @@ export default function KbAdmin({ api }: { api: Client }) {
 
   async function viewChunks(d: DocOut) {
     try {
-      setChunks({ doc: d, rows: (await call(api.GET("/documents/{doc_id}/chunks",
+      setChunks({ doc: d, rows: (await call(api.GET(P.docChunks,
         { params: { path: { doc_id: d.id } } }))) as unknown as ChunkOut[] });
     } catch (e) {
       setActionErr(e);
@@ -993,6 +1035,7 @@ git commit -m "stage1 任务7-5: 知识库后台——建库/上传/ARQ 状态 3
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import ModelsAdmin from "@/components/ModelsAdmin";
+import { P } from "@/lib/paths";
 import { fail, fakeApi, ok } from "@/lib/testkit";
 import type { ModelOut } from "@/lib/types";
 import { describe, expect, it, vi } from "vitest";
@@ -1002,7 +1045,7 @@ const m: ModelOut = { id: 3, scenario: "chat", provider: "bailian", base_url: "h
   enabled: true, api_key_masked: "****7f3a" };
 
 it("shows masked key as-is, never reconstructed", async () => {
-  const api = fakeApi({ GET: async (url) => (url === "/models" ? ok([m]) : undefined) });
+  const api = fakeApi({ GET: async (url) => (url === P.models ? ok([m]) : undefined) });
   render(<ModelsAdmin api={api} />);
   expect(await screen.findByText("****7f3a")).toBeInTheDocument();
 });
@@ -1010,12 +1053,12 @@ it("shows masked key as-is, never reconstructed", async () => {
 it("toggles enabled via PATCH", async () => {
   const patch = vi.fn(async () => ok({ ...m, enabled: false }));
   const api = fakeApi({
-    GET: async (url) => (url === "/models" ? ok([m]) : undefined),
-    PATCH: async (url, init) => (url === "/models/{model_id}" ? patch(url, init) : undefined),
+    GET: async (url) => (url === P.models ? ok([m]) : undefined),
+    PATCH: async (url, init) => (url === P.model ? patch(url, init) : undefined),
   });
   render(<ModelsAdmin api={api} />);
   await userEvent.click(await screen.findByRole("switch", { name: "启用 qwen3.7-max" }));
-  expect(patch).toHaveBeenCalledWith("/models/{model_id}", expect.objectContaining({
+  expect(patch).toHaveBeenCalledWith(P.model, expect.objectContaining({
     params: { path: { model_id: 3 } }, body: { enabled: false },
   }));
 });
@@ -1071,6 +1114,7 @@ import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { ErrorBanner } from "@/components/ErrorBanner";
 import { call, callVoid, type Client } from "@/lib/api";
+import { P } from "@/lib/paths";
 import { useAsync } from "@/lib/hooks";
 import type { ModelOut } from "@/lib/types";
 
@@ -1082,7 +1126,7 @@ export default function ModelsAdmin({ api }: { api: Client }) {
   const [form, setForm] = useState({ ...emptyForm });
   const [formErr, setFormErr] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
-  const list = useAsync(() => call(api.GET("/models")) as Promise<ModelOut[]>);
+  const list = useAsync(() => call(api.GET(P.models)) as Promise<ModelOut[]>);
 
   async function register() {
     for (const k of ["provider", "base_url", "api_key", "model_name"] as const) {
@@ -1094,7 +1138,7 @@ export default function ModelsAdmin({ api }: { api: Client }) {
     setFormErr(null);
     setBusy(true);
     try {
-      await call(api.POST("/models", { body: form }));
+      await call(api.POST(P.models, { body: form }));
       setForm({ ...emptyForm });
       list.reload();
     } catch (e) {
@@ -1105,12 +1149,12 @@ export default function ModelsAdmin({ api }: { api: Client }) {
   }
 
   async function toggle(m: ModelOut) {
-    await call(api.PATCH("/models/{model_id}", { params: { path: { model_id: m.id } }, body: { enabled: !m.enabled } }));
+    await call(api.PATCH(P.model, { params: { path: { model_id: m.id } }, body: { enabled: !m.enabled } }));
     list.reload();
   }
 
   async function remove(m: ModelOut) {
-    await callVoid(api.DELETE("/models/{model_id}", { params: { path: { model_id: m.id } } }));
+    await callVoid(api.DELETE(P.model, { params: { path: { model_id: m.id } } }));
     list.reload();
   }
 
@@ -1167,11 +1211,12 @@ export default function ModelsAdmin({ api }: { api: Client }) {
 import { Card } from "@/components/ui/card";
 import { ErrorBanner } from "@/components/ErrorBanner";
 import { call, type Client } from "@/lib/api";
+import { P } from "@/lib/paths";
 import { useAsync } from "@/lib/hooks";
 import type { UsageOut } from "@/lib/types";
 
 export default function UsageAdmin({ api }: { api: Client }) {
-  const sum = useAsync(() => call(api.GET("/usage/summary")) as Promise<UsageOut[]>);
+  const sum = useAsync(() => call(api.GET(P.usageSummary)) as Promise<UsageOut[]>);
   const rows = sum.data ?? [];
   const totalCalls = rows.reduce((a, r) => a + r.calls, 0);
   const totalTokens = rows.reduce((a, r) => a + r.prompt_tokens + r.completion_tokens, 0);
