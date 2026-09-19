@@ -7,7 +7,7 @@
   "scripts": {
     "gen": "openapi-typescript ../contracts/openapi.json -o src/schema.d.ts",
     "typecheck": "tsc --noEmit",
-    "test": "npm run gen && npm run typecheck"
+    "test": "npm run gen && git diff --exit-code -- src/schema.d.ts && npm run typecheck"
   },
   "license": "ISC",
   "devDependencies": {

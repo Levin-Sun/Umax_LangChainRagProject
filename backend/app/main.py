@@ -1,6 +1,7 @@
 # FastAPI 服务层：知识库/文档入库/检索/带引用问答/会话历史
 # 一期无鉴权（登录与初始化向导在后续任务）；embedder/chat_fn 依赖注入，测试用假实现
 from collections.abc import Callable, Iterator
+from pathlib import Path
 from typing import Annotated
 from uuid import uuid4
 
@@ -229,7 +230,10 @@ def create_app(
         kb = session.get(KnowledgeBase, kb_id)
         if not kb:
             raise HTTPException(404, "知识库不存在")
-        name = file.filename or "unnamed"
+        # 修复⑧收口：multipart filename 不经 pydantic 验证链，是唯一的裸入口字符串——
+        # 取 basename（防目录注入）+ 过 NUL/孤立代理清洗闸 + 截 200（_doc_json 会回显给前端），
+        # 否则 \x00 直接进 Path 拼接/write_bytes/PG 即未声明 500
+        name = _clean_text(Path(file.filename or "unnamed").name)[:200]
         if not supported_ext(name):
             raise HTTPException(415, f"暂不支持的文件类型：{name}（一期 .txt/.md，MinerU 接入后支持 PDF/Office）")
         raw = file.file.read()
@@ -237,8 +241,7 @@ def create_app(
                        size_bytes=len(raw), mime=file.content_type)
         session.add(doc)
         session.flush()
-        import pathlib
-        p = pathlib.Path(upload_dir) / f"{uuid4().hex[:8]}_{name}"
+        p = Path(upload_dir) / f"{uuid4().hex[:8]}_{name}"
         p.parent.mkdir(parents=True, exist_ok=True)
         p.write_bytes(raw)
         doc.storage_path = str(p)

@@ -31,7 +31,7 @@
 1. 先改/加测试（红）——在 `backend/tests/` 契约相关测试里先锁定新行为
 2. 实现端点变更（后端代码）
 3. 重新导出 spec：`cd backend && ../.venv/Scripts/python.exe scripts/export_openapi.py`
-4. 双端验证：`cd backend && ../.venv/Scripts/python.exe -m pytest` + `cd sdk-ts && npm test`（gen + tsc）
+4. 双端验证：`cd backend && ../.venv/Scripts/python.exe -m pytest` + `cd sdk-ts && npm test`（gen → **新鲜度闸** `git diff --exit-code src/schema.d.ts` → tsc；gen 会覆盖工作区再比对，若改了 `openapi.json` 却忘了把重新生成的 `schema.d.ts` 一起提交，npm test 直接红——入库类型永不静默腐烂）
 
 前端一律经 `@umax/sdk-ts`（`sdk-ts/`，openapi-fetch 强类型客户端）访问接口，**禁止裸 fetch `/api/v1`**——URL、参数、响应类型全部在编译期由 `schema.d.ts` 校验。
 

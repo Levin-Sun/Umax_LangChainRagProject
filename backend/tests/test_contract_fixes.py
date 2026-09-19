@@ -9,7 +9,7 @@ from fastapi.testclient import TestClient
 
 from app.core.config import get_settings
 from app.main import INT32_MAX, INT32_MIN, create_app
-from app.models import KnowledgeBase, ModelConfig
+from app.models import Document, KnowledgeBase, ModelConfig
 from tests.test_models_api import FakeEmbedder
 
 SECRET = "contract-fixes-secret"
@@ -134,3 +134,29 @@ def test_allow_header_is_full_method_union(client):
     # /documents/{id} 由 GET+PATCH 拼成
     assert set(client.options("/api/v1/documents/1").headers["allow"].split(", ")) \
         == {"GET", "PATCH"}
+
+
+# ---- 修复⑧收口：multipart filename 是唯一不经 pydantic 验证链的入口字符串 ----
+def test_upload_filename_nul_normalized(engine, db, tmp_path):
+    # filename 直接进 Path(upload_dir)/f"{hex}_{name}" 再 write_bytes：NUL 混入即
+    # ValueError/PG DataError → 未声明 500（契约侧 201/404/415 全对不上）。
+    # httpx 的 files= 会对 filename 做头编码清洗，掩盖真实形态——手工拼 multipart 原始字节，
+    # 确保 \x00 按 fuzz 同形态抵达 handler（python-multipart 不剥 NUL，实测 file.filename 含 \x00）
+    app = create_app(engine=engine, secret=SECRET,
+                     embedder=FakeEmbedder(get_settings().embedding_dim),
+                     upload_dir=str(tmp_path))
+    # raise_server_exceptions=False：修复前的 ValueError 以 500 形态被断言捕获而非抛进测试
+    with TestClient(app, raise_server_exceptions=False) as c:
+        kb = c.post("/api/v1/kb", json={"name": "k"}).json()["id"]
+        boundary = "----contractfix8"
+        body = (f"--{boundary}\r\n"
+                'Content-Disposition: form-data; name="file"; filename="a\x00b.md"\r\n'
+                "Content-Type: text/markdown\r\n"
+                f"\r\nhello contract\r\n--{boundary}--\r\n").encode("utf-8")
+        r = c.post(f"/api/v1/kb/{kb}/documents", content=body,
+                   headers={"content-type": f"multipart/form-data; boundary={boundary}"})
+        assert r.status_code == 201, (r.status_code, r.text[:200])
+        assert r.json()["name"] == "ab.md"          # NUL 剔除后入库并回显
+        row = db.query(Document).one()
+        assert row.name == "ab.md" and "\x00" not in row.name
+        assert row.storage_path and "\x00" not in row.storage_path
