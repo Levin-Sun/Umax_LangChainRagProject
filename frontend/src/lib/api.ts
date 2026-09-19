@@ -12,6 +12,10 @@ export class ApiError extends Error {
 }
 
 export function errText(body: unknown): string {
+  // call() 抛出的是 ApiError（原始响应体在 .body）——useAsync 存的是抛出的 error，
+  // 组件把它直接喂给 ErrorBanner；此处统一拆包，任务 4-6 共享（任务 4 实测：
+  // 不拆则 errText 读不到 .detail，横幅只剩兜底文案）。
+  if (body instanceof ApiError) return errText(body.body);
   if (typeof body === "string") return body;
   const detail = (body as { detail?: unknown } | undefined)?.detail;
   if (typeof detail === "string") return detail;
