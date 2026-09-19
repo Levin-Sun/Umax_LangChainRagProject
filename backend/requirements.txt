@@ -5,6 +5,9 @@ sqlalchemy>=2.0.36
 psycopg[binary]>=3.2
 pgvector>=0.3.5
 pydantic-settings>=2.4
+# 检索内核（迁自 stage0）
+jieba>=0.42
+rank-bm25>=0.2.2
 # 测试
 pytest>=8.3
 httpx>=0.27
