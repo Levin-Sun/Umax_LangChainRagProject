@@ -33,18 +33,18 @@ def _client(engine, tmp_path, embedder, queue=None):
 def test_upload_with_queue_returns_pending_and_enqueues(engine, db, tmp_path, embedder):
     q = RecordingQueue()
     client = _client(engine, tmp_path, embedder, queue=q)
-    kb = client.post("/api/kb", json={"name": "k"}).json()
-    doc = client.post(f"/api/kb/{kb['id']}/documents",
+    kb = client.post("/api/v1/kb", json={"name": "k"}).json()
+    doc = client.post(f"/api/v1/kb/{kb['id']}/documents",
                       files={"file": ("a.txt", "生鲜退货 政策".encode(), "text/plain")}).json()
     assert doc["status"] == "pending"
     assert q.enqueued == [doc["id"]]
-    assert client.get(f"/api/documents/{doc['id']}/chunks").json() == []
+    assert client.get(f"/api/v1/documents/{doc['id']}/chunks").json() == []
 
 
 def test_worker_run_import_completes_pipeline(engine, db, tmp_path, embedder):
     client = _client(engine, tmp_path, embedder)  # 同步模式先落盘
-    kb = client.post("/api/kb", json={"name": "k"}).json()
-    doc = client.post(f"/api/kb/{kb['id']}/documents",
+    kb = client.post("/api/v1/kb", json={"name": "k"}).json()
+    doc = client.post(f"/api/v1/kb/{kb['id']}/documents",
                       files={"file": ("b.txt", "干线物流 时效".encode(), "text/plain")}).json()
     from app.models import Document
 
@@ -54,7 +54,7 @@ def test_worker_run_import_completes_pipeline(engine, db, tmp_path, embedder):
         s.commit()
     result = run_import(document_id=doc["id"], engine=engine, embedder=embedder)
     assert result["status"] == "ready"
-    assert len(client.get(f"/api/documents/{doc['id']}/chunks").json()) == 1
+    assert len(client.get(f"/api/v1/documents/{doc['id']}/chunks").json()) == 1
 
 
 def test_worker_marks_failed_with_reason(engine, db, tmp_path, embedder):
@@ -81,10 +81,10 @@ def test_worker_marks_failed_with_reason(engine, db, tmp_path, embedder):
 def test_reprocess_with_queue_enqueues(engine, db, tmp_path, embedder):
     q = RecordingQueue()
     client = _client(engine, tmp_path, embedder, queue=q)
-    kb = client.post("/api/kb", json={"name": "k"}).json()
-    doc = client.post(f"/api/kb/{kb['id']}/documents",
+    kb = client.post("/api/v1/kb", json={"name": "k"}).json()
+    doc = client.post(f"/api/v1/kb/{kb['id']}/documents",
                       files={"file": ("c.txt", b"x y z", "text/plain")}).json()
     q.enqueued.clear()
-    r = client.post(f"/api/documents/{doc['id']}/reprocess")
+    r = client.post(f"/api/v1/documents/{doc['id']}/reprocess")
     assert r.status_code == 202 and r.json()["status"] == "pending"
     assert q.enqueued == [doc["id"]]

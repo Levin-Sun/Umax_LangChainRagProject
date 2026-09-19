@@ -92,13 +92,13 @@ def create_app(
         with Session(engine) as session:
             yield session
 
-    @app.get("/api/health")
+    @app.get("/api/v1/health")
     def health(session: Session = Depends(get_session)):
         session.execute(sa_text("SELECT 1"))
         return {"status": "ok"}
 
     # ---- 知识库 ----
-    @app.post("/api/kb", status_code=201)
+    @app.post("/api/v1/kb", status_code=201)
     def create_kb(body: KbIn, session: Session = Depends(get_session)):
         kb = KnowledgeBase(tenant_id="default", name=body.name, description=body.description,
                            embedding_model=s.embedding_model, chunk_target=s.chunk_target)
@@ -106,13 +106,13 @@ def create_app(
         session.commit()
         return {"id": kb.id, "name": kb.name, "description": kb.description}
 
-    @app.get("/api/kb")
+    @app.get("/api/v1/kb")
     def list_kb(session: Session = Depends(get_session)):
         return [{"id": k.id, "name": k.name, "description": k.description}
                 for k in session.query(KnowledgeBase).order_by(KnowledgeBase.id)]
 
     # ---- 文档与入库 ----
-    @app.post("/api/kb/{kb_id}/documents", status_code=201)
+    @app.post("/api/v1/kb/{kb_id}/documents", status_code=201)
     def upload_document(kb_id: int, file: UploadFile = File(...),
                         session: Session = Depends(get_session)):
         kb = session.get(KnowledgeBase, kb_id)
@@ -139,14 +139,14 @@ def create_app(
                               chunk_target=s.chunk_target, chunk_min=s.chunk_min)
         return _doc_json(doc)
 
-    @app.get("/api/documents/{doc_id}")
+    @app.get("/api/v1/documents/{doc_id}")
     def get_document(doc_id: int, session: Session = Depends(get_session)):
         doc = session.get(Document, doc_id)
         if not doc:
             raise HTTPException(404, "文档不存在")
         return _doc_json(doc)
 
-    @app.get("/api/documents/{doc_id}/chunks")
+    @app.get("/api/v1/documents/{doc_id}/chunks")
     def preview_chunks(doc_id: int, session: Session = Depends(get_session)):
         if not session.get(Document, doc_id):
             raise HTTPException(404, "文档不存在")
@@ -155,7 +155,7 @@ def create_app(
                 for c in session.query(Chunk).filter_by(document_id=doc_id)
                 .order_by(Chunk.chunk_index)]
 
-    @app.patch("/api/documents/{doc_id}")
+    @app.patch("/api/v1/documents/{doc_id}")
     def patch_document(doc_id: int, body: DocPatchIn, session: Session = Depends(get_session)):
         doc = session.get(Document, doc_id)
         if not doc:
@@ -166,7 +166,7 @@ def create_app(
         session.commit()
         return _doc_json(doc)
 
-    @app.post("/api/documents/{doc_id}/reprocess", status_code=202)
+    @app.post("/api/v1/documents/{doc_id}/reprocess", status_code=202)
     def reprocess(doc_id: int, session: Session = Depends(get_session)):
         doc = session.get(Document, doc_id)
         if not doc:
@@ -182,13 +182,13 @@ def create_app(
         return _doc_json(doc)
 
     # ---- 检索与问答 ----
-    @app.post("/api/retrieve")
+    @app.post("/api/v1/retrieve")
     def retrieve_api(body: RetrieveIn, session: Session = Depends(get_session)):
         return retrieve(session, body.query, embedder=embedder, kb_ids=body.kb_ids,
                         recall_k=s.recall_k, top_k=body.top_k or s.rerank_top_n,
                         min_sim=s.min_sim)
 
-    @app.post("/api/chat")
+    @app.post("/api/v1/chat")
     def chat(body: ChatIn, session: Session = Depends(get_session)):
         hits = retrieve(session, body.question, embedder=embedder, kb_ids=body.kb_ids,
                         recall_k=s.recall_k, top_k=s.rerank_top_n, min_sim=s.min_sim)
@@ -223,12 +223,12 @@ def create_app(
                 "cited_docs": parse_citations(answer, hits), "usage": usage}
 
     # ---- 会话历史 ----
-    @app.get("/api/conversations")
+    @app.get("/api/v1/conversations")
     def list_conversations(session: Session = Depends(get_session)):
         return [{"id": c.id, "title": c.title, "kb_ids": c.kb_ids}
                 for c in session.query(Conversation).order_by(Conversation.id)]
 
-    @app.get("/api/conversations/{conv_id}/messages")
+    @app.get("/api/v1/conversations/{conv_id}/messages")
     def list_messages(conv_id: int, session: Session = Depends(get_session)):
         if not session.get(Conversation, conv_id):
             raise HTTPException(404, "会话不存在")
@@ -250,7 +250,7 @@ def create_app(
                 "fallback_rank": m.fallback_rank, "enabled": m.enabled,
                 "api_key_masked": ("****" + plain[-4:]) if plain else ""}
 
-    @app.post("/api/models", status_code=201)
+    @app.post("/api/v1/models", status_code=201)
     def create_model(body: ModelIn, session: Session = Depends(get_session)):
         if body.scenario not in SCENARIOS:
             raise HTTPException(400, f"scenario 仅支持 {'/'.join(sorted(SCENARIOS))}")
@@ -263,13 +263,13 @@ def create_app(
         session.commit()
         return _model_json(m)
 
-    @app.get("/api/models")
+    @app.get("/api/v1/models")
     def list_models(session: Session = Depends(get_session)):
         rows = session.query(ModelConfig).order_by(ModelConfig.scenario,
                                                    ModelConfig.fallback_rank, ModelConfig.id)
         return [_model_json(m) for m in rows]
 
-    @app.patch("/api/models/{model_id}")
+    @app.patch("/api/v1/models/{model_id}")
     def patch_model(model_id: int, body: ModelPatchIn, session: Session = Depends(get_session)):
         m = session.get(ModelConfig, model_id)
         if not m:
@@ -284,7 +284,7 @@ def create_app(
         session.commit()
         return _model_json(m)
 
-    @app.delete("/api/models/{model_id}", status_code=204)
+    @app.delete("/api/v1/models/{model_id}", status_code=204)
     def delete_model(model_id: int, session: Session = Depends(get_session)):
         m = session.get(ModelConfig, model_id)
         if m:
@@ -292,7 +292,7 @@ def create_app(
             session.commit()
 
     # ---- 用量看板简版（§C：成本折算的事实来源）----
-    @app.get("/api/usage/summary")
+    @app.get("/api/v1/usage/summary")
     def usage_summary(session: Session = Depends(get_session)):
         rows = (session.query(UsageRecord.scenario, UsageRecord.model,
                               func.count().label("calls"),

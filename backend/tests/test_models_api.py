@@ -58,7 +58,7 @@ def _mask_fields(item):
 
 # ---- CRUD 与打码 ----
 def test_create_model_config_encrypts_and_masks(client, db):
-    r = client.post("/api/models", json=MODEL_BODY)
+    r = client.post("/api/v1/models", json=MODEL_BODY)
     assert r.status_code == 201
     body = r.json()
     _mask_fields(body)
@@ -70,19 +70,19 @@ def test_create_model_config_encrypts_and_masks(client, db):
 
 
 def test_list_models_masked(client):
-    client.post("/api/models", json=MODEL_BODY)
-    client.post("/api/models", json={**MODEL_BODY, "model_name": "emb",
+    client.post("/api/v1/models", json=MODEL_BODY)
+    client.post("/api/v1/models", json={**MODEL_BODY, "model_name": "emb",
                                      "scenario": "embedding", "api_key": "sk-emb-ZZZ9"})
-    items = client.get("/api/models").json()
+    items = client.get("/api/v1/models").json()
     assert {i["model_name"] for i in items} == {"deepseek-chat", "emb"}
     for i in items:
         _mask_fields(i)
-    assert "sk-emb-ZZZ9" not in client.get("/api/models").text
+    assert "sk-emb-ZZZ9" not in client.get("/api/v1/models").text
 
 
 def test_patch_disable_and_rotate_key(client, db):
-    mid = client.post("/api/models", json=MODEL_BODY).json()["id"]
-    r = client.patch(f"/api/models/{mid}", json={"enabled": False, "api_key": "sk-new-XY88"})
+    mid = client.post("/api/v1/models", json=MODEL_BODY).json()["id"]
+    r = client.patch(f"/api/v1/models/{mid}", json={"enabled": False, "api_key": "sk-new-XY88"})
     assert r.status_code == 200 and r.json()["enabled"] is False
     assert r.json()["api_key_masked"].endswith("XY88")
     row = db.get(ModelConfig, mid)
@@ -90,17 +90,17 @@ def test_patch_disable_and_rotate_key(client, db):
 
 
 def test_delete_model(client, db):
-    mid = client.post("/api/models", json=MODEL_BODY).json()["id"]
-    assert client.delete(f"/api/models/{mid}").status_code == 204
-    assert client.get("/api/models").json() == []
+    mid = client.post("/api/v1/models", json=MODEL_BODY).json()["id"]
+    assert client.delete(f"/api/v1/models/{mid}").status_code == 204
+    assert client.get("/api/v1/models").json() == []
 
 
 def test_reject_unknown_scenario(client):
-    assert client.post("/api/models", json={**MODEL_BODY, "scenario": "sms"}).status_code == 400
+    assert client.post("/api/v1/models", json={**MODEL_BODY, "scenario": "sms"}).status_code == 400
 
 
 def test_requires_gateway_secret(client_no_secret):
-    r = client_no_secret.post("/api/models", json=MODEL_BODY)
+    r = client_no_secret.post("/api/v1/models", json=MODEL_BODY)
     assert r.status_code == 503
     assert "GATEWAY_SECRET" in r.text
 
@@ -114,7 +114,7 @@ def test_usage_summary_aggregates(client, db):
         UsageRecord(user_email="s@x", scenario="embedding", model="e1", prompt_tokens=400, completion_tokens=0),
     ])
     db.commit()
-    rows = {(r["scenario"], r["model"]): r for r in client.get("/api/usage/summary").json()}
+    rows = {(r["scenario"], r["model"]): r for r in client.get("/api/v1/usage/summary").json()}
     assert rows[("chat", "m1")] == {"scenario": "chat", "model": "m1", "calls": 2,
                                     "prompt_tokens": 150, "completion_tokens": 30}
     assert rows[("embedding", "e1")]["calls"] == 1
@@ -123,10 +123,10 @@ def test_usage_summary_aggregates(client, db):
 
 # ---- 问答端点与网关台账的配合 ----
 def _ask(client):
-    kb = client.post("/api/kb", json={"name": "k"}).json()
-    client.post(f"/api/kb/{kb['id']}/documents",
+    kb = client.post("/api/v1/kb", json={"name": "k"}).json()
+    client.post(f"/api/v1/kb/{kb['id']}/documents",
                 files={"file": ("u.txt", "生鲜退货政策。".encode(), "text/plain")})
-    return client.post("/api/chat", json={"question": "生鲜 退货 政策", "kb_ids": [kb["id"]]})
+    return client.post("/api/v1/chat", json={"question": "生鲜 退货 政策", "kb_ids": [kb["id"]]})
 
 
 def test_chat_usage_records_model_returned_by_chat_fn(engine, db, tmp_path):

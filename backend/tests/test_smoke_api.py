@@ -18,13 +18,13 @@ def test_full_chain_with_real_bailian(tmp_path, engine, db):
     app = build_production_app(upload_dir=str(tmp_path), engine=engine)
     client = TestClient(app)
 
-    kb = client.post("/api/kb", json={"name": "冒烟库"}).json()
+    kb = client.post("/api/v1/kb", json={"name": "冒烟库"}).json()
     raw = (s.docs_dir / "rag_dirty_doc_01.txt").read_bytes()
-    doc = client.post(f"/api/kb/{kb['id']}/documents",
+    doc = client.post(f"/api/v1/kb/{kb['id']}/documents",
                       files={"file": ("rag_dirty_doc_01.txt", raw, "text/plain")}).json()
     assert doc["status"] == "ready", f"入库失败: {doc['error']}"
 
-    resp = client.post("/api/chat", json={
+    resp = client.post("/api/v1/chat", json={
         "question": "生鲜支持七天无理由退货吗？", "kb_ids": [kb["id"]]}).json()
     assert "不支持" in resp["answer"], resp["answer"]
     assert resp["citations"], "应带引用出处"
