@@ -12,7 +12,7 @@ from sqlalchemy.orm import Session
 from app.core.config import get_settings
 from app.models import Chunk, Conversation, Document, KnowledgeBase, Message, UsageRecord
 from app.services.citations import parse_citations
-from app.services.ingest import ingest_document, reingest, supported_ext
+from app.services.ingest import ingest_document, read_stored, supported_ext
 from app.services.retrieval import retrieve
 
 
@@ -52,6 +52,8 @@ def create_app(
     embedder=None,
     chat_fn: Callable[[str, list[dict]], dict] | None = None,
     upload_dir: str = "uploads",
+    queue=None,          # ImportQueue 协议；None=同步入库
+    mineru=None,         # MinerUClient；None=扫描件解析直接失败并说明原因
 ) -> FastAPI:
     app = FastAPI(title="Umax RAG", version="0.1.0")
     s = get_settings()
@@ -100,7 +102,10 @@ def create_app(
         p.write_bytes(raw)
         doc.storage_path = str(p)
         session.commit()
-        doc = ingest_document(session, doc, raw, embedder=embedder,
+        if queue is not None:
+            queue.enqueue_import(doc.id)
+            return _doc_json(doc)  # pending，worker 接手
+        doc = ingest_document(session, doc, raw, embedder=embedder, mineru=mineru,
                               chunk_target=s.chunk_target, chunk_min=s.chunk_min)
         return _doc_json(doc)
 
@@ -136,8 +141,14 @@ def create_app(
         doc = session.get(Document, doc_id)
         if not doc:
             raise HTTPException(404, "文档不存在")
-        doc = reingest(session, doc, embedder=embedder,
-                       chunk_target=s.chunk_target, chunk_min=s.chunk_min)
+        if queue is not None:
+            doc.status, doc.error = "pending", None
+            session.commit()
+            queue.enqueue_import(doc.id)
+            return _doc_json(doc)
+        doc = ingest_document(session, doc, read_stored(doc), embedder=embedder,
+                              mineru=mineru, chunk_target=s.chunk_target,
+                              chunk_min=s.chunk_min)
         return _doc_json(doc)
 
     # ---- 检索与问答 ----
@@ -215,8 +226,16 @@ def build_production_app(upload_dir: str = "uploads",
         if s.dashscope_api_key else None
     chat_fn = make_chat_fn(ChatClient(api_key=s.dashscope_api_key, base_url=s.dashscope_compat_base,
                                       model=s.chat_model)) if s.dashscope_api_key else None
+    from app.services.parsers import MinerUClient
+
+    mineru = MinerUClient(s.mineru_base_url) if s.mineru_base_url else None
+    queue = None
+    if s.queue_backend == "arq":
+        from app.queue import ArqQueue
+
+        queue = ArqQueue(redis_host=s.redis_host, redis_port=s.redis_port)
     return create_app(engine=engine, embedder=embedder, chat_fn=chat_fn,
-                      upload_dir=upload_dir)
+                      upload_dir=upload_dir, mineru=mineru, queue=queue)
 
 
 def main() -> None:

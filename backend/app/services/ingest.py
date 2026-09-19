@@ -1,22 +1,18 @@
-# 同步入库流水线：抽取文本→切块→向量化→写 chunks（任务 5 换 ARQ+MinerU 时替换抽取与调度）
-from collections.abc import Callable, Sequence
+# 入库流水线：解析（注册表路由，扫描件→MinerU）→切块→向量化→写 chunks
+# 调度：queue 参数为空时 API 同步调用；配 ARQ 后由 worker 的 run_import 调用
+from collections.abc import Callable
 
 from sqlalchemy import delete
 from sqlalchemy.orm import Session
 
 from app.models import Chunk, Document
 from app.services.chunking import chunk_text
-
-TEXT_EXTS = {".txt", ".md"}
+from app.services.parsers import parse_document, supported_extensions
 
 
 def supported_ext(filename: str) -> bool:
-    return filename[filename.rfind("."):].lower() in TEXT_EXTS if "." in filename else False
-
-
-def extract_text(filename: str, raw: bytes) -> str:
-    """一期仅纯文本类；PDF/Word/扫描件在任务 5 接 MinerU。"""
-    return raw.decode("utf-8")
+    ext = filename[filename.rfind("."):].lower() if "." in filename else ""
+    return ext in supported_extensions()
 
 
 def ingest_document(
@@ -25,14 +21,14 @@ def ingest_document(
     raw: bytes,
     *,
     embedder=None,
+    mineru=None,
     chunk_target: int = 300,
     chunk_min: int = 60,
-    read_file: Callable[[str], bytes] = lambda p: open(p, "rb").read(),
 ) -> Document:
     doc.status = "parsing"
     session.commit()
     try:
-        text = extract_text(doc.name, raw)
+        text = parse_document(doc.name, raw, mineru=mineru)
         pieces = chunk_text(text, target=chunk_target, min_len=chunk_min)
         vectors = embedder.embed(pieces) if (embedder and pieces) else [None] * len(pieces)
         session.execute(delete(Chunk).where(Chunk.document_id == doc.id))
@@ -50,9 +46,5 @@ def ingest_document(
     return doc
 
 
-def reingest(session: Session, doc: Document, *, embedder=None,
-             chunk_target: int = 300, chunk_min: int = 60) -> Document:
-    """从落盘原始文件重跑流水线（reprocess 端点与失败重试共用）。"""
-    raw = open(doc.storage_path, "rb").read()
-    return ingest_document(session, doc, raw, embedder=embedder,
-                           chunk_target=chunk_target, chunk_min=chunk_min)
+def read_stored(doc: Document) -> bytes:
+    return open(doc.storage_path, "rb").read()

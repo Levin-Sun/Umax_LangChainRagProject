@@ -23,6 +23,12 @@ class Settings(BaseSettings):
     embedding_model: str = "qwen3.7-text-embedding"
     embedding_dim: int = 1024
     rerank_model: str = "qwen3.7-text-rerank"
+    # MinerU 解析服务（空=未启用，扫描件解析将明确报错提示需启用）
+    mineru_base_url: str = ""
+    # 入库调度：sync（开发默认）/ arq（生产，需 Redis）
+    queue_backend: str = "sync"
+    redis_host: str = "localhost"
+    redis_port: int = 6379
 
     # 语料目录（冒烟测试用真实脏文档）
     docs_dir: Path = Path(__file__).resolve().parents[3] / "DirtyDocs"
