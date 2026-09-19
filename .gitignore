@@ -1,0 +1,24 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+
+# Node
+node_modules/
+.next/
+dist/
+
+# 环境与密钥
+.env
+.env.*
+!.env.example
+
+# 本地数据与日志（上传文件、解析产物不入库）
+data/
+uploads/
+logs/
+
+# 系统文件
+.DS_Store
+Thumbs.db
