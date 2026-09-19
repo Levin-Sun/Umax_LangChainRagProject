@@ -11,6 +11,7 @@ EXPECTED = {
     ("/api/v1/documents/{doc_id}", "get"): {"404"},
     ("/api/v1/documents/{doc_id}", "patch"): {"404"},
     ("/api/v1/documents/{doc_id}/reprocess", "post"): {"404"},
+    ("/api/v1/documents/{doc_id}/chunks", "get"): {"404"},
     ("/api/v1/conversations/{conv_id}/messages", "get"): {"404"},
     ("/api/v1/models", "post"): {"400", "503"},
     ("/api/v1/models/{model_id}", "patch"): {"400", "404", "503"},

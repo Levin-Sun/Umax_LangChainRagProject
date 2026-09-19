@@ -155,7 +155,8 @@ def create_app(
             raise HTTPException(404, "文档不存在")
         return _doc_json(doc)
 
-    @app.get("/api/v1/documents/{doc_id}/chunks")
+    @app.get("/api/v1/documents/{doc_id}/chunks",
+             responses=_ERR(404, "文档不存在"))
     def preview_chunks(doc_id: int, session: Session = Depends(get_session)):
         if not session.get(Document, doc_id):
             raise HTTPException(404, "文档不存在")
