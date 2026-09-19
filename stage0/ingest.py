@@ -67,6 +67,7 @@ def embed(texts: list[str]) -> list[list[float]]:
 
 
 def main() -> None:
+    no_embed = "--no-embed" in sys.argv
     docs = read_docs()
     rows: list[tuple[str, int, str]] = []
     for name, text in docs.items():
@@ -74,9 +75,13 @@ def main() -> None:
             rows.append((name, idx, c))
     print(f"切块完成：{len(rows)} 块（平均 {sum(len(r[2]) for r in rows) // len(rows)} 字/块）")
 
-    print(f"调用百炼 {config.EMBEDDING_MODEL} 生成向量 ...")
-    vectors = embed([r[2] for r in rows])
-    print(f"向量维度：{len(vectors[0])}")
+    vectors: list[list[float]] | None = None
+    if no_embed:
+        print("跳过向量化（纯 BM25 基线模式）")
+    else:
+        print(f"调用百炼 {config.EMBEDDING_MODEL} 生成向量 ...")
+        vectors = embed([r[2] for r in rows])
+        print(f"向量维度：{len(vectors[0])}")
 
     con = pg8000.native.Connection(
         host=config.PG["host"], port=config.PG["port"], user=config.PG["user"],
@@ -88,11 +93,12 @@ def main() -> None:
         f"CREATE TABLE chunks (id serial primary key, doc_name text, chunk_index int,"
         f" content text, embedding vector({config.EMBEDDING_DIM}))"
     )
-    for (name, idx, content), vec in zip(rows, vectors):
+    for i, ((name, idx, content), vec) in enumerate(zip(rows, vectors or [None] * len(rows))):
         con.run(
             "INSERT INTO chunks (doc_name, chunk_index, content, embedding)"
             " VALUES (:name, :idx, :content, CAST(:emb AS vector))",
-            name=name, idx=idx, content=content, emb="[" + ",".join(f"{x:.6f}" for x in vec) + "]",
+            name=name, idx=idx, content=content,
+            emb="[" + ",".join(f"{x:.6f}" for x in vec) + "]" if vec else None,
         )
     count = con.run("SELECT count(*) FROM chunks")[0][0]
     con.close()

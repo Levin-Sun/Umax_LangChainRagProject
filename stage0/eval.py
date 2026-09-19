@@ -10,7 +10,7 @@ sys.stdout.reconfigure(encoding="utf-8")
 
 import config
 from generate import generate
-from retrieve import retrieve
+import retrieve
 
 EVAL_DIR = Path(__file__).parent / "eval"
 

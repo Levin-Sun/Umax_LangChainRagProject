@@ -18,21 +18,25 @@ def _load_chunks(con) -> list[dict]:
     rows = con.run("SELECT id, doc_name, chunk_index, content, embedding::text FROM chunks")
     return [
         {"id": r[0], "doc_name": r[1], "chunk_index": r[2], "content": r[3],
-         "vec": [float(x) for x in r[4].strip("[]").split(",")]}
+         "vec": [float(x) for x in r[4].strip("[]").split(",")] if r[4] else None}
         for r in rows
     ]
 
 
-def _embed_query(query: str) -> list[float]:
-    resp = httpx.post(
-        f"{config.COMPAT_BASE}/embeddings",
-        headers={"Authorization": f"Bearer {config.DASHSCOPE_API_KEY}"},
-        json={"model": config.EMBEDDING_MODEL, "input": [query],
-              "dimensions": config.EMBEDDING_DIM, "encoding_format": "float"},
-        timeout=60,
-    )
-    resp.raise_for_status()
-    return resp.json()["data"][0]["embedding"]
+def _embed_query(query: str) -> list[float] | None:
+    try:
+        resp = httpx.post(
+            f"{config.COMPAT_BASE}/embeddings",
+            headers={"Authorization": f"Bearer {config.DASHSCOPE_API_KEY}"},
+            json={"model": config.EMBEDDING_MODEL, "input": [query],
+                  "dimensions": config.EMBEDDING_DIM, "encoding_format": "float"},
+            timeout=60,
+        )
+        resp.raise_for_status()
+        return resp.json()["data"][0]["embedding"]
+    except Exception as e:
+        print(f"⚠️ 向量化不可用（{e.__class__.__name__}），退回纯 BM25 检索")
+        return None
 
 
 def _cosine(a: list[float], b: list[float]) -> float:
@@ -51,21 +55,25 @@ def _rrf_fuse(rankings: list[list[int]]) -> dict[int, float]:
 
 
 def _rerank(query: str, candidates: list[dict], top_n: int) -> list[dict]:
-    """百炼原生 gte-rerank-v2（兼容模式不提供 rerank 端点）。"""
-    resp = httpx.post(
-        f"{config.NATIVE_BASE}/services/rerank/text-rerank/text-rerank",
-        headers={"Authorization": f"Bearer {config.DASHSCOPE_API_KEY}"},
-        json={"model": config.RERANK_MODEL,
-              "input": {"query": query, "documents": [c["content"] for c in candidates]},
-              "parameters": {"return_documents": False, "top_n": top_n}},
-        timeout=60,
-    )
-    resp.raise_for_status()
-    results = resp.json()["output"]["results"]
-    return [
-        {**candidates[r["index"]], "rerank_score": r["relevance_score"]}
-        for r in results
-    ]
+    """百炼原生 gte-rerank-v2（兼容模式不提供 rerank 端点）；不可用时退回融合排序。"""
+    try:
+        resp = httpx.post(
+            f"{config.NATIVE_BASE}/services/rerank/text-rerank/text-rerank",
+            headers={"Authorization": f"Bearer {config.DASHSCOPE_API_KEY}"},
+            json={"model": config.RERANK_MODEL,
+                  "input": {"query": query, "documents": [c["content"] for c in candidates]},
+                  "parameters": {"return_documents": False, "top_n": top_n}},
+            timeout=60,
+        )
+        resp.raise_for_status()
+        results = resp.json()["output"]["results"]
+        return [
+            {**candidates[r["index"]], "rerank_score": r["relevance_score"]}
+            for r in results
+        ]
+    except Exception as e:
+        print(f"⚠️ 重排不可用（{e.__class__.__name__}），使用 RRF 融合排序")
+        return candidates[:top_n]
 
 
 def retrieve(query: str, use_rerank: bool = True) -> tuple[list[dict], list[dict]]:
@@ -83,9 +91,14 @@ def retrieve(query: str, use_rerank: bool = True) -> tuple[list[dict], list[dict
     )[: config.RECALL_K]
 
     qvec = _embed_query(query)
-    vec_ranking = sorted(
-        range(len(chunks)), key=lambda i: _cosine(qvec, chunks[i]["vec"]), reverse=True
-    )[: config.RECALL_K]
+    if qvec is not None:
+        vec_ranking = sorted(
+            range(len(chunks)),
+            key=lambda i: _cosine(qvec, chunks[i]["vec"]) if chunks[i]["vec"] else -1.0,
+            reverse=True,
+        )[: config.RECALL_K]
+    else:
+        vec_ranking = []
 
     fused = _rrf_fuse([bm25_ranking, vec_ranking])
     order = sorted(fused, key=lambda i: fused[i], reverse=True)[: config.RECALL_K]

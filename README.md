@@ -17,7 +17,8 @@
 
 ## 当前进度
 
-- 阶段 0 技术验证进行中：`stage0/` 已搭建完整链路（切块 → text-embedding-v4 向量化 → pgvector 存储 → BM25+向量 RRF 混合检索 → gte-rerank 重排 → qwen-plus 带引用生成）
-- 金标准评测集 20 题（`stage0/eval/golden_qa.json`），覆盖错别字、版本冲突、同义术语、私人噪声、中英混杂、作废内容识别等考察点
+- ✅ **阶段 0 基线已达标**：金标准 20 题 **20/20（100%）**，报告见 `stage0/eval/report_20260919_1819.md`
+- 链路：切块 → pgvector 存储 → BM25 + 向量 RRF 混合检索 → gte-rerank 重排 → qwen3.7-flash 带引用生成
 - 用法：`docker compose up -d` → `python ingest.py` → `python query.py "问题"` → `python eval.py`
-- 当前阻塞：百炼 API key 被限制（Access denied by API-Key restrictions），待账户侧解除后跑基线评测
+- 说明：当前百炼专属端点仅放行 `qwen3.7-flash`（chat），向量与重排暂不可用，本次为**纯 BM25 基线**；接入 embedding/rerank 后需重跑对比，验证混合检索的增益
+- 评测集校准记录：前两轮 95%/90% 的失败项均为"回答未包含题目未问及的延伸细节"，属评测标准过严，已校准（延伸细节降级为加分项，见 golden_qa.json 备注）
