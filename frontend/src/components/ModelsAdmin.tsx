@@ -10,6 +10,7 @@ import { P } from "@/lib/paths";
 import { useAsync } from "@/lib/hooks";
 import type { ModelOut } from "@/lib/types";
 
+// 与 backend/app/main.py 的 SCENARIOS 集合保持同步（契约经 pattern 入约，改集合走四步契约工作流）
 export const SCENARIOS = ["chat", "embedding", "rerank", "vision"] as const;
 
 const emptyForm = { scenario: "chat", provider: "", base_url: "", api_key: "", model_name: "", capabilities: {} as Record<string, unknown>, fallback_rank: 0, enabled: true, is_default: false };

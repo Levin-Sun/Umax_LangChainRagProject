@@ -24,4 +24,21 @@ describe("uploadDocument", () => {
     expect(form.get("file")).toBeInstanceOf(File);
     expect(doc.id).toBe(7);
   });
+
+  // 终审收口 I2：锁定 createApiClient 默认 baseUrl = ""（Ruling-baseurl）。
+  // openapi-fetch 0.17 在调用 fetch 前先 new Request(baseUrl+path)——Node undici 对相对 URL
+  // 直接拒绝且消息含最终 URL，据此断言"单前缀 /api/v1/kb、无 /api/v1/api/v1/kb 双前缀"。
+  // 若默认值回归为 "/api/v1"（双前缀）或绝对 origin（触达注入的 fetch），本测试即红。
+  it("locks default baseUrl to \"\": client URL stays single-prefixed /api/v1/...", async () => {
+    const neverFetch = (async () => {
+      throw new Error("fetch reached: baseUrl resolved to an absolute URL");
+    }) as unknown as typeof fetch;
+    const client = createApiClient(undefined, { fetch: neverFetch }) as Client;
+    const err = await client
+      .GET("/api/v1/kb")
+      .then(() => null, (e: unknown) => e as Error);
+    expect(err).toBeInstanceOf(Error);
+    expect(err!.message).toContain("/api/v1/kb");
+    expect(err!.message).not.toContain("/api/v1/api/v1/kb");
+  });
 });

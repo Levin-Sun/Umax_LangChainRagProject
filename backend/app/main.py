@@ -24,6 +24,10 @@ from app.services.retrieval import retrieve
 
 
 SCENARIOS = {"chat", "embedding", "rerank", "vision"}
+# scenario 约束的单一事实源：SCENARIOS 派生（sorted 保序：chat|embedding|rerank|vision，
+# 与已入库 contracts/openapi.json 逐字一致，改集合必须走契约工作流重导 spec）。
+# 终审收口 I3：原为手写正则字面量，与运行时校验集合存在漂移风险。
+SCENARIO_PATTERN = "^(" + "|".join(sorted(SCENARIOS)) + ")$"
 # 契约 fuzz 修复①：id 落 PG INTEGER（int32）——裸 integer 无界，fuzz 发 2^31 直接 SQL 溢出 500，
 # 把 int32 边界写进契约。修复②：body 侧 Strict* 禁 bool/str 混入（lax 强转被 fuzz 判"违法请求被接受"）
 INT32_MIN, INT32_MAX = -(2**31), 2**31 - 1
@@ -85,7 +89,6 @@ def _utf8_str(v):
 
 Utf8Str = Annotated[str, BeforeValidator(_utf8_str)]           # 落库字符串统一过 NUL/代理规范化闸
 JsonSafe = Annotated[dict, BeforeValidator(_utf8_str)]         # JSONB 列（capabilities）递归过闸
-SCENARIO_PATTERN = "^(chat|embedding|rerank|vision)$"
 
 
 class KbIn(BaseModel):

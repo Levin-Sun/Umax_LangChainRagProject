@@ -19,7 +19,7 @@
 
 - 位置：仓库顶层 `frontend/`，与 `backend/`、`sdk-ts/` 平级；Next.js 15 App Router，TypeScript strict。
 - 依赖：`"@umax/sdk": "file:../sdk-ts"` —— SDK 类型即契约类型；sdk-ts 的 gen-diff 新鲜度门禁同时保护前端。
-- 开发代理：`next.config` rewrite `/api/v1/:path*` → `http://127.0.0.1:8000/api/v1/:path*`。SDK 默认 baseUrl `/api/v1` 零配置直通，无 CORS。
+- 开发代理：`next.config` rewrite `/api/v1/:path*` → `http://127.0.0.1:8000/api/v1/:path*`。（2026-09-20 对照实现修订）`createApiClient` 的 baseUrl 默认是**空串**（`sdk-ts/src/client.ts`）：openapi-fetch 只做 `baseUrl + path` 直拼，而 `/api/v1` 前缀逐字内嵌在 `schema.d.ts` 路径键与前端 `src/lib/paths.ts` 的 P 常量里（唯一事实源）——默认 baseUrl 若预置 `/api/v1` 会双重前缀。浏览器发出 `/api/v1/...` 相对同源请求，由上述 rewrite 转发到后端，无 CORS。
 - 生产：nginx 同域反代，同构配置。
 
 ## 2. 页面结构（4 页）
@@ -34,7 +34,7 @@
 - kb 列表 + 新建（`GET/POST /kb`）。无删除端点——不做删除按钮。
 - 按 kb 上传文档（`POST /kb/{kb_id}/documents`，multipart）。
 - 文档列表轮询 ingest 状态（ARQ 异步）：存在 pending 时每 3s 轮询，全部 done/failed 停止；failed 行内展示错误并给 reprocess（`POST /documents/{doc_id}/reprocess`）。
-- 文档详情抽屉：`GET /documents/{doc_id}` + `GET /documents/{doc_id}/chunks` 分页查看切块。
+- 文档详情抽屉：`GET /documents/{doc_id}` + `GET /documents/{doc_id}/chunks` 查看切块（2026-09-20 修订：一期实作为不分页全量列表 + 每块 200 字预览——契约本无分页参数；**分页列入二期**）。
 
 ### `/admin/models` 模型配置
 - 列表（`GET /models`，key 恒为 `****后4位` 掩码，明文不出后端，前端不尝试还原）。
