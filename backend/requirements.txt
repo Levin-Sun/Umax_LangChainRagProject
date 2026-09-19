@@ -8,6 +8,7 @@ pydantic-settings>=2.4
 # 检索内核（迁自 stage0）
 jieba>=0.42
 rank-bm25>=0.2.2
+python-multipart>=0.0.9  # FastAPI 文件上传
 # 测试
 pytest>=8.3
 httpx>=0.27

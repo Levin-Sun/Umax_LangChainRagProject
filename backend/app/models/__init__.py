@@ -51,6 +51,7 @@ class Document(Base):
     # 解析流水线状态机：pending → parsing → ready / failed（失败可重试回 pending）
     status = Column(String(16), nullable=False, default="pending", index=True)
     error = Column(Text)
+    storage_path = Column(String(1024))  # 原始文件落盘路径（重处理/MinerU 解析用）
     size_bytes = Column(Integer)
     mime = Column(String(128))
     created_at = Column(DateTime(timezone=True), server_default=func.now())

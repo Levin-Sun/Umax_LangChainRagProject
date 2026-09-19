@@ -34,11 +34,14 @@ def _bm25_ranking(chunks: list[dict], query: str, limit: int) -> list[int]:
 
 
 def _vector_ranking(session: Session, qvec: list[float],
-                    kb_ids: list[int] | None, limit: int) -> list[int]:
+                    kb_ids: list[int] | None, limit: int,
+                    min_sim: float = 0.0) -> list[int]:
     sql = ("SELECT id FROM chunks WHERE embedding IS NOT NULL"
+           " AND 1 - (embedding <=> CAST(:q AS vector)) >= :min_sim"
            + (" AND kb_id = ANY(:kb_ids)" if kb_ids else "")
            + " ORDER BY embedding <=> CAST(:q AS vector) LIMIT :limit")
-    params = {"q": "[" + ",".join(f"{x:.6f}" for x in qvec) + "]", "limit": limit}
+    params = {"q": "[" + ",".join(f"{x:.6f}" for x in qvec) + "]", "limit": limit,
+              "min_sim": min_sim}
     if kb_ids:
         params["kb_ids"] = list(kb_ids)
     return [r[0] for r in session.execute(sa_text(sql), params)]
@@ -53,6 +56,7 @@ def retrieve(
     recall_k: int = 10,
     top_k: int = 5,
     rrf_k: int = 60,
+    min_sim: float = 0.15,
     rerank: Callable[[str, list[dict]], list[dict]] | None = None,
 ) -> list[dict]:
     from app.services.fusion import rrf_fuse  # 局部导入避免环依赖
@@ -66,7 +70,7 @@ def retrieve(
     vec_ids: list[int] = []
     if embedder is not None:
         qvec = embedder.embed([query])[0]
-        vec_ids = _vector_ranking(session, qvec, kb_ids, recall_k)
+        vec_ids = _vector_ranking(session, qvec, kb_ids, recall_k, min_sim)
 
     fused = rrf_fuse([bm25_ids, vec_ids], k=rrf_k)
     order = sorted(fused, key=lambda i: -fused[i])[:recall_k]

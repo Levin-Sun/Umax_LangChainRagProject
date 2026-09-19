@@ -17,7 +17,7 @@
 
 ## 当前进度
 
-- 🚧 **阶段 1 进行中（TDD）**：`backend/` 已完成 数据模型 9 表（§3.3，真 pgvector 集成测试）、混合检索服务化（BM25+向量 SQL+RRF+重排钩子）、百炼嵌入 provider——`cd backend && pytest` 35/35 绿
+- 🚧 **阶段 1 进行中（TDD）**：`backend/` 已完成 数据模型 9 表（§3.3）、检索内核、百炼 provider、**FastAPI 服务层**（知识库/上传入库/分块预览/检索/带引用问答+未命中兜底/会话历史/用量落账）——`cd backend && pytest` 48/48 绿，`pytest -m smoke` 真机全链路通过
 - ✅ **阶段 0 完成（2026-09-19）**：金标准 20 题，纯 BM25 基线 20/20，混合检索 20/20（百炼 API 与本地 bge 双 provider 各验一轮）；执行记录与交接说明见[产品需求与开发方案.md](./产品需求与开发方案.md)第六章
 - 链路：切块 → pgvector → BM25+向量 RRF → 重排 → qwen3.7-flash 带引用生成；嵌入/重排支持百炼 API 与本地双 provider，可 `.env` 切换
 - 用法：`docker compose up -d` → `python ingest.py` → `python query.py "问题"` → `python eval.py` → `python compare_retrieval.py`
