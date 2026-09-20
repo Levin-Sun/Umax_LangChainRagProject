@@ -44,6 +44,17 @@ it("renders 503 detail from backend (gateway secret missing)", async () => {
   expect(await screen.findByRole("alert")).toHaveTextContent("GATEWAY_SECRET");
 });
 
+// 登记表单中文提示：可访问名=中文 label（替代裸字段名 aria-label）
+it("register form fields carry Chinese labels", async () => {
+  const api = fakeApi({ GET: async () => ok([]) });
+  render(<ModelsAdmin api={api} />);
+  for (const label of ["场景", "厂商", "接口地址", "API 密钥", "模型名", "回退优先级"]) {
+    expect(await screen.findByLabelText(label)).toBeInTheDocument();
+  }
+  // 占位提示保留中英对照，便于对照 API 字段
+  expect(screen.getByPlaceholderText(/provider/)).toBeInTheDocument();
+});
+
 // 任务7欠账②回归：启停/删除失败要进 ErrorBanner（旧实现裸 await——rejection 无人接，
 // UI 静默失败）；busy 防重入由同一次点击只发一请求间接锁定
 it("surfaces toggle failure in banner instead of failing silently", async () => {

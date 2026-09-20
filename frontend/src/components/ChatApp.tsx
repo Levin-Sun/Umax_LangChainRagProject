@@ -2,9 +2,8 @@
 // 聊天页：左栏会话、主区消息流、引用 [n] → chips → 右侧原文抽屉（零额外请求）
 // 取数模型：只有"点击会话"才拉历史；send() 的结果存本地 turns 追加渲染——
 // 避免"新会话 send 后 refetch → 本地+远端同一答案渲染两遍"。
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { ErrorBanner } from "@/components/ErrorBanner";
 import { call, type Client } from "@/lib/api";
@@ -18,7 +17,7 @@ function answerParts(answer: string, citations: Citation[], onCite: (c: Citation
     const c = m ? citations.find((x) => x.n === Number(m[1])) : undefined;
     if (!c) return <span key={i}>{seg}</span>;
     return (
-      <button key={i} className="mx-0.5 rounded bg-blue-50 px-1 text-xs text-blue-700 hover:bg-blue-100"
+      <button key={i} className="mx-0.5 rounded-full bg-blue-50 px-2 py-px align-baseline text-xs text-blue-600 hover:bg-blue-100"
               onClick={() => onCite(c)} title={c.excerpt}>
         {`[${c.n}] ${c.doc_name}`}
       </button>
@@ -26,7 +25,9 @@ function answerParts(answer: string, citations: Citation[], onCite: (c: Citation
   });
 }
 
-interface LocalTurn { convId: number; question: string; out: ChatOut }
+// 乐观上屏：send() 先以 out=null 的 pending turn 立即渲染提问气泡，
+// POST 成功后按 key 就地填答案，失败按 key 摘除——提问不再等后端回包。
+interface LocalTurn { key: number; convId: number | null; question: string; out: ChatOut | null }
 
 export default function ChatApp({ api }: { api: Client }) {
   const [convId, setConvId] = useState<number | null>(null);
@@ -37,6 +38,8 @@ export default function ChatApp({ api }: { api: Client }) {
   const [cite, setCite] = useState<Citation | null>(null);
   // activeConv 仅由点击设置——useAsync deps 变化 = 用户点了某个会话 = 拉历史
   const [activeConv, setActiveConv] = useState<number | null>(null);
+  const taRef = useRef<HTMLTextAreaElement>(null);
+  const seq = useRef(0);
   const convs = useAsync(() => call(api.GET(P.conversations)) as Promise<ConversationOut[]>);
   const msgs = useAsync(
     () => (activeConv === null ? Promise.resolve([] as MessageOut[])
@@ -57,6 +60,9 @@ export default function ChatApp({ api }: { api: Client }) {
   async function send() {
     const q = question.trim();
     if (!q || sending) return;
+    const key = ++seq.current;
+    setTurns((t) => [...t, { key, convId, question: q, out: null }]);
+    setQuestion("");
     setSending(true);
     setSendErr(null);
     try {
@@ -64,35 +70,45 @@ export default function ChatApp({ api }: { api: Client }) {
         body: { question: q, conversation_id: convId },
       }))) as unknown as ChatOut;
       setConvId(out.conversation_id);
-      setTurns((t) => [...t, { convId: out.conversation_id, question: q, out }]);
-      setQuestion("");
+      setTurns((t) => t.map((x) => (x.key === key ? { ...x, convId: out.conversation_id, out } : x)));
       setCite(null);
       convs.reload();
     } catch (e) {
+      setTurns((t) => t.filter((x) => x.key !== key));
       setSendErr(e);
     } finally {
       setSending(false);
+      taRef.current?.focus();
     }
+  }
+
+  function autoGrow() {
+    const el = taRef.current;
+    if (!el) return;
+    el.style.height = "auto";
+    el.style.height = `${Math.min(el.scrollHeight, 160)}px`;
   }
 
   const shown: MessageOut[] = [
     ...(msgs.data ?? []),
-    ...turns.filter((t) => t.convId === convId).flatMap((t, i) => [
-      { id: -1000 - i, role: "user" as const, content: [{ type: "text", text: t.question }], citations: null },
-      { id: -1001 - i, role: "assistant" as const, content: [{ type: "text", text: t.out.answer }], citations: t.out.citations },
-    ]),
+    ...turns.filter((t) => t.convId === convId).flatMap((t, i) => {
+      const q: MessageOut = { id: -1000 - i, role: "user", content: [{ type: "text", text: t.question }], citations: null };
+      if (!t.out) return [q];
+      return [q, { id: -1001 - i, role: "assistant" as const, content: [{ type: "text" as const, text: t.out.answer }], citations: t.out.citations }];
+    }),
   ];
 
   return (
     <div className="flex h-[calc(100vh-3rem)]">
-      <aside className="w-56 shrink-0 border-r p-2">
-        <Button className="w-full" variant="outline" onClick={() => openConversation(null)}>
+      <aside className="w-60 shrink-0 border-r border-neutral-200/80 bg-muted/40 px-3 py-4">
+        <Button className="w-full rounded-xl border-neutral-300 bg-white text-sm font-medium shadow-sm hover:bg-white/80"
+                variant="outline" size="sm" onClick={() => openConversation(null)}>
           新建会话
         </Button>
-        <ul className="mt-2 space-y-1">
+        <ul className="mt-3 space-y-0.5">
           {(convs.data ?? []).map((c) => (
             <li key={c.id}>
-              <button className={`w-full truncate rounded px-2 py-1 text-left text-sm hover:bg-accent ${c.id === convId ? "bg-accent" : ""}`}
+              <button className={`w-full truncate rounded-lg px-2.5 py-2 text-left text-[13px] transition-colors hover:bg-black/5 ${c.id === convId ? "bg-white font-medium shadow-sm" : "text-muted-foreground"}`}
                       onClick={() => openConversation(c.id)}>
                 {c.title}
               </button>
@@ -101,35 +117,55 @@ export default function ChatApp({ api }: { api: Client }) {
         </ul>
       </aside>
       <main className="flex min-w-0 flex-1 flex-col">
-        <div className="flex-1 space-y-4 overflow-y-auto p-4">
-          {shown.map((m, i) => (
-            <div key={`${m.id}:${i}`} className={m.role === "user" ? "text-right" : ""}>
-              <div className={`inline-block max-w-[80%] rounded-lg border p-3 text-left text-sm ${m.role === "user" ? "bg-muted" : ""}`}>
+        <div role="log" className="flex-1 overflow-y-auto">
+          <div className="mx-auto w-full max-w-[760px] space-y-6 px-4 py-6">
+            {shown.map((m, i) => m.role === "user" ? (
+              <div key={`${m.id}:${i}`} className="flex justify-end">
+                <div className="max-w-[85%] whitespace-pre-wrap rounded-2xl rounded-br-md bg-neutral-100 px-4 py-2.5 text-[15px] leading-7">
+                  {m.content.map((p, j) => p.type === "text" && <p key={j}>{p.text}</p>)}
+                </div>
+              </div>
+            ) : (
+              <div key={`${m.id}:${i}`} className="max-w-full text-[15px] leading-7">
                 {m.content.map((p, j) => p.type === "text" && (
                   <p key={j}>{m.role === "assistant" && m.citations
                     ? answerParts(p.text ?? "", m.citations, setCite)
                     : p.text}</p>
                 ))}
               </div>
-            </div>
-          ))}
-          {sending && <p className="text-sm text-muted-foreground">检索并生成中…</p>}
-          <ErrorBanner error={msgs.error ?? convs.error ?? sendErr} />
+            ))}
+            {sending && <p className="text-sm text-muted-foreground">检索并生成中…</p>}
+            <ErrorBanner error={msgs.error ?? convs.error ?? sendErr} />
+          </div>
         </div>
-        <form className="flex gap-2 border-t p-3" onSubmit={(e) => { e.preventDefault(); send(); }}>
-          <Input aria-label="提问" placeholder="就知识库内容提问…" value={question}
-                 onChange={(e) => setQuestion(e.target.value)} disabled={sending} />
-          <Button type="submit" disabled={!question.trim() || sending}>发送</Button>
+        <form className="px-4 pb-5" onSubmit={(e) => { e.preventDefault(); send(); }}>
+          <div className="mx-auto w-full max-w-[760px] rounded-2xl border border-neutral-300 bg-white shadow-sm transition-colors focus-within:border-neutral-400">
+            <textarea ref={taRef} aria-label="提问" rows={1}
+                      placeholder="就知识库内容提问…" value={question}
+                      disabled={sending}
+                      onChange={(e) => { setQuestion(e.target.value); autoGrow(); }}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); send(); }
+                      }}
+                      className="block max-h-40 w-full resize-none bg-transparent px-4 pt-3.5 text-[15px] leading-6 outline-none placeholder:text-neutral-400" />
+            <div className="flex items-center justify-between px-3 pb-2.5 pt-1">
+              <span className="select-none text-xs text-neutral-400">Enter 发送 · Shift+Enter 换行</span>
+              <Button type="submit" size="sm" disabled={!question.trim() || sending}
+                      className="h-8 rounded-full px-4">
+                发送
+              </Button>
+            </div>
+          </div>
         </form>
       </main>
       {cite && (
-        <aside className="w-80 shrink-0 space-y-2 border-l bg-muted/30 p-4">
+        <aside className="w-80 shrink-0 space-y-3 overflow-y-auto border-l border-neutral-200/80 p-4">
           <div className="flex items-center justify-between">
-            <Badge>{`[${cite.n}] ${cite.doc_name}`}</Badge>
-            <Button size="sm" variant="ghost" onClick={() => setCite(null)}>关闭</Button>
+            <Badge className="max-w-[80%] truncate rounded-full bg-blue-50 text-blue-600 hover:bg-blue-50">{`[${cite.n}] ${cite.doc_name}`}</Badge>
+            <Button size="sm" variant="ghost" className="h-7 px-2 text-xs text-muted-foreground" onClick={() => setCite(null)}>关闭</Button>
           </div>
-          <p className="text-sm">chunk #{cite.chunk_id}</p>
-          <blockquote className="border-l-2 pl-2 text-sm text-muted-foreground">{cite.excerpt}</blockquote>
+          <p className="text-xs text-muted-foreground">chunk #{cite.chunk_id}</p>
+          <blockquote className="whitespace-pre-wrap border-l-2 border-neutral-200 pl-3 text-sm leading-6 text-muted-foreground">{cite.excerpt}</blockquote>
         </aside>
       )}
     </div>

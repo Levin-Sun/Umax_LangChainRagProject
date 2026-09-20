@@ -72,19 +72,20 @@ export default function KbAdmin({ api }: { api: Client }) {
   }
 
   return (
-    <div className="flex gap-6 p-6">
-      <aside className="w-64 shrink-0 space-y-2">
+    <div className="mx-auto flex w-full max-w-5xl gap-5 px-6 py-6">
+      <aside className="w-56 shrink-0 space-y-3">
         <form className="flex gap-2" onSubmit={(e) => { e.preventDefault(); createKb(); }}>
-          <Input aria-label="新知识库名" placeholder="新知识库名" value={newName} onChange={(e) => setNewName(e.target.value)} />
-          <Button type="submit" disabled={!newName.trim()}>建库</Button>
+          <Input aria-label="新知识库名" placeholder="新知识库名" className="h-9 rounded-lg border-neutral-300"
+                 value={newName} onChange={(e) => setNewName(e.target.value)} />
+          <Button type="submit" size="sm" disabled={!newName.trim()} className="h-9 shrink-0 rounded-lg px-3">建库</Button>
         </form>
         {/* 任务7欠账③：actionErr 挪到左栏常驻横幅——建库失败时往往还没选库，
             旧版藏在 kbId!==null 块里根本看不见 */}
         <ErrorBanner error={kbs.error ?? actionErr} />
-        <ul className="space-y-1">
+        <ul className="space-y-0.5">
           {(kbs.data ?? []).map((k) => (
             <li key={k.id}>
-              <button className={`w-full rounded px-2 py-1 text-left text-sm hover:bg-accent ${k.id === kbId ? "bg-accent" : ""}`}
+              <button className={`w-full truncate rounded-lg px-2.5 py-2 text-left text-[13px] transition-colors hover:bg-black/5 ${k.id === kbId ? "bg-white font-medium shadow-sm" : "text-muted-foreground"}`}
                       onClick={() => { setKbId(k.id); setChunks(null); docs.reload(); /* usePolling deps=[tick,enabled] 不感知 fn——切库必须 reload 换轮询目标（任务3评审裁决） */ }}>
                 {k.name}
               </button>
@@ -93,28 +94,35 @@ export default function KbAdmin({ api }: { api: Client }) {
         </ul>
       </aside>
       <section className="min-w-0 flex-1">
-        {!kbId && <p className="text-sm text-muted-foreground">选择或新建一个知识库</p>}
+        {!kbId && (
+          <div className="flex h-40 items-center justify-center rounded-xl border border-dashed border-neutral-300 text-sm text-muted-foreground">
+            选择或新建一个知识库
+          </div>
+        )}
         {kbId !== null && (
-          <>
-            <div className="mb-3 flex items-center gap-3">
-              <label className="text-sm">
+          <div className="space-y-4 rounded-xl border border-neutral-200 bg-white p-4 shadow-sm">
+            <div className="flex items-center gap-3">
+              <label className="text-sm text-neutral-600">
                 <input type="file" accept=".txt,.md,.pdf,.docx,.xlsx,.pptx" disabled={busy}
+                       className="text-sm file:mr-3 file:cursor-pointer file:rounded-lg file:border-0 file:bg-neutral-100 file:px-3 file:py-1.5 file:text-sm hover:file:bg-neutral-200"
                        onChange={(e) => onFile(e.target.files?.[0])} />
               </label>
               {busy && <Badge variant="secondary">上传中…</Badge>}
             </div>
             <table className="w-full text-sm">
-              <thead><tr className="border-b text-left"><th className="py-1">文档</th><th>状态</th><th>大小</th><th /></tr></thead>
+              <thead><tr className="border-b border-neutral-200 text-left text-xs text-muted-foreground">
+                <th className="py-2 font-medium">文档</th><th className="font-medium">状态</th><th className="font-medium">大小</th><th /></tr></thead>
               <tbody>
                 {(docs.data ?? []).map((d) => (
-                  <tr key={d.id} className="border-b">
-                    <td className="py-1">{d.name}</td>
-                    <td><Badge variant={d.status === "failed" ? "destructive" : "secondary"}>{STATUS_LABEL[d.status] ?? d.status}</Badge>
-                      {d.error && <p className="text-xs text-red-600">{d.error}</p>}</td>
-                    <td>{d.size_bytes} B</td>
-                    <td className="space-x-2 text-right">
-                      {d.status === "failed" && <Button size="sm" variant="outline" onClick={() => reprocess(d)}>重试入库</Button>}
-                      <Button size="sm" variant="ghost" onClick={() => viewChunks(d)}>看切块</Button>
+                  <tr key={d.id} className="border-b border-neutral-100 last:border-0">
+                    <td className="py-2.5">{d.name}</td>
+                    <td><Badge variant={d.status === "failed" ? "destructive" : "secondary"} className="rounded-full font-normal">
+                      {STATUS_LABEL[d.status] ?? d.status}</Badge>
+                      {d.error && <p className="mt-0.5 max-w-60 truncate text-xs text-red-600" title={d.error}>{d.error}</p>}</td>
+                    <td className="text-muted-foreground">{d.size_bytes} B</td>
+                    <td className="space-x-1 text-right">
+                      {d.status === "failed" && <Button size="sm" variant="outline" className="h-7 rounded-lg text-xs" onClick={() => reprocess(d)}>重试入库</Button>}
+                      <Button size="sm" variant="ghost" className="h-7 rounded-lg text-xs text-blue-600" onClick={() => viewChunks(d)}>看切块</Button>
                     </td>
                   </tr>
                 ))}
@@ -122,17 +130,17 @@ export default function KbAdmin({ api }: { api: Client }) {
             </table>
             {docs.loading && !docs.data && <p className="text-sm text-muted-foreground">载入…</p>}
             <ErrorBanner error={docs.error} />
-          </>
+          </div>
         )}
       </section>
       {chunks && (
-        <aside className="w-96 shrink-0 space-y-2 overflow-y-auto border-l bg-muted/30 p-4">
-          <div className="flex justify-between">
-            <h3 className="font-medium">{chunks.doc.name}：{chunks.rows.length} 块</h3>
-            <Button size="sm" variant="ghost" onClick={() => setChunks(null)}>关闭</Button>
+        <aside className="w-[380px] shrink-0 space-y-3 overflow-y-auto border-l border-neutral-200/80 p-4">
+          <div className="flex items-center justify-between">
+            <h3 className="text-sm font-medium">{chunks.doc.name}：{chunks.rows.length} 块</h3>
+            <Button size="sm" variant="ghost" className="h-7 px-2 text-xs text-muted-foreground" onClick={() => setChunks(null)}>关闭</Button>
           </div>
           {chunks.rows.map((c) => (
-            <pre key={c.id} className="whitespace-pre-wrap rounded bg-background p-2 text-xs">
+            <pre key={c.id} className="whitespace-pre-wrap rounded-lg border border-neutral-200 bg-white p-3 text-xs leading-5">
               #{c.chunk_index}{c.has_embedding ? "" : "（无向量）"} {"\n"}{c.content.slice(0, 200)}
             </pre>
           ))}

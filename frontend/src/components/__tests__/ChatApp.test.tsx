@@ -1,4 +1,4 @@
-import { render, screen } from "@testing-library/react";
+import { act, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { expect, it } from "vitest";
 import ChatApp from "@/components/ChatApp";
@@ -64,7 +64,39 @@ it("renders backend detail in banner when list fails", async () => {
   expect(await screen.findByRole("alert")).toHaveTextContent("知识库不存在");
 });
 
-// 任务7欠账①回归：点击当前已打开会话 = no-op，本地追加的答案不能被 setTurns([]) 抹掉
+// 交互修复回归：提问必须点击发送后立即上屏，答案到达后再追加（而非等 POST 一起渲染）。
+// 断言限定在 role=log 的消息区——jsdom 里 textarea 的 value 即其 textContent，
+// 全局 getByText 会误匹配输入框（首版测试因此假绿）。
+it("shows the question immediately while the answer is still pending", async () => {
+  let resolvePost: ((v: unknown) => void) | undefined;
+  const api5 = fakeApi({
+    GET: async (url) => (url === P.conversations ? ok(convs)
+      : url === P.convMessages ? ok([] as MessageOut[]) : undefined),
+    POST: () => new Promise((r) => { resolvePost = r; }),
+  });
+  render(<ChatApp api={api5} />);
+  await userEvent.type(screen.getByLabelText("提问"), "售后多久响应？");
+  await userEvent.click(screen.getByRole("button", { name: "发送" }));
+  const log = screen.getByRole("log");
+  expect(within(log).getByText("售后多久响应？")).toBeInTheDocument();     // 答案未回，提问已在
+  expect(within(log).queryByText(/需24小时响应/)).not.toBeInTheDocument();
+  await act(async () => { resolvePost?.(ok(chatOut)); });
+  expect(await within(log).findByText(/需24小时响应/)).toBeInTheDocument();
+  expect(within(log).getAllByText("售后多久响应？")).toHaveLength(1);      // 无重复气泡
+});
+
+it("removes the pending question and shows banner when send fails", async () => {
+  const api6 = fakeApi({
+    GET: async (url) => (url === P.conversations ? ok(convs)
+      : url === P.convMessages ? ok([] as MessageOut[]) : undefined),
+    POST: async () => fail("模型不可用", 503),
+  });
+  render(<ChatApp api={api6} />);
+  await userEvent.type(screen.getByLabelText("提问"), "会炸吗？");
+  await userEvent.click(screen.getByRole("button", { name: "发送" }));
+  expect(await screen.findByRole("alert")).toHaveTextContent("模型不可用");
+  expect(within(screen.getByRole("log")).queryByText("会炸吗？")).not.toBeInTheDocument(); // 失败不留孤儿气泡
+});
 it("re-clicking the currently open conversation keeps the local answer on screen", async () => {
   const api4 = fakeApi({
     GET: async (url) => (url === P.conversations ? ok(convs)
