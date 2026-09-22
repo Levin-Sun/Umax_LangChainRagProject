@@ -1,6 +1,9 @@
 "use client";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import { api, logout } from "@/lib/api";
+import { useAdminHint } from "@/components/AdminGate";
+import { ThemeToggle } from "@/components/ThemeToggle";
 
 const LINKS = [
   { href: "/", label: "聊天" },
@@ -11,19 +14,36 @@ const LINKS = [
 
 export function Nav() {
   const path = usePathname();
+  const hint = useAdminHint();
+  const links = hint ? LINKS : LINKS.slice(0, 1);
   return (
-    <nav className="flex h-12 items-center gap-1 border-b border-neutral-200/80 px-4">
+    <nav className="flex h-12 items-center gap-1 border-b border-border/80 px-4">
       <span className="mr-3 text-sm font-semibold tracking-wide">Umax RAG</span>
-      {LINKS.map(({ href, label }) => {
+      {links.map(({ href, label }) => {
         const active = href === "/" ? path === "/" : path.startsWith(href);
         return (
           <Link key={href} href={href}
                 className={`rounded-lg px-3 py-1.5 text-sm transition-colors ${
-                  active ? "bg-blue-50 font-medium text-blue-600" : "text-neutral-600 hover:bg-neutral-100"}`}>
+                  active ? "bg-brand-soft font-medium text-brand" : "text-muted-foreground hover:bg-accent"}`}>
             {label}
           </Link>
         );
       })}
+      <div className="ml-auto flex items-center gap-1">
+        <ThemeToggle />
+        {!hint && path !== "/admin/login" && (
+          <Link href="/admin/login"
+                className="rounded-lg px-3 py-1.5 text-sm text-muted-foreground transition-colors hover:bg-accent">
+            管理员登录
+          </Link>
+        )}
+        {hint && path.startsWith("/admin") && (
+          <button className="rounded-lg px-3 py-1.5 text-sm text-muted-foreground transition-colors hover:bg-accent"
+                  onClick={() => logout(api, () => { window.location.href = "/admin/login"; })}>
+            退出
+          </button>
+        )}
+      </div>
     </nav>
   );
 }

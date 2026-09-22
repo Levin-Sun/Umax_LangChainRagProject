@@ -73,6 +73,7 @@
           "status": {
             "anyOf": [
               {
+                "maxLength": 16,
                 "type": "string"
               },
               {
@@ -125,6 +126,7 @@
             "title": "Description"
           },
           "name": {
+            "maxLength": 128,
             "title": "Name",
             "type": "string"
           }
@@ -133,6 +135,19 @@
           "name"
         ],
         "title": "KbIn",
+        "type": "object"
+      },
+      "LoginIn": {
+        "properties": {
+          "token": {
+            "title": "Token",
+            "type": "string"
+          }
+        },
+        "required": [
+          "token"
+        ],
+        "title": "LoginIn",
         "type": "object"
       },
       "ModelIn": {
@@ -169,10 +184,12 @@
             "type": "boolean"
           },
           "model_name": {
+            "maxLength": 128,
             "title": "Model Name",
             "type": "string"
           },
           "provider": {
+            "maxLength": 32,
             "title": "Provider",
             "type": "string"
           },
@@ -266,6 +283,7 @@
           "model_name": {
             "anyOf": [
               {
+                "maxLength": 128,
                 "type": "string"
               },
               {
@@ -277,6 +295,7 @@
           "provider": {
             "anyOf": [
               {
+                "maxLength": 32,
                 "type": "string"
               },
               {
@@ -389,6 +408,68 @@
   },
   "openapi": "3.1.0",
   "paths": {
+    "/api/v1/admin/login": {
+      "post": {
+        "operationId": "admin_login_api_v1_admin_login_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/LoginIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            },
+            "description": "请求体解析失败"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            },
+            "description": "口令错误"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Admin Login"
+      }
+    },
+    "/api/v1/admin/logout": {
+      "post": {
+        "operationId": "admin_logout_api_v1_admin_logout_post",
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Admin Logout"
+      }
+    },
     "/api/v1/chat": {
       "post": {
         "operationId": "chat_api_v1_chat_post",
@@ -592,6 +673,16 @@
             },
             "description": "请求体解析失败"
           },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            },
+            "description": "需要管理员登录"
+          },
           "404": {
             "content": {
               "application/json": {
@@ -690,6 +781,16 @@
             },
             "description": "Successful Response"
           },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            },
+            "description": "需要管理员登录"
+          },
           "404": {
             "content": {
               "application/json": {
@@ -775,6 +876,16 @@
               }
             },
             "description": "请求体解析失败"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            },
+            "description": "需要管理员登录"
           },
           "422": {
             "content": {
@@ -882,6 +993,16 @@
             },
             "description": "请求体解析失败"
           },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            },
+            "description": "需要管理员登录"
+          },
           "404": {
             "content": {
               "application/json": {
@@ -927,6 +1048,16 @@
               }
             },
             "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            },
+            "description": "需要管理员登录"
           }
         },
         "summary": "List Models"
@@ -961,6 +1092,16 @@
               }
             },
             "description": "scenario 非法"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            },
+            "description": "需要管理员登录"
           },
           "422": {
             "content": {
@@ -1005,6 +1146,16 @@
         "responses": {
           "204": {
             "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            },
+            "description": "需要管理员登录"
           },
           "422": {
             "content": {
@@ -1072,6 +1223,16 @@
               }
             },
             "description": "scenario 非法"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            },
+            "description": "需要管理员登录"
           },
           "404": {
             "content": {
@@ -1164,6 +1325,16 @@
               }
             },
             "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            },
+            "description": "需要管理员登录"
           }
         },
         "summary": "Usage Summary"

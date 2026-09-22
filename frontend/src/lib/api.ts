@@ -6,9 +6,13 @@ export type Client = Pick<ReturnType<typeof createApiClient>, "GET" | "POST" | "
 export const api: Client = createApiClient();
 
 export class ApiError extends Error {
-  constructor(public body: unknown) {
+  constructor(public body: unknown, public status?: number) {
     super(errText(body));
   }
+}
+
+export function is401(e: unknown): boolean {
+  return e instanceof ApiError && e.status === 401;
 }
 
 export function errText(body: unknown): string {
@@ -23,16 +27,28 @@ export function errText(body: unknown): string {
   return "网络或服务异常，请稍后重试";
 }
 
-export async function call<T>(p: Promise<{ data?: T; error?: unknown }>): Promise<T> {
-  const { data, error } = await p;
-  if (error !== undefined) throw new ApiError(error);
-  if (data === undefined) throw new ApiError(undefined);
+export async function call<T>(p: Promise<{ data?: T; error?: unknown; response?: Response }>): Promise<T> {
+  const { data, error, response } = await p;
+  if (error !== undefined) throw new ApiError(error, response?.status);
+  if (data === undefined) throw new ApiError(undefined, response?.status);
   return data;
 }
 
-export async function callVoid(p: Promise<{ data?: unknown; error?: unknown }>): Promise<void> {
-  const { error } = await p;
-  if (error !== undefined) throw new ApiError(error);
+export async function callVoid(p: Promise<{ data?: unknown; error?: unknown; response?: Response }>): Promise<void> {
+  const { error, response } = await p;
+  if (error !== undefined) throw new ApiError(error, response?.status);
+}
+
+// 管理会话退出：后端清 cookie 后执行跳转钩子（after 注入以便测试，Nav 传 location 跳转）
+export async function logout(client: Client, after: () => void): Promise<void> {
+  await callVoid(client.POST(P.adminLogout, {} as never));
+  after();
+}
+
+// 后端 login 同时下发的 JS 可读标记（授权仍只认 HttpOnly 的 admin_session）；
+// 伪造它最多看到空壳管理页 + 401 横幅，无安全影响
+export function isAdminHint(): boolean {
+  return typeof document !== "undefined" && /(?:^|; )admin_hint=1/.test(document.cookie);
 }
 
 export async function uploadDocument(client: Client, kbId: number, file: File): Promise<DocOut> {

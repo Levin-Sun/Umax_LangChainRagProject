@@ -27,6 +27,8 @@ class Settings(BaseSettings):
     mineru_base_url: str = ""
     # 模型网关主密钥：加密 model_configs.encrypted_api_key（§C BYO-key）
     gateway_secret: str = ""
+    # 管理员口令：非空则管理类端点（kb 写/models/usage）要求登录会话；留空=不启用（开发默认）
+    admin_token: str = ""
     # 入库调度：sync（开发默认）/ arq（生产，需 Redis）
     queue_backend: str = "sync"
     redis_host: str = "localhost"

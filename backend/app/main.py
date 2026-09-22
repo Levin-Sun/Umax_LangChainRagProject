@@ -1,11 +1,13 @@
 # FastAPI 服务层：知识库/文档入库/检索/带引用问答/会话历史
-# 一期无鉴权（登录与初始化向导在后续任务）；embedder/chat_fn 依赖注入，测试用假实现
+# 管理类端点（kb 写/models/usage）经 require_admin 守护：create_app(admin_token) 注入，
+# 生产由 build_production_app 从 ADMIN_TOKEN 配置接线；留空=不启用（开发/测试默认）
+import secrets
 from collections.abc import Callable, Iterator
 from pathlib import Path
 from typing import Annotated
 from uuid import uuid4
 
-from fastapi import Depends, FastAPI, File, HTTPException, UploadFile
+from fastapi import Depends, FastAPI, File, HTTPException, Request, Response, UploadFile
 from pydantic import BaseModel, BeforeValidator, Field, StrictBool
 from sqlalchemy import func, text as sa_text
 from sqlalchemy.engine import Engine
@@ -92,7 +94,7 @@ JsonSafe = Annotated[dict, BeforeValidator(_utf8_str)]         # JSONB 列（cap
 
 
 class KbIn(BaseModel):
-    name: Utf8Str
+    name: Utf8Str = Field(max_length=128)          # 修复⑨：varchar 列宽入约（PG String(128)）
     description: Utf8Str | None = None
 
 
@@ -109,7 +111,7 @@ class ChatIn(BaseModel):
 
 
 class DocPatchIn(BaseModel):
-    status: Utf8Str | None = None
+    status: Utf8Str | None = Field(None, max_length=16)   # 修复⑨：PG String(16)
     error: Utf8Str | None = None
 
 
@@ -117,10 +119,10 @@ class ModelIn(BaseModel):
     # scenario 枚举约束写进 schema（pattern）：运行时仍走 400 业务校验，但契约生成器不再
     # 拿任意合法字符串撞出 400 被判"合法请求被拒"（fuzz 修复③：约束没进 spec 才是根因）
     scenario: str = Field(json_schema_extra={"pattern": SCENARIO_PATTERN})
-    provider: Utf8Str
-    base_url: Utf8Str
-    api_key: Utf8Str
-    model_name: Utf8Str
+    provider: Utf8Str = Field(max_length=32)              # 修复⑨：PG String(32)
+    base_url: Utf8Str                                     # Text 无界
+    api_key: Utf8Str                                      # 加密后落 Text
+    model_name: Utf8Str = Field(max_length=128)           # 修复⑨：PG String(128)
     capabilities: JsonSafe = {}
     is_default: StrictBool = False
     fallback_rank: ReqId = 0
@@ -129,14 +131,18 @@ class ModelIn(BaseModel):
 
 class ModelPatchIn(BaseModel):
     scenario: Annotated[str, Field(json_schema_extra={"pattern": SCENARIO_PATTERN})] | None = None
-    provider: Utf8Str | None = None
+    provider: Utf8Str | None = Field(None, max_length=32)
     base_url: Utf8Str | None = None
     api_key: Utf8Str | None = None
-    model_name: Utf8Str | None = None
+    model_name: Utf8Str | None = Field(None, max_length=128)
     capabilities: JsonSafe | None = None
     is_default: StrictBool | None = None
     fallback_rank: ReqId | None = None
     enabled: StrictBool | None = None
+
+
+class LoginIn(BaseModel):
+    token: Utf8Str
 
 
 # 契约 fuzz 前提：真实错误码必须写进 spec，否则 schemathesis 判合法响应为违约
@@ -196,10 +202,37 @@ def create_app(
     queue=None,          # ImportQueue 协议；None=同步入库
     mineru=None,         # MinerUClient；None=扫描件解析直接失败并说明原因
     secret: str | None = None,  # 网关主密钥（GATEWAY_SECRET），None=读配置
+    admin_token: str = "",      # 管理口令；""=鉴权不启用（生产由 build_production_app 接线）
 ) -> FastAPI:
     app = FastAPI(title="Umax RAG", version="0.1.0")
     s = get_settings()
     gateway_secret = s.gateway_secret if secret is None else secret
+
+    # 管理鉴权：cookie 即令牌的 bearer 形态（HttpOnly+SameSite=Lax），依赖内网/HTTPS 边界；
+    # 常数时间比对，未配置=全开放（开发形态），留空时 login 一律 401 不泄露"未配置"
+    _ERR_ADMIN = _ERR(401, "需要管理员登录")
+
+    def require_admin(request: Request) -> None:
+        if not admin_token or secrets.compare_digest(request.cookies.get("admin_session", ""),
+                                                     admin_token):
+            return
+        raise HTTPException(401, "需要管理员登录")
+
+    @app.post("/api/v1/admin/login", status_code=204,
+              responses={**_ERR(401, "口令错误"), **_ERR_BODY})
+    def admin_login(body: LoginIn, response: Response):
+        if not admin_token or not secrets.compare_digest(body.token, admin_token):
+            raise HTTPException(401, "口令错误")
+        response.set_cookie("admin_session", admin_token, httponly=True,
+                            samesite="lax", max_age=7 * 24 * 3600, path="/")
+        # JS 可读的登录标记：Nav 显隐用；授权仍只认 HttpOnly 的 admin_session
+        response.set_cookie("admin_hint", "1", samesite="lax",
+                            max_age=7 * 24 * 3600, path="/")
+
+    @app.post("/api/v1/admin/logout", status_code=204)
+    def admin_logout(response: Response):
+        response.delete_cookie("admin_session", path="/")
+        response.delete_cookie("admin_hint", path="/")
 
     def get_session() -> Iterator[Session]:
         with Session(engine) as session:
@@ -211,7 +244,8 @@ def create_app(
         return {"status": "ok"}
 
     # ---- 知识库 ----
-    @app.post("/api/v1/kb", status_code=201, responses=_ERR_BODY)
+    @app.post("/api/v1/kb", status_code=201, dependencies=[Depends(require_admin)],
+              responses={**_ERR_BODY, **_ERR_ADMIN})
     def create_kb(body: KbIn, session: Session = Depends(get_session)):
         kb = KnowledgeBase(tenant_id="default", name=body.name, description=body.description,
                            embedding_model=s.embedding_model, chunk_target=s.chunk_target)
@@ -234,8 +268,9 @@ def create_app(
 
     # ---- 文档与入库 ----
     @app.post("/api/v1/kb/{kb_id}/documents", status_code=201,
+              dependencies=[Depends(require_admin)],
               responses={**_ERR(404, "知识库不存在"), **_ERR(415, "不支持的文件类型"),
-                         **_ERR_BODY})
+                         **_ERR_BODY, **_ERR_ADMIN})
     def upload_document(kb_id: PathId, file: UploadFile = File(...),
                         session: Session = Depends(get_session)):
         kb = session.get(KnowledgeBase, kb_id)
@@ -282,8 +317,8 @@ def create_app(
                 for c in session.query(Chunk).filter_by(document_id=doc_id)
                 .order_by(Chunk.chunk_index)]
 
-    @app.patch("/api/v1/documents/{doc_id}",
-               responses={**_ERR(404, "文档不存在"), **_ERR_BODY})
+    @app.patch("/api/v1/documents/{doc_id}", dependencies=[Depends(require_admin)],
+               responses={**_ERR(404, "文档不存在"), **_ERR_BODY, **_ERR_ADMIN})
     def patch_document(doc_id: PathId, body: DocPatchIn, session: Session = Depends(get_session)):
         doc = session.get(Document, doc_id)
         if not doc:
@@ -295,7 +330,8 @@ def create_app(
         return _doc_json(doc)
 
     @app.post("/api/v1/documents/{doc_id}/reprocess", status_code=202,
-              responses=_ERR(404, "文档不存在"))
+              dependencies=[Depends(require_admin)],
+              responses={**_ERR(404, "文档不存在"), **_ERR_ADMIN})
     def reprocess(doc_id: PathId, session: Session = Depends(get_session)):
         doc = session.get(Document, doc_id)
         if not doc:
@@ -380,8 +416,9 @@ def create_app(
                 "fallback_rank": m.fallback_rank, "enabled": m.enabled,
                 "api_key_masked": ("****" + plain[-4:]) if plain else ""}
 
-    @app.post("/api/v1/models", status_code=201,
-              responses={**_ERR(400, "scenario 非法"), **_ERR(503, "未配置 GATEWAY_SECRET")})
+    @app.post("/api/v1/models", status_code=201, dependencies=[Depends(require_admin)],
+              responses={**_ERR(400, "scenario 非法"), **_ERR(503, "未配置 GATEWAY_SECRET"),
+                         **_ERR_ADMIN})
     def create_model(body: ModelIn, session: Session = Depends(get_session)):
         if body.scenario not in SCENARIOS:
             raise HTTPException(400, f"scenario 仅支持 {'/'.join(sorted(SCENARIOS))}")
@@ -394,15 +431,16 @@ def create_app(
         session.commit()
         return _model_json(m)
 
-    @app.get("/api/v1/models")
+    @app.get("/api/v1/models", dependencies=[Depends(require_admin)],
+             responses=_ERR_ADMIN)
     def list_models(session: Session = Depends(get_session)):
         rows = session.query(ModelConfig).order_by(ModelConfig.scenario,
                                                    ModelConfig.fallback_rank, ModelConfig.id)
         return [_model_json(m) for m in rows]
 
-    @app.patch("/api/v1/models/{model_id}",
+    @app.patch("/api/v1/models/{model_id}", dependencies=[Depends(require_admin)],
                responses={**_ERR(400, "scenario 非法"), **_ERR(404, "模型配置不存在"),
-                          **_ERR(503, "未配置 GATEWAY_SECRET")})
+                          **_ERR(503, "未配置 GATEWAY_SECRET"), **_ERR_ADMIN})
     def patch_model(model_id: PathId, body: ModelPatchIn, session: Session = Depends(get_session)):
         m = session.get(ModelConfig, model_id)
         if not m:
@@ -418,7 +456,8 @@ def create_app(
         return _model_json(m)
 
     @app.delete("/api/v1/models/{model_id}", status_code=204,
-                responses=_ERR(503, "未配置 GATEWAY_SECRET"))
+                dependencies=[Depends(require_admin)],
+                responses={**_ERR(503, "未配置 GATEWAY_SECRET"), **_ERR_ADMIN})
     def delete_model(model_id: PathId, session: Session = Depends(get_session)):
         m = session.get(ModelConfig, model_id)
         if m:
@@ -426,7 +465,8 @@ def create_app(
             session.commit()
 
     # ---- 用量看板简版（§C：成本折算的事实来源）----
-    @app.get("/api/v1/usage/summary")
+    @app.get("/api/v1/usage/summary", dependencies=[Depends(require_admin)],
+             responses=_ERR_ADMIN)
     def usage_summary(session: Session = Depends(get_session)):
         rows = (session.query(UsageRecord.scenario, UsageRecord.model,
                               func.count().label("calls"),
@@ -479,8 +519,14 @@ def build_production_app(upload_dir: str = "uploads",
         from app.queue import ArqQueue
 
         queue = ArqQueue(redis_host=s.redis_host, redis_port=s.redis_port)
+    if not s.admin_token:
+        import logging
+
+        logging.getLogger("umax").warning(
+            "ADMIN_TOKEN 未配置：知识库写操作/模型管理/用量看板无鉴权开放，部署前必须配置")
     return create_app(engine=engine, embedder=embedder, chat_fn=chat_fn,
-                      upload_dir=upload_dir, mineru=mineru, queue=queue)
+                      upload_dir=upload_dir, mineru=mineru, queue=queue,
+                      admin_token=s.admin_token)
 
 
 def main() -> None:

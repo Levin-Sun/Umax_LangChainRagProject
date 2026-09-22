@@ -9,4 +9,6 @@ export const P = {
   models: "/api/v1/models",
   model: "/api/v1/models/{model_id}",
   usageSummary: "/api/v1/usage/summary",
+  adminLogin: "/api/v1/admin/login",
+  adminLogout: "/api/v1/admin/logout",
 } as const;

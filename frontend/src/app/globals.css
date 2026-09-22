@@ -29,6 +29,9 @@
   --chart-4: oklch(0.828 0.189 84.429);
   --chart-5: oklch(0.769 0.188 70.08);
   --radius: 0.625rem;
+  /* 品牌色（导航高亮/链接）：三主题各配一版，护眼下换低饱和暖青 */
+  --brand: oklch(0.546 0.245 262.881);
+  --brand-soft: oklch(0.97 0.014 254.604);
 }
 
 .dark {
@@ -56,6 +59,33 @@
   --chart-3: oklch(0.769 0.188 70.08);
   --chart-4: oklch(0.627 0.265 303.9);
   --chart-5: oklch(0.645 0.246 16.439);
+  --brand: oklch(0.707 0.165 254.624);
+  --brand-soft: oklch(0.282 0.091 267.935);
+}
+
+/* 护眼（sepia）：暖米纸感底 + 棕灰文字，整组覆盖，组件走 token 自动跟随 */
+.sepia {
+  --background: oklch(0.96 0.028 87);
+  --foreground: oklch(0.36 0.035 72);
+  --card: oklch(0.98 0.02 88);
+  --card-foreground: oklch(0.36 0.035 72);
+  --popover: oklch(0.98 0.02 88);
+  --popover-foreground: oklch(0.36 0.035 72);
+  --primary: oklch(0.38 0.055 62);
+  --primary-foreground: oklch(0.98 0.02 88);
+  --secondary: oklch(0.92 0.035 86);
+  --secondary-foreground: oklch(0.36 0.035 72);
+  --muted: oklch(0.93 0.03 86);
+  --muted-foreground: oklch(0.53 0.035 74);
+  --accent: oklch(0.9 0.045 84);
+  --accent-foreground: oklch(0.32 0.045 68);
+  --destructive: oklch(0.53 0.19 26);
+  --destructive-foreground: oklch(0.98 0.02 88);
+  --border: oklch(0.85 0.035 86);
+  --input: oklch(0.85 0.035 86);
+  --ring: oklch(0.6 0.05 70);
+  --brand: oklch(0.5 0.075 165);
+  --brand-soft: oklch(0.9 0.04 150);
 }
 
 @theme inline {
@@ -83,6 +113,8 @@
   --color-chart-3: var(--chart-3);
   --color-chart-4: var(--chart-4);
   --color-chart-5: var(--chart-5);
+  --color-brand: var(--brand);
+  --color-brand-soft: var(--brand-soft);
   --radius-sm: calc(var(--radius) - 4px);
   --radius-md: calc(var(--radius) - 2px);
   --radius-lg: var(--radius);

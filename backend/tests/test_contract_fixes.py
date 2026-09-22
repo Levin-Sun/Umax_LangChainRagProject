@@ -160,3 +160,18 @@ def test_upload_filename_nul_normalized(engine, db, tmp_path):
         row = db.query(Document).one()
         assert row.name == "ab.md" and "\x00" not in row.name
         assert row.storage_path and "\x00" not in row.storage_path
+
+
+# ---- 修复⑨：varchar 列宽入约——超长字符串是 spec 合法正数据，此前直达 PG 变 500
+# StringDataRightTruncation（fuzz 随机挖中 provider 33 字符）。schema 侧声明列宽
+# maxLength（生成器不再产超长正例），运行时 422 拒收（默认面已声明），边界值放行。
+def test_varchar_widths_declared_and_enforced(client):
+    assert client.post("/api/v1/models",
+                       json={**MODEL_BODY, "provider": "p" * 33}).status_code == 422
+    assert client.post("/api/v1/models",
+                       json={**MODEL_BODY, "model_name": "m" * 129}).status_code == 422
+    assert client.post("/api/v1/kb", json={"name": "n" * 129}).status_code == 422
+    assert client.patch("/api/v1/documents/1", json={"status": "s" * 17}).status_code == 422
+    # 边界值必须放行（maxLength=N 收 N 字符）
+    assert client.post("/api/v1/models",
+                       json={**MODEL_BODY, "provider": "p" * 32}).status_code == 201

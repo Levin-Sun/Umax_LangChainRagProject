@@ -44,6 +44,13 @@ it("renders 503 detail from backend (gateway secret missing)", async () => {
   expect(await screen.findByRole("alert")).toHaveTextContent("GATEWAY_SECRET");
 });
 
+it("401 from protected list offers login entry", async () => {
+  const api = fakeApi({ GET: async () => fail("需要管理员登录", 401) });
+  render(<ModelsAdmin api={api} />);
+  expect(await screen.findByRole("alert")).toHaveTextContent("需要管理员登录");
+  expect(screen.getByRole("link", { name: "去登录" })).toHaveAttribute("href", "/admin/login");
+});
+
 // 登记表单中文提示：可访问名=中文 label（替代裸字段名 aria-label）
 it("register form fields carry Chinese labels", async () => {
   const api = fakeApi({ GET: async () => ok([]) });
