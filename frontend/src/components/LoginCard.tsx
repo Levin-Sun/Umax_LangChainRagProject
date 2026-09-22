@@ -27,10 +27,10 @@ export default function LoginCard({ api, onDone }: { api: Client; onDone: () => 
   }
 
   return (
-    <form className="w-full max-w-sm space-y-3 rounded-xl border border-border bg-card p-6 shadow-sm"
+    <form className="w-full max-w-sm space-y-3 rounded-xl border border-border bg-card px-6 py-5 shadow-sm"
           onSubmit={(e) => { e.preventDefault(); submit(); }}>
-      <h2 className="text-base font-medium">管理员登录</h2>
-      <p className="text-xs text-muted-foreground">知识库/模型/用量管理需要管理员口令；未配置 ADMIN_TOKEN 时管理端点保持开放。</p>
+      <h2 className="text-h2 font-semibold">管理员登录</h2>
+      <p className="text-caption text-ink-3">知识库/模型/用量管理需要管理员口令；未配置 ADMIN_TOKEN 时管理端点保持开放。</p>
       <ErrorBanner error={error} />
       <Input aria-label="管理员口令" type="password" placeholder="管理员口令" value={token}
              className="h-9 rounded-lg border-border"

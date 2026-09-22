@@ -7,7 +7,7 @@ export default function AdminBanner({ error }: { error?: unknown }) {
   if (!error) return null;
   if (is401(error)) {
     return (
-      <div role="alert" className="rounded-lg border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive">
+      <div role="alert" className="rounded-lg border border-destructive/30 bg-destructive/10 px-3 py-2 text-body text-destructive">
         需要管理员登录 · <Link href="/admin/login" className="font-medium underline">去登录</Link>
       </div>
     );

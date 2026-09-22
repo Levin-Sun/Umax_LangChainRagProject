@@ -1,17 +1,12 @@
 import type { Metadata } from "next";
 import { cookies } from "next/headers";
-import { Geist, Geist_Mono } from "next/font/google";
+import { Inter } from "next/font/google";
 import { Nav } from "@/components/Nav";
 import { THEME_COOKIE } from "@/lib/theme";
 import "./globals.css";
 
-const geistSans = Geist({
-  variable: "--font-geist-sans",
-  subsets: ["latin"],
-});
-
-const geistMono = Geist_Mono({
-  variable: "--font-geist-mono",
+const inter = Inter({
+  variable: "--font-inter",
   subsets: ["latin"],
 });
 
@@ -24,7 +19,7 @@ export default async function RootLayout({ children }: { children: React.ReactNo
   const themeClass = t === "dark" || t === "sepia" ? t : undefined;
   return (
     <html lang="zh" className={themeClass}>
-      <body className={`${geistSans.variable} ${geistMono.variable} bg-background text-foreground antialiased`}>
+      <body className={`${inter.variable} bg-background text-foreground antialiased`}>
         <Nav />
         {children}
       </body>

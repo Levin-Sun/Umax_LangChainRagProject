@@ -18,13 +18,13 @@ export function Nav() {
   const links = hint ? LINKS : LINKS.slice(0, 1);
   return (
     <nav className="flex h-12 items-center gap-1 border-b border-border/80 px-4">
-      <span className="mr-3 text-sm font-semibold tracking-wide">Umax RAG</span>
+      <span className="mr-3 text-h3 font-semibold">Umax RAG</span>
       {links.map(({ href, label }) => {
         const active = href === "/" ? path === "/" : path.startsWith(href);
         return (
           <Link key={href} href={href}
-                className={`rounded-lg px-3 py-1.5 text-sm transition-colors ${
-                  active ? "bg-brand-soft font-medium text-brand" : "text-muted-foreground hover:bg-accent"}`}>
+                className={`rounded-lg px-3 py-1.5 text-body transition-colors ${
+                  active ? "bg-brand-soft font-medium text-ink-1" : "text-muted-foreground hover:bg-accent"}`}>
             {label}
           </Link>
         );
@@ -33,12 +33,12 @@ export function Nav() {
         <ThemeToggle />
         {!hint && path !== "/admin/login" && (
           <Link href="/admin/login"
-                className="rounded-lg px-3 py-1.5 text-sm text-muted-foreground transition-colors hover:bg-accent">
+                className="rounded-lg px-3 py-1.5 text-body text-muted-foreground transition-colors hover:bg-accent">
             管理员登录
           </Link>
         )}
         {hint && path.startsWith("/admin") && (
-          <button className="rounded-lg px-3 py-1.5 text-sm text-muted-foreground transition-colors hover:bg-accent"
+          <button className="rounded-lg px-3 py-1.5 text-body text-muted-foreground transition-colors hover:bg-accent"
                   onClick={() => logout(api, () => { window.location.href = "/admin/login"; })}>
             退出
           </button>

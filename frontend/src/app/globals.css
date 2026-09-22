@@ -3,21 +3,40 @@
 
 @custom-variant dark (&:is(.dark *));
 
+/* UI 规范三色文字层级：主 #1D2129 / 次 #4E5969 / 辅 #86909C（深色、护眼配层级等价三色） */
+:root {
+  --ink-1: #1d2129;
+  --ink-2: #4e5969;
+  --ink-3: #86909c;
+}
+
+.dark {
+  --ink-1: #f2f3f5;
+  --ink-2: #c9cdd4;
+  --ink-3: #86909c;
+}
+
+.sepia {
+  --ink-1: oklch(0.33 0.045 72);
+  --ink-2: oklch(0.45 0.04 72);
+  --ink-3: oklch(0.57 0.04 76);
+}
+
 :root {
   --background: oklch(1 0 0);
-  --foreground: oklch(0.145 0 0);
+  --foreground: var(--ink-1);
   --card: oklch(1 0 0);
-  --card-foreground: oklch(0.145 0 0);
+  --card-foreground: var(--ink-1);
   --popover: oklch(1 0 0);
-  --popover-foreground: oklch(0.145 0 0);
+  --popover-foreground: var(--ink-1);
   --primary: oklch(0.205 0 0);
   --primary-foreground: oklch(0.985 0 0);
   --secondary: oklch(0.97 0 0);
   --secondary-foreground: oklch(0.205 0 0);
   --muted: oklch(0.97 0 0);
-  --muted-foreground: oklch(0.556 0 0);
+  --muted-foreground: var(--ink-3);
   --accent: oklch(0.97 0 0);
-  --accent-foreground: oklch(0.205 0 0);
+  --accent-foreground: var(--ink-1);
   --destructive: oklch(0.577 0.245 27.325);
   --destructive-foreground: oklch(0.985 0 0);
   --border: oklch(0.922 0 0);
@@ -36,19 +55,19 @@
 
 .dark {
   --background: oklch(0.145 0 0);
-  --foreground: oklch(0.985 0 0);
+  --foreground: var(--ink-1);
   --card: oklch(0.205 0 0);
-  --card-foreground: oklch(0.985 0 0);
+  --card-foreground: var(--ink-1);
   --popover: oklch(0.205 0 0);
-  --popover-foreground: oklch(0.985 0 0);
+  --popover-foreground: var(--ink-1);
   --primary: oklch(0.922 0 0);
   --primary-foreground: oklch(0.205 0 0);
   --secondary: oklch(0.269 0 0);
   --secondary-foreground: oklch(0.985 0 0);
   --muted: oklch(0.269 0 0);
-  --muted-foreground: oklch(0.708 0 0);
+  --muted-foreground: var(--ink-3);
   --accent: oklch(0.269 0 0);
-  --accent-foreground: oklch(0.985 0 0);
+  --accent-foreground: var(--ink-1);
   --destructive: oklch(0.577 0.245 27.325);
   --destructive-foreground: oklch(0.985 0 0);
   --border: oklch(0.269 0 0);
@@ -66,19 +85,19 @@
 /* 护眼（sepia）：暖米纸感底 + 棕灰文字，整组覆盖，组件走 token 自动跟随 */
 .sepia {
   --background: oklch(0.96 0.028 87);
-  --foreground: oklch(0.36 0.035 72);
+  --foreground: var(--ink-1);
   --card: oklch(0.98 0.02 88);
-  --card-foreground: oklch(0.36 0.035 72);
+  --card-foreground: var(--ink-1);
   --popover: oklch(0.98 0.02 88);
-  --popover-foreground: oklch(0.36 0.035 72);
+  --popover-foreground: var(--ink-1);
   --primary: oklch(0.38 0.055 62);
   --primary-foreground: oklch(0.98 0.02 88);
   --secondary: oklch(0.92 0.035 86);
-  --secondary-foreground: oklch(0.36 0.035 72);
+  --secondary-foreground: var(--ink-1);
   --muted: oklch(0.93 0.03 86);
-  --muted-foreground: oklch(0.53 0.035 74);
+  --muted-foreground: var(--ink-3);
   --accent: oklch(0.9 0.045 84);
-  --accent-foreground: oklch(0.32 0.045 68);
+  --accent-foreground: var(--ink-1);
   --destructive: oklch(0.53 0.19 26);
   --destructive-foreground: oklch(0.98 0.02 88);
   --border: oklch(0.85 0.035 86);
@@ -91,6 +110,9 @@
 @theme inline {
   --color-background: var(--background);
   --color-foreground: var(--foreground);
+  --color-ink-1: var(--ink-1);
+  --color-ink-2: var(--ink-2);
+  --color-ink-3: var(--ink-3);
   --color-card: var(--card);
   --color-card-foreground: var(--card-foreground);
   --color-popover: var(--popover);
@@ -119,8 +141,24 @@
   --radius-md: calc(var(--radius) - 2px);
   --radius-lg: var(--radius);
   --radius-xl: calc(var(--radius) + 4px);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
+  /* UI 规范：全站唯一字体体系——Inter 主字体（中文回落系统），代码/引用 Consolas 等宽 */
+  --font-sans: var(--font-inter), "PingFang SC", "Microsoft YaHei", ui-sans-serif, system-ui, sans-serif;
+  --font-mono: Consolas, "Cascadia Mono", Menlo, ui-monospace, monospace;
+}
+
+/* UI 规范五级字阶：字号/行高/字距在此锁定，组件层禁用默认字号与手动 leading（styleGuard 守护） */
+@theme {
+  --text-h1: 24px;
+  --text-h1--line-height: 32px;
+  --text-h2: 18px;
+  --text-h2--line-height: 24px;
+  --text-h3: 16px;
+  --text-h3--line-height: 22px;
+  --text-body: 14px;
+  --text-body--line-height: 20px;
+  --text-body--letter-spacing: 0.2px;
+  --text-caption: 12px;
+  --text-caption--line-height: 18px;
 }
 
 @layer base {

@@ -72,7 +72,7 @@ export default function KbAdmin({ api }: { api: Client }) {
   }
 
   return (
-    <div className="mx-auto flex w-full max-w-5xl gap-5 px-6 py-6">
+    <div className="mx-auto flex w-full max-w-5xl gap-6 px-6 py-6">
       <aside className="w-56 shrink-0 space-y-3">
         <form className="flex gap-2" onSubmit={(e) => { e.preventDefault(); createKb(); }}>
           <Input aria-label="新知识库名" placeholder="新知识库名" className="h-9 rounded-lg border-border"
@@ -85,7 +85,7 @@ export default function KbAdmin({ api }: { api: Client }) {
         <ul className="space-y-0.5">
           {(kbs.data ?? []).map((k) => (
             <li key={k.id}>
-              <button className={`w-full truncate rounded-lg px-2.5 py-2 text-left text-[13px] transition-colors hover:bg-accent/60 ${k.id === kbId ? "bg-card font-medium shadow-sm" : "text-muted-foreground"}`}
+              <button className={`w-full truncate rounded-lg px-2.5 py-2 text-left text-body transition-colors hover:bg-accent/60 ${k.id === kbId ? "bg-card font-medium text-ink-1 shadow-sm" : "text-ink-3"}`}
                       onClick={() => { setKbId(k.id); setChunks(null); docs.reload(); /* usePolling deps=[tick,enabled] 不感知 fn——切库必须 reload 换轮询目标（任务3评审裁决） */ }}>
                 {k.name}
               </button>
@@ -95,22 +95,22 @@ export default function KbAdmin({ api }: { api: Client }) {
       </aside>
       <section className="min-w-0 flex-1">
         {!kbId && (
-          <div className="flex h-40 items-center justify-center rounded-xl border border-dashed border-border text-sm text-muted-foreground">
+          <div className="flex h-40 items-center justify-center rounded-xl border border-dashed border-border text-caption text-ink-3">
             选择或新建一个知识库
           </div>
         )}
         {kbId !== null && (
-          <div className="space-y-4 rounded-xl border border-border bg-card p-4 shadow-sm">
+          <div className="space-y-3 rounded-xl border border-border bg-card px-6 py-5 shadow-sm">
             <div className="flex items-center gap-3">
-              <label className="text-sm text-muted-foreground">
+              <label className="text-body text-ink-2">
                 <input type="file" accept=".txt,.md,.pdf,.docx,.xlsx,.pptx" disabled={busy}
-                       className="text-sm file:mr-3 file:cursor-pointer file:rounded-lg file:border-0 file:bg-secondary file:px-3 file:py-1.5 file:text-sm hover:file:bg-accent"
+                       className="text-body file:mr-3 file:cursor-pointer file:rounded-lg file:border-0 file:bg-secondary file:px-3 file:py-1.5 file:text-body hover:file:bg-accent"
                        onChange={(e) => onFile(e.target.files?.[0])} />
               </label>
               {busy && <Badge variant="secondary">上传中…</Badge>}
             </div>
-            <table className="w-full text-sm">
-              <thead><tr className="border-b border-border text-left text-xs text-muted-foreground">
+            <table className="w-full text-body text-ink-2">
+              <thead><tr className="border-b border-border text-left text-h3 font-medium text-ink-2">
                 <th className="py-2 font-medium">文档</th><th className="font-medium">状态</th><th className="font-medium">大小</th><th /></tr></thead>
               <tbody>
                 {(docs.data ?? []).map((d) => (
@@ -118,17 +118,17 @@ export default function KbAdmin({ api }: { api: Client }) {
                     <td className="py-2.5">{d.name}</td>
                     <td><Badge variant={d.status === "failed" ? "destructive" : "secondary"} className="rounded-full font-normal">
                       {STATUS_LABEL[d.status] ?? d.status}</Badge>
-                      {d.error && <p className="mt-0.5 max-w-60 truncate text-xs text-destructive" title={d.error}>{d.error}</p>}</td>
-                    <td className="text-muted-foreground">{d.size_bytes} B</td>
+                      {d.error && <p className="mt-0.5 max-w-60 truncate text-caption text-destructive" title={d.error}>{d.error}</p>}</td>
+                    <td className="font-medium">{d.size_bytes} B</td>
                     <td className="space-x-1 text-right">
-                      {d.status === "failed" && <Button size="sm" variant="outline" className="h-7 rounded-lg text-xs" onClick={() => reprocess(d)}>重试入库</Button>}
-                      <Button size="sm" variant="ghost" className="h-7 rounded-lg text-xs text-brand" onClick={() => viewChunks(d)}>看切块</Button>
+                      {d.status === "failed" && <Button size="sm" variant="outline" className="h-7 rounded-lg" onClick={() => reprocess(d)}>重试入库</Button>}
+                      <Button size="sm" variant="ghost" className="h-7 rounded-lg text-ink-1" onClick={() => viewChunks(d)}>看切块</Button>
                     </td>
                   </tr>
                 ))}
               </tbody>
             </table>
-            {docs.loading && !docs.data && <p className="text-sm text-muted-foreground">载入…</p>}
+            {docs.loading && !docs.data && <p className="text-caption text-ink-3">载入…</p>}
             <AdminBanner error={docs.error} />
           </div>
         )}
@@ -136,11 +136,11 @@ export default function KbAdmin({ api }: { api: Client }) {
       {chunks && (
         <aside className="w-[380px] shrink-0 space-y-3 overflow-y-auto border-l border-border/80 p-4">
           <div className="flex items-center justify-between">
-            <h3 className="text-sm font-medium">{chunks.doc.name}：{chunks.rows.length} 块</h3>
-            <Button size="sm" variant="ghost" className="h-7 px-2 text-xs text-muted-foreground" onClick={() => setChunks(null)}>关闭</Button>
+            <h3 className="text-h3 font-medium text-ink-2">{chunks.doc.name}：{chunks.rows.length} 块</h3>
+            <Button size="sm" variant="ghost" className="h-7 px-2 text-ink-3" onClick={() => setChunks(null)}>关闭</Button>
           </div>
           {chunks.rows.map((c) => (
-            <pre key={c.id} className="whitespace-pre-wrap rounded-lg border border-border bg-card p-3 text-xs leading-5">
+            <pre key={c.id} className="whitespace-pre-wrap rounded-lg border border-border bg-card p-3 font-mono text-caption text-ink-2">
               #{c.chunk_index}{c.has_embedding ? "" : "（无向量）"} {"\n"}{c.content.slice(0, 200)}
             </pre>
           ))}

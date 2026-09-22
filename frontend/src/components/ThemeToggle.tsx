@@ -25,7 +25,7 @@ export function ThemeToggle() {
     <div className="flex items-center gap-0.5 rounded-lg border border-border p-0.5">
       {THEMES.map(([t, label]) => (
         <button key={t} aria-pressed={theme === t} onClick={() => pick(t)}
-                className={`rounded-md px-2 py-1 text-xs transition-colors ${
+                className={`rounded-md px-2 py-1 text-body transition-colors ${
                   theme === t
                     ? "bg-accent font-medium text-accent-foreground"
                     : "text-muted-foreground hover:bg-accent/60"}`}>

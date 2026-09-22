@@ -73,11 +73,11 @@ export default function ModelsAdmin({ api }: { api: Client }) {
   }
 
   return (
-    <div className="mx-auto w-full max-w-5xl space-y-5 px-6 py-6">
+    <div className="mx-auto w-full max-w-5xl space-y-6 px-6 py-6">
       <AdminBanner error={list.error ?? rowErr} />
       <div className="overflow-hidden rounded-xl border border-border bg-card shadow-sm">
-        <table className="w-full text-sm">
-          <thead><tr className="border-b border-border bg-muted/60 text-left text-xs text-muted-foreground">
+        <table className="w-full text-body text-ink-2">
+          <thead><tr className="border-b border-border bg-muted/60 text-left text-h3 font-medium text-ink-2">
             <th className="px-4 py-2.5 font-medium">场景</th><th className="py-2.5 font-medium">模型</th>
             <th className="py-2.5 font-medium">API Key</th><th className="py-2.5 font-medium">fallback</th>
             <th className="py-2.5 pr-4 font-medium">操作</th></tr></thead>
@@ -85,48 +85,48 @@ export default function ModelsAdmin({ api }: { api: Client }) {
             {(list.data ?? []).map((m) => (
               <tr key={m.id} className="border-b border-border last:border-0">
                 <td className="px-4 py-2.5"><Badge variant="secondary" className="rounded-full font-normal">{m.scenario}</Badge></td>
-                <td>{m.model_name}{m.is_default && <span className="ml-1 text-xs text-brand">默认</span>}
-                  {!m.enabled && <span className="ml-1 text-xs text-muted-foreground">（停用）</span>}</td>
-                <td className="font-mono text-xs">{m.api_key_masked}</td>
-                <td className="text-muted-foreground">#{m.fallback_rank}</td>
+                <td>{m.model_name}{m.is_default && <span className="ml-1 text-caption font-medium text-ink-1">默认</span>}
+                  {!m.enabled && <span className="ml-1 text-caption text-ink-3">（停用）</span>}</td>
+                <td className="font-mono text-caption">{m.api_key_masked}</td>
+                <td className="font-medium">#{m.fallback_rank}</td>
                 <td className="space-x-1.5 pr-4">
                   <button role="switch" aria-checked={m.enabled} aria-label={`启用 ${m.model_name}`}
-                          className={`rounded-full border px-2.5 py-0.5 text-xs transition-colors ${
-                            m.enabled ? "border-border text-foreground hover:bg-accent" : "border-border/60 text-muted-foreground"}`}
+                          className={`rounded-full border px-2.5 py-0.5 text-body transition-colors ${
+                            m.enabled ? "border-border text-ink-1 hover:bg-accent" : "border-border/60 text-ink-3"}`}
                           onClick={() => toggle(m)}>
                     {m.enabled ? "停用" : "启用"}
                   </button>
-                  <Button size="sm" variant="ghost" className="h-7 px-2 text-xs text-destructive hover:text-destructive" onClick={() => remove(m)}>删除</Button>
+                  <Button size="sm" variant="ghost" className="h-7 px-2 text-destructive hover:text-destructive" onClick={() => remove(m)}>删除</Button>
                 </td>
               </tr>
             ))}
           </tbody>
         </table>
       </div>
-      <form className="max-w-md space-y-2.5 rounded-xl border border-border bg-card p-4 shadow-sm"
+      <form className="max-w-md space-y-3 rounded-xl border border-border bg-card px-6 py-5 shadow-sm"
             onSubmit={(e) => { e.preventDefault(); register(); }}>
-        <h3 className="text-sm font-medium">登记模型</h3>
+        <h3 className="text-h2 font-semibold">登记模型</h3>
         <label className="block space-y-1">
-          <span className="text-xs text-muted-foreground">场景</span>
-          <select className="w-full rounded-lg border border-border px-3 py-2 text-sm outline-none focus:border-ring"
+          <span className="text-h3 font-medium text-ink-2">场景</span>
+          <select className="w-full rounded-lg border border-border px-3 py-2 text-body text-ink-1 outline-none focus:border-ring"
                   value={form.scenario} onChange={(e) => setForm({ ...form, scenario: e.target.value })}>
             {SCENARIOS.map((s) => <option key={s} value={s}>{s}</option>)}
           </select>
         </label>
         {([["provider", "厂商"], ["base_url", "接口地址"], ["api_key", "API 密钥"], ["model_name", "模型名"]] as const).map(([k, zh]) => (
           <label key={k} className="block space-y-1">
-            <span className="text-xs text-muted-foreground">{zh}</span>
+            <span className="text-h3 font-medium text-ink-2">{zh}</span>
             <Input placeholder={k} value={String(form[k])} type={k === "api_key" ? "password" : "text"}
                    className="h-9 rounded-lg border-border"
                    onChange={(e) => setForm({ ...form, [k]: e.target.value })} />
           </label>
         ))}
         <label className="block space-y-1">
-          <span className="text-xs text-muted-foreground">回退优先级</span>
+          <span className="text-h3 font-medium text-ink-2">回退优先级</span>
           <Input type="number" placeholder="fallback_rank" value={form.fallback_rank} className="h-9 rounded-lg border-border"
                  onChange={(e) => setForm({ ...form, fallback_rank: Number(e.target.value) || 0 })} />
         </label>
-        {formErr && <p className="text-sm text-destructive">{formErr}</p>}
+        {formErr && <p className="text-body text-destructive">{formErr}</p>}
         <Button type="submit" disabled={busy} className="h-9 rounded-lg">{busy ? "提交中…" : "提交登记"}</Button>
       </form>
     </div>
