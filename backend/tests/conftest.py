@@ -40,3 +40,21 @@ def db(engine: Engine) -> Session:
             con.execute(text(f"TRUNCATE {tables} RESTART IDENTITY CASCADE"))
     with Session(engine) as session:
         yield session
+
+
+# ---- RBAC 测试助手（任务 3 起共享）----
+def seed_user(engine, email: str, password: str, *, role: str = "member", name: str = "") -> int:
+    """直写 users 表（绕过端点，端点行为另有测试）。返回 user id。"""
+    from app.models import User
+    from app.services.auth import hash_password
+    with Session(engine) as s:
+        u = User(tenant_id="default", email=email, name=name or email.split("@")[0],
+                 hashed_password=hash_password(password), role=role, status="active")
+        s.add(u)
+        s.commit()
+        return u.id
+
+
+def login(client, email: str, password: str) -> None:
+    r = client.post("/api/v1/auth/login", json={"email": email, "password": password})
+    assert r.status_code == 204, f"登录失败：{r.status_code} {r.text}"

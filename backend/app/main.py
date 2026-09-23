@@ -3,6 +3,7 @@
 # 生产由 build_production_app 从 ADMIN_TOKEN 配置接线；留空=不启用（开发/测试默认）
 import secrets
 from collections.abc import Callable, Iterator
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Annotated
 from uuid import uuid4
@@ -18,7 +19,10 @@ from starlette.types import ASGIApp, Receive, Scope, Send
 
 from app.core.config import get_settings
 from app.models import (Chunk, Conversation, Document, KnowledgeBase, Message,
-                        ModelConfig, UsageRecord)
+                        ModelConfig, User, UserKbGrant, UserSession, UsageRecord)
+from app.services.audit import record as audit_record
+from app.services.auth import (LoginThrottle, hash_password, new_session_token,
+                               token_digest, verify_password)
 from app.services.citations import parse_citations
 from app.services.crypto import decrypt_secret, encrypt_secret
 from app.services.ingest import ingest_document, read_stored, supported_ext
@@ -141,8 +145,18 @@ class ModelPatchIn(BaseModel):
     enabled: StrictBool | None = None
 
 
-class LoginIn(BaseModel):
+class LegacyTokenLoginIn(BaseModel):   # 旧 token 登录（/admin/login）：任务 6 连旧端点一并删除
     token: Utf8Str
+
+
+class LoginIn(BaseModel):          # 新邮箱+口令登录（RBAC spec §2）
+    email: Utf8Str = Field(max_length=255)
+    password: Utf8Str = Field(max_length=256)
+
+
+class ChangePasswordIn(BaseModel):
+    old_password: Utf8Str = Field(max_length=256)
+    new_password: Utf8Str = Field(min_length=8, max_length=256)
 
 
 # 契约 fuzz 前提：真实错误码必须写进 spec，否则 schemathesis 判合法响应为违约
@@ -220,7 +234,7 @@ def create_app(
 
     @app.post("/api/v1/admin/login", status_code=204,
               responses={**_ERR(401, "口令错误"), **_ERR_BODY})
-    def admin_login(body: LoginIn, response: Response):
+    def admin_login(body: LegacyTokenLoginIn, response: Response):
         if not admin_token or not secrets.compare_digest(body.token, admin_token):
             raise HTTPException(401, "口令错误")
         response.set_cookie("admin_session", admin_token, httponly=True,
@@ -237,6 +251,95 @@ def create_app(
     def get_session() -> Iterator[Session]:
         with Session(engine) as session:
             yield session
+
+    # ==================== RBAC（spec 2026-09-23）：账号+DB 会话+库级授权 ====================
+    SESSION_COOKIE, SESSION_TTL_DAYS = "umax_session", 7
+    throttle = LoginThrottle()   # 每 app 实例独立计数：测试互污染为零
+
+    _ERR_UNAUTH, _ERR_FORBID = _ERR(401, "需要登录"), _ERR(403, "需要管理员权限")
+
+    def _now() -> datetime:
+        return datetime.now(timezone.utc)
+
+    def _client_ip(request: Request) -> str:
+        return request.client.host if request.client else "unknown"
+
+    def get_user(request: Request, session: Session = Depends(get_session)) -> User:
+        """cookie→会话→账号三点一线，任一断 401（禁用的存活会话也断在这）——所有受护端点的统一依赖。"""
+        token = request.cookies.get(SESSION_COOKIE)
+        row = session.get(UserSession, token_digest(token)) if token else None
+        user = session.get(User, row.user_id) if row else None
+        if not row or row.expires_at <= _now() or not user or user.status != "active":
+            raise HTTPException(401, "需要登录")
+        request.state.user, request.state.session_hash = user, row.token_hash
+        return user
+
+    def require_admin_role(user: User = Depends(get_user)) -> User:
+        if user.role != "admin":
+            raise HTTPException(403, "需要管理员权限")
+        return user
+
+    def allowed_kb_ids(session: Session, user: User) -> set[int] | None:
+        """None=admin 隐式全库；member=授权集合（可为空集——消费端必须区分 None 与 set()）。"""
+        if user.role == "admin":
+            return None
+        return {g.kb_id for g in session.query(UserKbGrant).filter_by(user_id=user.id)}
+
+    @app.post("/api/v1/auth/login", status_code=204,
+              responses={**_ERR(401, "邮箱或口令错误"),
+                         **_ERR(429, "失败次数过多，15 分钟后再试"), **_ERR_BODY})
+    def auth_login(body: LoginIn, request: Request, response: Response,
+                   session: Session = Depends(get_session)):
+        key = f"{body.email}|{_client_ip(request)}"
+        if throttle.blocked(key):
+            raise HTTPException(429, "失败次数过多，请 15 分钟后再试")
+        u = session.query(User).filter_by(tenant_id="default", email=body.email).first()
+        if not u or not verify_password(body.password, u.hashed_password) or u.status != "active":
+            throttle.failure(key)
+            audit_record(session, "login_failed", user_email=body.email, ip=_client_ip(request))
+            session.commit()   # 审计必须先落，再抛 401
+            raise HTTPException(401, "邮箱或口令错误")
+        throttle.success(key)
+        plain, token_hash = new_session_token()
+        session.add(UserSession(token_hash=token_hash, user_id=u.id,
+                                expires_at=_now() + timedelta(days=SESSION_TTL_DAYS)))
+        audit_record(session, "login_success", user_email=u.email, target_type="user",
+                     target_id=u.id, ip=_client_ip(request))
+        session.commit()
+        response.set_cookie(SESSION_COOKIE, plain, httponly=True, samesite="lax",
+                            max_age=SESSION_TTL_DAYS * 24 * 3600, path="/")
+
+    @app.post("/api/v1/auth/logout", status_code=204, responses=_ERR_UNAUTH)
+    def auth_logout(request: Request, response: Response,
+                    user: User = Depends(get_user), session: Session = Depends(get_session)):
+        row = session.get(UserSession, request.state.session_hash)
+        if row:
+            session.delete(row)
+        audit_record(session, "logout", user_email=user.email, ip=_client_ip(request))
+        session.commit()
+        response.delete_cookie(SESSION_COOKIE, path="/")
+
+    @app.get("/api/v1/auth/me", responses=_ERR_UNAUTH)
+    def auth_me(user: User = Depends(get_user), session: Session = Depends(get_session)):
+        allowed = allowed_kb_ids(session, user)
+        return {"email": user.email, "name": user.name, "role": user.role,
+                "kb_ids": None if allowed is None else sorted(allowed)}
+
+    @app.post("/api/v1/auth/change-password", status_code=204,
+              # 422 不覆写：FastAPI 默认 422（HTTPValidationError，detail 是数组）——用 _ERR(ErrorOut)
+              # 覆写会被 fuzz 判 response_schema_conformance 违约（JSON 解析失败先于依赖 401 发生）
+              responses={**_ERR(401, "旧口令错误"), **_ERR_UNAUTH, **_ERR_BODY})
+    def auth_change_password(body: ChangePasswordIn, request: Request,
+                             user: User = Depends(get_user), session: Session = Depends(get_session)):
+        if not verify_password(body.old_password, user.hashed_password):
+            raise HTTPException(401, "旧口令错误")
+        user.hashed_password = hash_password(body.new_password)
+        session.query(UserSession).filter(
+            UserSession.user_id == user.id,
+            UserSession.token_hash != request.state.session_hash).delete()   # 踢其他设备，留当前
+        audit_record(session, "user_updated", user_email=user.email, target_type="user",
+                     target_id=user.id, detail={"fields": ["self_password"]}, ip=_client_ip(request))
+        session.commit()
 
     @app.get("/api/v1/health")
     def health(session: Session = Depends(get_session)):

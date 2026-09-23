@@ -21,6 +21,11 @@ EXPECTED = {
     ("/api/v1/usage/summary", "get"): {"401"},
     ("/api/v1/admin/login", "post"): {"401"},
     ("/api/v1/admin/logout", "post"): set(),
+    # 任务 3 增量：RBAC 认证端点错误码入约（表的整体重写留给任务 6）
+    ("/api/v1/auth/login", "post"): {"401", "429", "400"},
+    ("/api/v1/auth/logout", "post"): {"401"},
+    ("/api/v1/auth/me", "get"): {"401"},
+    ("/api/v1/auth/change-password", "post"): {"401", "422", "400"},
 }
 
 
@@ -32,6 +37,9 @@ def test_error_codes_declared():
 
 # 管理面 = 401 声明的全集：新增管理类端点忘挂守护/忘入约时在此曝光
 def test_admin_surface_is_exactly_401_declared():
+    # 任务 3 增量：/auth/* 四枚端点声明 401，自然计入 guarded 侧（它们不是"管理面"，
+    # 但本守卫按"401 声明全集"相等收口——已入 EXPECTED 且不在排除名单，等式成立；
+    # 语义整体重写给任务 6）。
     guarded = {(p, m) for p, ms in SPEC["paths"].items()
                for m, r in ms.items() if "401" in r["responses"]}
     assert guarded == set(EXPECTED) - {
