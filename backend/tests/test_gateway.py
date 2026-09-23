@@ -118,15 +118,25 @@ def test_chat_raises_when_all_providers_fail(engine, db):
     assert _usage_rows(engine, "chat") == []  # 全挂不记账
 
 
-# ---- make_chat_fn：兼容现有 chat_fn 协议，并标记 logged 防端点重复记账 ----
-def test_make_chat_fn_protocol_and_logged_flag(engine, db, gateway):
+# ---- 记账两轨：chat(log=True) 直连归网关记，chat(log=False)/make_chat_fn 不记 ----
+def test_chat_log_false_returns_without_usage_row(engine, db, gateway):
+    """端点自己按登录者记账，网关这条路径必须零落账（旧 logged 约定的替代物）。"""
+    _seed(engine, "chat", "m-main")
+    out = gateway.chat([{"role": "user", "content": "hi"}], log=False)
+    assert out["text"] == "[m-main] 据资料回答"
+    assert out["model"] == "m-main" and out["latency_ms"] >= 0
+    assert _usage_rows(engine, "chat") == [], "log=False 不落账"
+
+
+def test_make_chat_fn_protocol_never_logs(engine, db, gateway):
+    """适配 chat_fn 协议：结果字段齐备、无 logged 键（约定已退役）、网关不记账。"""
     _seed(engine, "chat", "m-main")
     fn = gateway.make_chat_fn()
     out = fn("生鲜怎么退？", [{"doc_name": "手册.txt", "content": "不支持七天无理由"}])
     assert out["answer"] == "[m-main] 据资料回答"
-    assert out["logged"] is True
     assert out["model"] == "m-main"
-    assert len(_usage_rows(engine, "chat")) == 1
+    assert "logged" not in out
+    assert _usage_rows(engine, "chat") == []
 
 
 # ---- embedding：按 embedding 场景路由、按 index 还原顺序、记台账 ----

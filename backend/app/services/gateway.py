@@ -57,7 +57,9 @@ class ModelGateway:
             s.commit()
 
     def chat(self, messages: list[dict], *, user_email: str = "system@local",
-             kb_id: int | None = None) -> dict:
+             kb_id: int | None = None, log: bool = True) -> dict:
+        """log=True（默认，直连调用方）由网关记一笔台账；log=False 只返回结果不落账——
+        问答端点自己按"真实登录者邮箱"记账，避免同一请求双记（logged 约定已退役）。"""
         providers = self.providers("chat")
         if not providers:
             raise GatewayError("没有已启用的 chat 模型配置（model_configs 表为空？）")
@@ -71,21 +73,22 @@ class ModelGateway:
                 continue
             out["model"] = p.model_name
             out["latency_ms"] = int((time.monotonic() - t0) * 1000)
-            self._log(user_email, kb_id, "chat", p.model_name, out["prompt_tokens"],
-                      out["completion_tokens"], out["latency_ms"])
+            if log:
+                self._log(user_email, kb_id, "chat", p.model_name, out["prompt_tokens"],
+                          out["completion_tokens"], out["latency_ms"])
             return out
         raise GatewayError("全部 chat 模型均调用失败")
 
-    def make_chat_fn(self, *, user_email: str = "system@local") -> Callable[[str, list[dict]], dict]:
-        """适配 chat_fn 协议；logged=True 告诉端点台账已由网关记过，勿重复记账。"""
+    def make_chat_fn(self) -> Callable[[str, list[dict]], dict]:
+        """适配 chat_fn 协议：网关内部不记账（log=False），台账统一由问答端点按登录者记一次。"""
         def chat_fn(query: str, hits: Sequence[dict]) -> dict:
             out = self.chat(
                 [{"role": "system", "content": SYSTEM_PROMPT},
                  {"role": "user", "content": build_user_prompt(query, hits)}],
-                user_email=user_email, kb_id=(hits[0].get("kb_id") if hits else None))
+                log=False, kb_id=(hits[0].get("kb_id") if hits else None))
             return {"answer": out["text"], "prompt_tokens": out["prompt_tokens"],
                     "completion_tokens": out["completion_tokens"], "model": out["model"],
-                    "latency_ms": out["latency_ms"], "logged": True}
+                    "latency_ms": out["latency_ms"]}
         return chat_fn
 
     def embed(self, texts: list[str], *, user_email: str = "system@local",

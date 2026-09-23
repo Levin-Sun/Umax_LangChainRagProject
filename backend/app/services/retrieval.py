@@ -14,13 +14,15 @@ class Embedder(Protocol):
 
 
 def _load_chunks(session: Session, kb_ids: list[int] | None) -> list[dict]:
-    sql = ("SELECT c.id, d.name AS doc_name, c.chunk_index, c.content"
+    # c.kb_id 一并出库：hits 带"出处库"id——RBAC 越权断言（test_permissions）与网关 kb_id
+    # 记账都吃这个字段，缺它就只能靠 doc_name 反推出处，过滤正确性无法在数据层证明
+    sql = ("SELECT c.id, d.name AS doc_name, c.kb_id, c.chunk_index, c.content"
            " FROM chunks c JOIN documents d ON d.id = c.document_id")
     params: dict = {}
     if kb_ids:
         sql += " WHERE c.kb_id = ANY(:kb_ids)"
         params["kb_ids"] = list(kb_ids)
-    return [dict(zip(("id", "doc_name", "chunk_index", "content"), r))
+    return [dict(zip(("id", "doc_name", "kb_id", "chunk_index", "content"), r))
             for r in session.execute(sa_text(sql), params)]
 
 
@@ -53,6 +55,7 @@ def retrieve(
     *,
     embedder: Embedder | None = None,
     kb_ids: list[int] | None = None,
+    allowed_kb_ids: set[int] | None = None,
     recall_k: int = 10,
     top_k: int = 5,
     rrf_k: int = 60,
@@ -60,6 +63,14 @@ def retrieve(
     rerank: Callable[[str, list[dict]], list[dict]] | None = None,
 ) -> list[dict]:
     from app.services.fusion import rrf_fuse  # 局部导入避免环依赖
+
+    # 授权钳制在谓词层（spec 裁决 3）：None=admin 不限；集合（含空集）=可见库全集。
+    # 交集而非替换：调用方点了未授权库要静默剔除，越权显式点库由端点先行 403。
+    if allowed_kb_ids is not None:
+        scope = (set(kb_ids) & allowed_kb_ids) if kb_ids else set(allowed_kb_ids)
+        if not scope:
+            return []           # 空授权=空结果——绝不落到"无过滤全库"
+        kb_ids = sorted(scope)  # 两路（_load_chunks/BM25 语料 与 _vector_ranking）天然都走 ANY(:kb_ids) 谓词
 
     chunks = _load_chunks(session, kb_ids)
     if not chunks:

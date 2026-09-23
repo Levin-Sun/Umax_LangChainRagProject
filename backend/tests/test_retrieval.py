@@ -76,6 +76,29 @@ def test_kb_filter_scopes_results(db: Session, embedder):
     assert {h["doc_name"] for h in hits} == {"in.pdf"}
 
 
+# ---- 授权钳制（任务 6：可见性边界就在这一层，不在展示层）----
+def test_allowed_kb_ids_clamps_both_paths_and_carries_kb_id(db: Session, embedder):
+    kb1 = _seed(db, kb_name="授权库", docs={"in.pdf": ["钳制测试 独有关键词戊戊"]}, embedder=embedder)
+    kb2 = _seed(db, kb_name="未授权库", docs={"out.pdf": ["钳制测试 独有关键词戊戊"]}, embedder=embedder)
+    hits = retrieve(db, "独有关键词戊戊", embedder=embedder, allowed_kb_ids={kb1.id}, top_k=10)
+    assert hits and {h["kb_id"] for h in hits} == {kb1.id}, "hits 必须带出处库 id 且只含授权库"
+    # 显式点了未授权库：交集为空 → 空结果（谓词层剔除，不是"回落全库"）
+    assert retrieve(db, "独有关键词戊戊", embedder=embedder, kb_ids=[kb2.id],
+                    allowed_kb_ids={kb1.id}) == []
+    assert all(h["kb_id"] != kb2.id for h in retrieve(
+        db, "独有关键词戊戊", embedder=embedder, kb_ids=[kb1.id, kb2.id],
+        allowed_kb_ids={kb1.id})), "混合点库只保留授权部分"
+
+
+def test_empty_allowed_set_never_falls_through_to_full_corpus(db: Session, embedder):
+    """空集 ≠ None：空集必须直接空结果——写成 `if allowed_kb_ids:` 就漏成全库可检索。"""
+    _seed(db, kb_name="任意库", docs={"d.pdf": ["全库泄漏 独有关键词己己"]}, embedder=embedder)
+    assert db.query(Chunk).count() > 0, "语料必须真的在库里（防空集式假通过）"
+    assert retrieve(db, "独有关键词己己", embedder=embedder, allowed_kb_ids=set()) == []
+    assert retrieve(db, "独有关键词己己", embedder=embedder, kb_ids=[], allowed_kb_ids=set()) == []
+    assert retrieve(db, "独有关键词己己", embedder=embedder), "None=admin：不加钳制"
+
+
 def test_top_k_limit_and_hit_schema(db: Session, embedder):
     kb = _seed(db, embedder=embedder, docs={
         f"d{i}.pdf": [f"通用内容 通用内容 差异词{i}"] for i in range(8)
