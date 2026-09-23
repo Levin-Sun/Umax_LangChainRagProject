@@ -58,6 +58,26 @@ def test_self_demote_and_self_disable_are_400(client, engine):
     assert client.patch(f"/api/v1/users/{uid}", json={"status": "disabled"}).status_code == 400
 
 
+def test_patch_user_empty_role_or_status_is_400_not_a_silent_write(client, engine):
+    """终审收口②：`if body.role and body.role not in ROLES` 是假值洞——空串跳过校验，
+    再被写循环的 `if v is not None` 当真值落库：用户变成 role=""/status=""，
+    既不匹配任何角色判定，status="" 还绕过"不能禁用当前登录管理员"守护。
+    守卫改为 is not None 语义后，空串照旧吃 400，且库里必须一格未动。
+    """
+    from sqlalchemy.orm import Session
+
+    from app.models import User
+    rows = client.get("/api/v1/users").json()
+    uid = [u["id"] for u in rows if u["email"] == MEMBER[0]][0]
+    aid = [u["id"] for u in rows if u["email"] == ADMIN[0]][0]
+    assert client.patch(f"/api/v1/users/{aid}", json={"status": ""}).status_code == 400, \
+        "自禁用守护不得被空串绕过"
+    assert client.patch(f"/api/v1/users/{uid}", json={"role": ""}).status_code == 400
+    with Session(engine) as s:
+        assert [(u.role, u.status) for u in s.query(User).order_by(User.id)] == [
+            ("admin", "active"), ("member", "active")]
+
+
 def test_password_reset_kicks_target_sessions_but_not_operator(client, engine):
     uid = [u["id"] for u in client.get("/api/v1/users").json() if u["email"] == MEMBER[0]][0]
     target = TestClient(client.app)

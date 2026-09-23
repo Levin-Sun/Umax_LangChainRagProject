@@ -27,7 +27,11 @@ export default function ChangePasswordDialog({ api, onClose, onChanged }:
     setErr(null);
     setBusy(true);
     try {
-      await callVoid(api.POST(P.authChangePassword, { body: { old_password: oldPw, new_password: newPw } }));
+      // 终审收口③：这里的 401 绝大多数是"旧口令错误"（表单级输入错误，人还登录着），
+      // 全局跳转钩子会把整页换成登录页、盖掉横幅文案；豁免后错误只在弹窗里上屏。
+      // 真过期了也只会退化成"这里显示『需要登录』"——下一次任意业务请求仍会照常跳登录页。
+      await callVoid(api.POST(P.authChangePassword,
+        { body: { old_password: oldPw, new_password: newPw } }), { skipAuthRedirect: true });
       await onChanged?.();
       onClose();
     } catch (e) {

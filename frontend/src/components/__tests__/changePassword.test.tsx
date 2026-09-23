@@ -1,6 +1,7 @@
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import ChangePasswordDialog from "@/components/ChangePasswordDialog";
+import { call, setUnauthorizedHandler } from "@/lib/api";
 import { P } from "@/lib/paths";
 import { fail, fakeApi } from "@/lib/testkit";
 import { describe, expect, it, vi } from "vitest";
@@ -51,4 +52,23 @@ it("收编⑰：提交进行中回车重入不再发第二个请求（busy 防�
   await userEvent.type(screen.getByLabelText("确认新口令"), "{Enter}");
   expect(POST).toHaveBeenCalledOnce();
   settle?.({ data: undefined, error: undefined, response: new Response() });
+});
+
+it("终审收口：改密 401 只上横幅，不触发全局『跳登录页』钩子", async () => {
+  // 旧口令打错=表单级错误（后端 401 "旧口令错误"）。全局 401 钩子会把已登录用户整页
+  // 拽到 /admin/login，横幅文案一眼看不到，人还留在登录态里——改密这条请求必须显式豁免。
+  const h = vi.fn();
+  setUnauthorizedHandler(h);
+  try {
+    const POST = vi.fn(() => fail("旧口令错误", 401));
+    render(<ChangePasswordDialog api={fakeApi({ POST })} onClose={vi.fn()} />);
+    await fill("wrong", "New-Pass-9", "New-Pass-9");
+    expect(await screen.findByText("旧口令错误")).toBeInTheDocument();
+    expect(h).not.toHaveBeenCalled();
+    // 对照：同一个钩子对普通 401 照旧生效——否则上面的 not.toHaveBeenCalled 是钩子失灵的假通过
+    await expect(call(fail("需要登录", 401))).rejects.toMatchObject({ status: 401 });
+    expect(h).toHaveBeenCalledTimes(1);
+  } finally {
+    setUnauthorizedHandler(() => {});
+  }
 });

@@ -120,6 +120,30 @@ def test_conversations_isolated_per_user(world):
     assert world["member"].get(f"/api/v1/conversations/{conv}/messages").status_code == 200
 
 
+def test_chat_provided_conversation_id_is_no_existence_oracle(world):
+    """终审收口①：conversation_id 给了就必须"存在且归调用者"，否则一律同一 404 文案。
+
+    旧实现的洞：只有"存在且跨用户"才 404，"根本不存在的 id"往下走当成新建会话回 200 ——
+    于是 (404=别人的会话 / 200=没人用过这个号) 成了存在性探测口，违反 spec §0
+    "无权限 == 不存在，不可区分"。只有 conversation_id 缺席（null）才新建。
+    """
+    _grant(world, "b")
+    foreign = world["member"].post("/api/v1/chat", json={"question": "贝塔 规则"}).json()["conversation_id"]
+    ghost = world["admin"].post("/api/v1/chat", json={"question": "贝塔 规则"}).json()["conversation_id"] + 10_000
+    details = []
+    for actor, cid in [(world["admin"], foreign),        # 别人的真实会话
+                       (world["member"], ghost),         # 全新的、从未用过的号
+                       (world["member"], foreign + 50_000)]:  # 全新的号（换个起点）
+        r = actor.post("/api/v1/chat", json={"question": "贝塔 规则", "conversation_id": cid})
+        assert r.status_code == 404, f"会话 {cid} 不该回 {r.status_code}（存在性探测口）"
+        details.append(r.json()["detail"])
+    assert details == ["会话不存在"] * 3, "三种情形必须逐字同文案，不给任何区分信号"
+    # 对照：id 缺席才允许新建（否则上面的 404 就成了"chat 永远不可用"式假通过）
+    fresh = world["member"].post("/api/v1/chat", json={"question": "贝塔 规则", "conversation_id": None})
+    assert fresh.status_code == 200
+    assert fresh.json()["conversation_id"] not in (foreign, ghost)
+
+
 def test_chat_records_real_user(world):
     _grant(world, "b")
     world["member"].post("/api/v1/chat", json={"question": "贝塔 规则"})

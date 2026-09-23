@@ -407,9 +407,12 @@ def create_app(
             raise HTTPException(404, "用户不存在")
         if u.id == admin.id and (body.role == "member" or body.status == "disabled"):
             raise HTTPException(400, "不能对当前登录管理员降级或禁用")
-        if body.role and body.role not in ROLES:
+        # 终审收口②：守卫是 `is not None` 而非真值判定——schema 里的 ROLE_PATTERN 只是
+        # json_schema_extra（生成契约用，不参与校验），空串必须在这里吃 400：否则它跳过校验
+        # 又被下面的 `if v is not None` 写循环当真值落库，账号变成不匹配任何角色判定的 role=""。
+        if body.role is not None and body.role not in ROLES:
             raise HTTPException(400, "role 仅支持 admin/member")
-        if body.status and body.status not in USER_STATUSES:
+        if body.status is not None and body.status not in USER_STATUSES:
             raise HTTPException(400, "status 仅支持 active/disabled")
         changed: list[str] = []
         for f in ("name", "role", "status"):
@@ -645,7 +648,8 @@ def create_app(
                         recall_k=s.recall_k, top_k=body.top_k or s.rerank_top_n,
                         min_sim=s.min_sim)
 
-    @app.post("/api/v1/chat", responses={**_ERR_BODY, **_ERR_UNAUTH, **_ERR_FORBID})
+    @app.post("/api/v1/chat", responses={**_ERR(404, "会话不存在"), **_ERR_BODY,
+                                         **_ERR_UNAUTH, **_ERR_FORBID})
     def chat(body: ChatIn, user: User = Depends(get_user),
              session: Session = Depends(get_session)):
         allowed = allowed_kb_ids(session, user)
@@ -653,9 +657,12 @@ def create_app(
         hits = retrieve(session, body.question, embedder=embedder, kb_ids=body.kb_ids,
                         allowed_kb_ids=allowed,
                         recall_k=s.recall_k, top_k=s.rerank_top_n, min_sim=s.min_sim)
-        conv = session.get(Conversation, body.conversation_id) if body.conversation_id else None
-        if conv is not None and conv.user_email != user.email:
-            raise HTTPException(404, "会话不存在")   # 跨用户会话与不存在同文案（同 list_messages）
+        # 终审收口①：给了 id 就必须"存在且归调用者"——不存在与跨用户同文案（同 list_messages），
+        # 否则"不存在→新建回 200 / 别人的→404"成了会话存在性探测口（spec §0：不可区分）。
+        # 只有 conversation_id 缺席（null）才新建会话。
+        conv = session.get(Conversation, body.conversation_id) if body.conversation_id is not None else None
+        if body.conversation_id is not None and (conv is None or conv.user_email != user.email):
+            raise HTTPException(404, "会话不存在")
         if conv is None:
             conv = Conversation(tenant_id="default", user_email=user.email,
                                 title=body.question[:32], kb_ids=body.kb_ids or [])

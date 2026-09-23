@@ -853,6 +853,16 @@
             },
             "description": "需要管理员权限"
           },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            },
+            "description": "会话不存在"
+          },
           "422": {
             "content": {
               "application/json": {
