@@ -26,6 +26,12 @@ EXPECTED = {
     ("/api/v1/auth/logout", "post"): {"401"},
     ("/api/v1/auth/me", "get"): {"401"},
     ("/api/v1/auth/change-password", "post"): {"401", "422", "400"},
+    # 任务 4 增量：/users 与 /users/{id}/grants 管理端点错误码入约（表的整体重写留给任务 6）
+    ("/api/v1/users", "get"): {"401", "403"},
+    ("/api/v1/users", "post"): {"400", "401", "403", "422"},
+    ("/api/v1/users/{user_id}", "patch"): {"400", "401", "403", "404", "422"},
+    ("/api/v1/users/{user_id}/grants", "get"): {"400", "401", "403", "404", "422"},
+    ("/api/v1/users/{user_id}/grants", "put"): {"400", "401", "403", "404", "422"},
 }
 
 

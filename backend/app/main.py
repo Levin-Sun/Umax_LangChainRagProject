@@ -34,6 +34,11 @@ SCENARIOS = {"chat", "embedding", "rerank", "vision"}
 # 与已入库 contracts/openapi.json 逐字一致，改集合必须走契约工作流重导 spec）。
 # 终审收口 I3：原为手写正则字面量，与运行时校验集合存在漂移风险。
 SCENARIO_PATTERN = "^(" + "|".join(sorted(SCENARIOS)) + ")$"
+# role/status 枚举同款派生（任务 4）：约束写进 schema，运行时校验集合是同一事实源，防漂移
+ROLES = {"admin", "member"}
+USER_STATUSES = {"active", "disabled"}
+ROLE_PATTERN = "^(" + "|".join(sorted(ROLES)) + ")$"
+USER_STATUS_PATTERN = "^(" + "|".join(sorted(USER_STATUSES)) + ")$"
 # 契约 fuzz 修复①：id 落 PG INTEGER（int32）——裸 integer 无界，fuzz 发 2^31 直接 SQL 溢出 500，
 # 把 int32 边界写进契约。修复②：body 侧 Strict* 禁 bool/str 混入（lax 强转被 fuzz 判"违法请求被接受"）
 INT32_MIN, INT32_MAX = -(2**31), 2**31 - 1
@@ -157,6 +162,25 @@ class LoginIn(BaseModel):          # 新邮箱+口令登录（RBAC spec §2）
 class ChangePasswordIn(BaseModel):
     old_password: Utf8Str = Field(max_length=256)
     new_password: Utf8Str = Field(min_length=8, max_length=256)
+
+
+class UserIn(BaseModel):
+    email: Utf8Str = Field(max_length=255)
+    name: Utf8Str = Field(default="", max_length=128)
+    password: Utf8Str = Field(min_length=8, max_length=256)
+    role: str = Field(default="member", json_schema_extra={"pattern": ROLE_PATTERN})
+
+
+class UserPatchIn(BaseModel):
+    name: Utf8Str | None = Field(None, max_length=128)
+    role: str | None = Field(None, json_schema_extra={"pattern": ROLE_PATTERN})
+    status: str | None = Field(None, json_schema_extra={"pattern": USER_STATUS_PATTERN})
+    # 默认必须显式 None：Field 无默认=必填（同款写法见 ModelPatchIn），否则 patch 不带 password 即 422
+    password: Utf8Str | None = Field(None, min_length=8, max_length=256)
+
+
+class GrantsIn(BaseModel):
+    kb_ids: list[ReqId] = []
 
 
 # 契约 fuzz 前提：真实错误码必须写进 spec，否则 schemathesis 判合法响应为违约
@@ -340,6 +364,110 @@ def create_app(
         audit_record(session, "user_updated", user_email=user.email, target_type="user",
                      target_id=user.id, detail={"fields": ["self_password"]}, ip=_client_ip(request))
         session.commit()
+
+    # ---- 用户管理 + 库级授权（spec §3.1，任务 4）：admin 独占，写操作全审计 ----
+    def _grants_map(session: Session) -> dict[int, list[int]]:
+        out: dict[int, list[int]] = {}
+        for g in session.query(UserKbGrant).order_by(UserKbGrant.kb_id):
+            out.setdefault(g.user_id, []).append(g.kb_id)
+        return out
+
+    def _user_json(u: User, grants: dict[int, list[int]]) -> dict:
+        return {"id": u.id, "email": u.email, "name": u.name, "role": u.role,
+                "status": u.status, "created_at": u.created_at.isoformat(),
+                "kb_ids": None if u.role == "admin" else grants.get(u.id, [])}
+
+    def _revoke_sessions(session: Session, user_id: int, *, except_hash: str | None = None) -> None:
+        q = session.query(UserSession).filter_by(user_id=user_id)
+        if except_hash:
+            q = q.filter(UserSession.token_hash != except_hash)
+        q.delete()
+
+    @app.get("/api/v1/users", responses={**_ERR_UNAUTH, **_ERR_FORBID})
+    def list_users(admin: User = Depends(require_admin_role), session: Session = Depends(get_session)):
+        g = _grants_map(session)
+        return [_user_json(u, g) for u in session.query(User).order_by(User.id)]
+
+    @app.post("/api/v1/users", status_code=201,
+              responses={**_ERR(400, "email 重复或 role 非法"), **_ERR_UNAUTH, **_ERR_FORBID, **_ERR_BODY})
+    def create_user_api(body: UserIn, request: Request,
+                        admin: User = Depends(require_admin_role), session: Session = Depends(get_session)):
+        if body.role not in ROLES:
+            raise HTTPException(400, "role 仅支持 admin/member")
+        if session.query(User).filter_by(tenant_id="default", email=body.email).first():
+            raise HTTPException(400, "该邮箱已存在")
+        u = User(tenant_id="default", email=body.email, name=body.name or body.email.split("@")[0],
+                 hashed_password=hash_password(body.password), role=body.role, status="active")
+        session.add(u)
+        session.flush()
+        audit_record(session, "user_created", user_email=admin.email, target_type="user",
+                     target_id=u.id, detail={"email": u.email, "role": u.role}, ip=_client_ip(request))
+        session.commit()
+        return _user_json(u, _grants_map(session))
+
+    @app.patch("/api/v1/users/{user_id}",
+               responses={**_ERR(400, "不能对当前登录管理员降级/禁用，role/status 非法"),
+                          **_ERR(404, "用户不存在"), **_ERR_UNAUTH, **_ERR_FORBID, **_ERR_BODY})
+    def patch_user(user_id: PathId, body: UserPatchIn, request: Request,
+                   admin: User = Depends(require_admin_role), session: Session = Depends(get_session)):
+        u = session.get(User, user_id)
+        if not u:
+            raise HTTPException(404, "用户不存在")
+        if u.id == admin.id and (body.role == "member" or body.status == "disabled"):
+            raise HTTPException(400, "不能对当前登录管理员降级或禁用")
+        if body.role and body.role not in ROLES:
+            raise HTTPException(400, "role 仅支持 admin/member")
+        if body.status and body.status not in USER_STATUSES:
+            raise HTTPException(400, "status 仅支持 active/disabled")
+        changed: list[str] = []
+        for f in ("name", "role", "status"):
+            v = getattr(body, f)
+            if v is not None and v != getattr(u, f):
+                setattr(u, f, v)
+                changed.append(f)
+        if body.password:
+            u.hashed_password = hash_password(body.password)
+            changed.append("password")
+        if {"role", "status", "password"} & set(changed):
+            _revoke_sessions(session, u.id)   # 角色/启停/重置口令变更一律全吊销（spec §2）
+        if changed:
+            audit_record(session, "user_updated", user_email=admin.email, target_type="user",
+                         target_id=u.id, detail={"fields": changed}, ip=_client_ip(request))
+        session.commit()
+        return _user_json(u, _grants_map(session))
+
+    @app.get("/api/v1/users/{user_id}/grants",
+             responses={**_ERR(400, "管理员隐式全库，无授权表"), **_ERR(404, "用户不存在"),
+                        **_ERR_UNAUTH, **_ERR_FORBID})
+    def get_grants(user_id: PathId, admin: User = Depends(require_admin_role),
+                   session: Session = Depends(get_session)):
+        u = session.get(User, user_id)
+        if not u:
+            raise HTTPException(404, "用户不存在")
+        if u.role == "admin":
+            raise HTTPException(400, "管理员隐式全库，无授权表")
+        return sorted(_grants_map(session).get(u.id, []))
+
+    @app.put("/api/v1/users/{user_id}/grants",
+             responses={**_ERR(400, "管理员无授权表 / 知识库不存在"), **_ERR(404, "用户不存在"),
+                        **_ERR_UNAUTH, **_ERR_FORBID, **_ERR_BODY})
+    def put_grants(user_id: PathId, body: GrantsIn, request: Request,
+                   admin: User = Depends(require_admin_role), session: Session = Depends(get_session)):
+        u = session.get(User, user_id)
+        if not u:
+            raise HTTPException(404, "用户不存在")
+        if u.role == "admin":
+            raise HTTPException(400, "管理员隐式全库，无授权表")
+        ids = sorted(set(body.kb_ids))
+        if ids and len(session.query(KnowledgeBase.id).filter(KnowledgeBase.id.in_(ids)).all()) != len(ids):
+            raise HTTPException(400, "存在不存在的知识库 id")
+        session.query(UserKbGrant).filter_by(user_id=u.id).delete()
+        for k in ids:
+            session.add(UserKbGrant(user_id=u.id, kb_id=k))
+        audit_record(session, "grants_updated", user_email=admin.email, target_type="user",
+                     target_id=u.id, detail={"kb_ids": ids}, ip=_client_ip(request))
+        session.commit()
+        return ids
 
     @app.get("/api/v1/health")
     def health(session: Session = Depends(get_session)):
