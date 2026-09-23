@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import { cookies } from "next/headers";
 import { Inter } from "next/font/google";
 import { Nav } from "@/components/Nav";
+import { Providers } from "@/components/Providers";
 import { THEME_COOKIE } from "@/lib/theme";
 import "./globals.css";
 
@@ -20,8 +21,11 @@ export default async function RootLayout({ children }: { children: React.ReactNo
   return (
     <html lang="zh" className={`${inter.variable}${themeClass ? ` ${themeClass}` : ""}`}>
       <body className="bg-background text-foreground antialiased">
-        <Nav />
-        {children}
+        {/* 登录基座：AuthProvider + 401 跳登录钩子（Nav 也用 useAuth，必须在壳内） */}
+        <Providers>
+          <Nav />
+          {children}
+        </Providers>
       </body>
     </html>
   );

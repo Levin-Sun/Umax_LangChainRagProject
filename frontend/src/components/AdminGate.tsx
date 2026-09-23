@@ -1,27 +1,17 @@
 "use client";
-// admin 页门闸：读不到 admin_hint 标记就 replace 到登录页、不渲染 children。
-// 这是体验层不是安全层——真实授权由后端 401 把关（AdminBanner 仍保留作兜底）。
-// 测量与跳转必须在同一 effect 内：分开写会拿首帧的 hint=false 判定，
-// 把「登录成功→push 到管理页」的正常流程也弹回登录页。
-import { useEffect, useState, type ReactNode } from "react";
-import { usePathname, useRouter } from "next/navigation";
-import { isAdminHint } from "@/lib/api";
-
-export function useAdminHint(): boolean {
-  const path = usePathname();
-  const [hint, setHint] = useState(false);
-  useEffect(() => { setHint(isAdminHint()); }, [path]);
-  return hint;
-}
+// admin 页门闸：/auth/me 为真相源——未登录弹回登录页，member 弹回聊天。
+// 体验层非安全层；真授权由后端 401/403 把关（AdminBanner 兜底保留）。
+import { useEffect, type ReactNode } from "react";
+import { useRouter } from "next/navigation";
+import { useAuth } from "@/lib/auth";
 
 export default function AdminGate({ children }: { children: ReactNode }) {
-  const path = usePathname();
+  const { me, loaded } = useAuth();
   const router = useRouter();
-  const [hint, setHint] = useState(false);
   useEffect(() => {
-    const h = isAdminHint();
-    setHint(h);
-    if (!h && path !== "/admin/login") router.replace("/admin/login");
-  }, [path, router]);
-  return hint || path === "/admin/login" ? <>{children}</> : null;
+    if (!loaded) return;
+    if (!me) router.replace("/admin/login");
+    else if (me.role !== "admin") router.replace("/");
+  }, [loaded, me, router]);
+  return me && me.role === "admin" ? <>{children}</> : null;
 }

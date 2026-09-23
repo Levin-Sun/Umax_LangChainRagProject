@@ -1,17 +1,44 @@
-// 管理鉴权前端面：ApiError 携带 status → is401 判定；AdminBanner 401 给"去登录"入口；
-// LoginCard 提交口令（成功回调/失败展示 detail）；logout 先清会话再跳转。
+// 登录链路前端面：ApiError 携带 status → is401 判定；AdminBanner 401 给"去登录"入口；
+// LoginCard 提交邮箱+口令（useAuth.login → 成功 onDone(me)、失败上屏 detail 含 429 限流文案）；
+// 登录页按角色分流：admin→/admin/kb，member→聊天。
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { expect, it, vi } from "vitest";
-import { ApiError, call, is401, logout } from "@/lib/api";
+import { describe, expect, it, vi } from "vitest";
+import { ApiError, call, is401 } from "@/lib/api";
 import AdminBanner from "@/components/AdminBanner";
 import LoginCard from "@/components/LoginCard";
-import { fail, fakeApi, ok } from "@/lib/testkit";
+import LoginPage from "@/app/admin/login/page";
+import { AuthProvider } from "@/lib/auth";
 import { P } from "@/lib/paths";
+import { fakeApi, ok, fail } from "@/lib/testkit";
+import type { AuthMe } from "@/lib/types";
+
+const nav = vi.hoisted(() => ({ pushed: [] as string[] }));
+vi.mock("next/navigation", () => ({
+  usePathname: () => "/",
+  useRouter: () => ({
+    push: (to: string) => { nav.pushed.push(to); },
+    replace: () => {},
+  }),
+}));
+
+const ADMIN: AuthMe = { email: "a@x.com", name: "阿管", role: "admin", kb_ids: null };
+const MEMBER: AuthMe = { email: "m@x.com", name: "阿员", role: "member", kb_ids: [7] };
+
+// 登录后 me 才可读的门闩式假后端：POST /auth/login 前 me=401，成功后 me=ok(me)
+function loginApi(me: AuthMe) {
+  let logged = false;
+  const post = vi.fn(() => { logged = true; return ok(undefined); });
+  const api = fakeApi({
+    GET: (u) => (u.includes("/auth/me") ? (logged ? ok(me) : fail("需要登录", 401)) : ok([])),
+    POST: post,
+  });
+  return { api, post };
+}
 
 it("call captures HTTP status into ApiError; is401 matches 401 only", async () => {
   await expect(call(Promise.resolve({
-    data: undefined, error: { detail: "需要管理员登录" },
+    data: undefined, error: { detail: "需要登录" },
     response: new Response("x", { status: 401 }),
   }))).rejects.toMatchObject({ status: 401 });
   expect(is401(new ApiError({}, 401))).toBe(true);
@@ -20,9 +47,9 @@ it("call captures HTTP status into ApiError; is401 matches 401 only", async () =
 });
 
 it("AdminBanner turns 401 into login prompt, other errors stay plain", () => {
-  const { unmount } = render(<AdminBanner error={new ApiError({ detail: "需要管理员登录" }, 401)} />);
+  const { unmount } = render(<AdminBanner error={new ApiError({ detail: "需要登录" }, 401)} />);
   const alert = screen.getByRole("alert");
-  expect(alert).toHaveTextContent("需要管理员登录");
+  expect(alert).toHaveTextContent("需要管理员登录"); // 401 特化文案是 AdminBanner 固定串，不透传 detail
   expect(screen.getByRole("link", { name: "去登录" })).toHaveAttribute("href", "/admin/login");
   unmount();
   render(<AdminBanner error={new ApiError({ detail: "网关写库炸了" }, 500)} />);
@@ -30,32 +57,70 @@ it("AdminBanner turns 401 into login prompt, other errors stay plain", () => {
   expect(screen.queryByRole("link", { name: "去登录" })).not.toBeInTheDocument();
 });
 
-it("LoginCard submits token and fires onDone on success", async () => {
-  const post = vi.fn(async (_url: string, init: unknown) => {
-    expect((init as { body: { token: string } }).body).toEqual({ token: "abc123" });
-    return ok(undefined);
+describe("LoginCard", () => {
+  it("提交邮箱+口令走 P.authLogin，成功后 onDone 收到 me", async () => {
+    const { api, post } = loginApi(ADMIN);
+    const done = vi.fn();
+    render(<AuthProvider client={api}><LoginCard onDone={done} /></AuthProvider>);
+    await userEvent.type(screen.getByLabelText("邮箱"), "a@x.com");
+    await userEvent.type(screen.getByLabelText("口令"), "pw-123");
+    await userEvent.click(screen.getByRole("button", { name: "登录" }));
+    await waitFor(() => expect(post).toHaveBeenCalledWith(P.authLogin, expect.objectContaining({
+      body: { email: "a@x.com", password: "pw-123" },
+    })));
+    expect(done).toHaveBeenCalledWith(ADMIN);
   });
-  const done = vi.fn();
-  render(<LoginCard api={fakeApi({ POST: post })} onDone={done} />);
-  await userEvent.type(screen.getByLabelText("管理员口令"), "abc123");
-  await userEvent.click(screen.getByRole("button", { name: "登录" }));
-  await waitFor(() => expect(post).toHaveBeenCalledTimes(1));
-  expect(post.mock.calls[0][0]).toBe(P.adminLogin);
-  expect(done).toHaveBeenCalled();
+
+  it("邮箱或口令错误：detail 上屏且不调 onDone", async () => {
+    const api = fakeApi({
+      GET: () => fail("需要登录", 401),
+      POST: () => fail("邮箱或口令错误", 401),
+    });
+    const done = vi.fn();
+    render(<AuthProvider client={api}><LoginCard onDone={done} /></AuthProvider>);
+    await userEvent.type(screen.getByLabelText("邮箱"), "a@x.com");
+    await userEvent.type(screen.getByLabelText("口令"), "nope");
+    await userEvent.click(screen.getByRole("button", { name: "登录" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent("邮箱或口令错误");
+    expect(done).not.toHaveBeenCalled();
+  });
+
+  it("限流 429：后端文案直接上屏", async () => {
+    const api = fakeApi({
+      GET: () => fail("需要登录", 401),
+      POST: () => fail("失败次数过多，15 分钟后再试", 429),
+    });
+    render(<AuthProvider client={api}><LoginCard onDone={vi.fn()} /></AuthProvider>);
+    await userEvent.type(screen.getByLabelText("邮箱"), "a@x.com");
+    await userEvent.type(screen.getByLabelText("口令"), "pw");
+    await userEvent.click(screen.getByRole("button", { name: "登录" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent("失败次数过多，15 分钟后再试");
+  });
 });
 
-it("LoginCard shows backend detail on wrong token", async () => {
-  const api = fakeApi({ POST: async () => fail("口令错误", 401) });
-  render(<LoginCard api={api} onDone={vi.fn()} />);
-  await userEvent.type(screen.getByLabelText("管理员口令"), "nope");
-  await userEvent.click(screen.getByRole("button", { name: "登录" }));
-  expect(await screen.findByRole("alert")).toHaveTextContent("口令错误");
+describe("登录页角色分流", () => {
+  it("admin 登录成功跳 /admin/kb", async () => {
+    nav.pushed = [];
+    const { api } = loginApi(ADMIN);
+    render(<AuthProvider client={api}><LoginPage /></AuthProvider>);
+    await userEvent.type(screen.getByLabelText("邮箱"), "a@x.com");
+    await userEvent.type(screen.getByLabelText("口令"), "pw");
+    await userEvent.click(screen.getByRole("button", { name: "登录" }));
+    await waitFor(() => expect(nav.pushed).toEqual(["/admin/kb"]));
+  });
+
+  it("member 登录成功跳聊天 /", async () => {
+    nav.pushed = [];
+    const { api } = loginApi(MEMBER);
+    render(<AuthProvider client={api}><LoginPage /></AuthProvider>);
+    await userEvent.type(screen.getByLabelText("邮箱"), "m@x.com");
+    await userEvent.type(screen.getByLabelText("口令"), "pw");
+    await userEvent.click(screen.getByRole("button", { name: "登录" }));
+    await waitFor(() => expect(nav.pushed).toEqual(["/"]));
+  });
 });
 
-it("logout clears session server-side then runs after-hook", async () => {
-  const post = vi.fn(async () => ok(undefined));
-  const after = vi.fn();
-  await logout(fakeApi({ POST: post }), after);
-  expect(post).toHaveBeenCalledWith(P.adminLogout, expect.anything());
-  expect(after).toHaveBeenCalled();
+// P.authLogin 引用守护：登录链路只经 P 常量（URL 唯一事实源）
+it("login path key matches P.authLogin", () => {
+  expect(P.authLogin).toBe("/api/v1/auth/login");
 });

@@ -2,10 +2,12 @@
 // 聊天页：左栏会话、主区消息流、引用 [n] → chips → 右侧原文抽屉（零额外请求）
 // 取数模型：只有"点击会话"才拉历史；send() 的结果存本地 turns 追加渲染——
 // 避免"新会话 send 后 refetch → 本地+远端同一答案渲染两遍"。
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
+import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { ErrorBanner } from "@/components/ErrorBanner";
 import { call, type Client } from "@/lib/api";
+import { useAuth } from "@/lib/auth";
 import { P } from "@/lib/paths";
 import { useAsync } from "@/lib/hooks";
 import type { ChatOut, Citation, ConversationOut, MessageOut } from "@/lib/types";
@@ -29,6 +31,13 @@ function answerParts(answer: string, citations: Citation[], onCite: (c: Citation
 interface LocalTurn { key: number; convId: number | null; question: string; out: ChatOut | null }
 
 export default function ChatApp({ api }: { api: Client }) {
+  // 任务 7 换轨：/auth/me 就绪前不发业务请求（匿名只会处处 401）；loaded 无 me → 弹回登录页。
+  const { me, loaded } = useAuth();
+  const router = useRouter();
+  const ready = loaded && me !== null;
+  useEffect(() => {
+    if (loaded && !me) router.replace("/admin/login");
+  }, [loaded, me, router]);
   const [convId, setConvId] = useState<number | null>(null);
   const [question, setQuestion] = useState("");
   const [sending, setSending] = useState(false);
@@ -39,11 +48,14 @@ export default function ChatApp({ api }: { api: Client }) {
   const [activeConv, setActiveConv] = useState<number | null>(null);
   const taRef = useRef<HTMLTextAreaElement>(null);
   const seq = useRef(0);
-  const convs = useAsync(() => call(api.GET(P.conversations)) as Promise<ConversationOut[]>);
+  const convs = useAsync(
+    () => (ready ? call(api.GET(P.conversations)) as Promise<ConversationOut[]>
+                 : Promise.resolve([] as ConversationOut[])),
+    [ready]);
   const msgs = useAsync(
-    () => (activeConv === null ? Promise.resolve([] as MessageOut[])
+    () => (!ready || activeConv === null ? Promise.resolve([] as MessageOut[])
       : call(api.GET(P.convMessages, { params: { path: { conv_id: activeConv } } })) as Promise<MessageOut[]>),
-    [activeConv]);
+    [activeConv, ready]);
 
   function openConversation(id: number | null) {
     // 任务7欠账①：点击当前已打开会话 = no-op（旧实现无条件 setTurns([]) 把本地
@@ -87,6 +99,16 @@ export default function ChatApp({ api }: { api: Client }) {
     el.style.height = "auto";
     el.style.height = `${Math.min(el.scrollHeight, 160)}px`;
   }
+
+  if (!loaded) {
+    // me 未定的首帧只有骨架：未登录态不闪出空会话列表/输入框
+    return (
+      <div className="flex h-[calc(100vh-3rem)] items-center justify-center">
+        <p className="text-caption text-ink-3">加载中…</p>
+      </div>
+    );
+  }
+  if (!me) return null;  // effect 已弹回登录页，本页不再渲染
 
   const shown: MessageOut[] = [
     ...(msgs.data ?? []),

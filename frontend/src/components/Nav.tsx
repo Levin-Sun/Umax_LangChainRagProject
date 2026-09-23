@@ -1,8 +1,10 @@
 "use client";
+// 顶栏导航：登录态由 useAuth() 驱动（admin_hint 已退役）——admin 见全套管理链接，
+// member/匿名只剩「聊天」；已登录右侧显 用户名+退出（退出后回聊天页）。
+// 「改密」入口随 Task 8 的 ChangePasswordDialog 一起接入（此处不放死按钮）。
 import Link from "next/link";
-import { usePathname } from "next/navigation";
-import { api, logout } from "@/lib/api";
-import { useAdminHint } from "@/components/AdminGate";
+import { usePathname, useRouter } from "next/navigation";
+import { useAuth } from "@/lib/auth";
 import { ThemeToggle } from "@/components/ThemeToggle";
 
 const LINKS = [
@@ -14,8 +16,14 @@ const LINKS = [
 
 export function Nav() {
   const path = usePathname();
-  const hint = useAdminHint();
-  const links = hint ? LINKS : LINKS.slice(0, 1);
+  const router = useRouter();
+  const { me, loaded, logout } = useAuth();
+  const links = me?.role === "admin" ? LINKS : LINKS.slice(0, 1);
+
+  async function onLogout() {
+    try { await logout(); } finally { router.push("/"); }
+  }
+
   return (
     <nav className="flex h-12 items-center gap-1 border-b border-border/80 px-4">
       <span className="mr-3 text-h3 font-semibold">Umax RAG</span>
@@ -31,17 +39,20 @@ export function Nav() {
       })}
       <div className="ml-auto flex items-center gap-1">
         <ThemeToggle />
-        {!hint && path !== "/admin/login" && (
+        {me && (
+          <>
+            <span className="px-3 py-1.5 text-body text-ink-3">{me.name}</span>
+            <button className="rounded-lg px-3 py-1.5 text-body text-muted-foreground transition-colors hover:bg-accent"
+                    onClick={() => void onLogout()}>
+              退出
+            </button>
+          </>
+        )}
+        {!me && loaded && path !== "/admin/login" && (
           <Link href="/admin/login"
                 className="rounded-lg px-3 py-1.5 text-body text-muted-foreground transition-colors hover:bg-accent">
-            管理员登录
+            登录
           </Link>
-        )}
-        {hint && path.startsWith("/admin") && (
-          <button className="rounded-lg px-3 py-1.5 text-body text-muted-foreground transition-colors hover:bg-accent"
-                  onClick={() => logout(api, () => { window.location.href = "/admin/login"; })}>
-            退出
-          </button>
         )}
       </div>
     </nav>
