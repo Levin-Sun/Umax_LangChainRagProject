@@ -667,7 +667,7 @@ class ChangePasswordIn(BaseModel):
 ```
 
 - [ ] **Step 5: 跑绿** — `pytest tests/test_auth_api.py -v` Expected: 全 passed；`pytest` 全量不回归。
-- [ ] **Step 6: 契约同步（四步③④）** — `cd backend && ../.venv/Scripts/python.exe scripts/export_openapi.py`；`cd sdk-ts && npm test`（gen→新鲜度闸→tsc）。
+- [ ] **Step 6: 契约同步（四步③④）** — `cd backend && ../.venv/Scripts/python.exe scripts/export_openapi.py`；`cd sdk-ts && npm test`（gen→新鲜度闸→tsc）。**同时增量更新 `test_contract_declared.py`**：本任务新端点的错误码补进 EXPECTED，且 `test_admin_surface_is_exactly_401_declared` 的"全集相等"必须把声明 401 的新端点计入 guarded 侧（否则全量回归当场红；Task 6 才整体重写该表）。
 - [ ] **Step 7: Commit** — `git add -A backend/app backend/tests contracts sdk-ts/src && git commit -m "feat(rbac-3/9): 认证端点四件套+DB 会话吊销+登录限流+审计写入口（登录/登出/改密/事件全测）"`
 
 ---
@@ -939,7 +939,7 @@ USER_STATUS_PATTERN = "^(" + "|".join(sorted(USER_STATUSES)) + ")$"
 ```
 
 - [ ] **Step 4: 跑绿** — `pytest tests/test_users_api.py -v` + 全量。
-- [ ] **Step 5: 契约③④ + Commit** — 重导 spec、`sdk-ts npm test`，commit `"feat(rbac-4/9): /users 与 /users/{id}/grants 管理端点（自身保护/吊销链/审计事件）"`
+- [ ] **Step 5: 契约③④ + Commit** — 重导 spec、`sdk-ts npm test`；`test_contract_declared.py` 增量同 Task 3 Step 6（EXPECTED+guarded 集合同步 users/grants 新面）。commit `"feat(rbac-4/9): /users 与 /users/{id}/grants 管理端点（自身保护/吊销链/审计事件）"`
 
 ---
 
@@ -1077,7 +1077,7 @@ def test_detail_never_contains_secrets(client):
 `user_email` 统一 `Depends(require_admin)`→此任务先以"该端点已登录操作者"为准：在 `audit_record(..., user_email=admin_or_user.email)`；实现方式=这些端点本任务加 `user: User = Depends(get_user)`（写端点是 admin 语义的用 `require_admin_role`），操作者邮箱入审计。**旧 token 版 require_admin 保持共存**，任务 6 再全局切换。`document_deleted`/`kb_deleted` 事件：阶段 1 没有删文档/删库端点——本任务不新增端点（YAGNI），ACTIONS 常量保留该两枚举备用，spec §5 与之对齐由 spec 修订记录覆盖（在 commit message 注明）。
 
 - [ ] **Step 4: 跑绿** — `pytest tests/test_audit_api.py -v` + 全量。
-- [ ] **Step 5: 契约③④ + Commit** — `git add -A backend contracts sdk-ts/src && git commit -m "feat(rbac-5/9): GET /audit 查询端点 + kb/文档/模型写路径审计埋点"`
+- [ ] **Step 5: 契约③④ + Commit** — 重导 spec、`sdk-ts npm test`；`test_contract_declared.py` 增量同步 /audit 面（同 Task 3/4 注）。`git add -A backend contracts sdk-ts/src && git commit -m "feat(rbac-5/9): GET /audit 查询端点 + kb/文档/模型写路径审计埋点"`
 
 ---
 
