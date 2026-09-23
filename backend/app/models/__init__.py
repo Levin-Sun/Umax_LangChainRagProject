@@ -23,6 +23,8 @@ class User(Base):
     tenant_id = T()
     email = Column(String(255), nullable=False)
     hashed_password = Column(String(255), nullable=False)
+    name = Column(String(128), nullable=False, default="", server_default="")
+    status = Column(String(16), nullable=False, default="active", server_default="active")  # active/disabled
     role = Column(String(16), nullable=False, default="member")  # admin / member
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
@@ -142,3 +144,38 @@ class License(Base):
     expires_at = Column(DateTime(timezone=True), nullable=False)
     features = J(nullable=False, default=dict)  # {"max_docs":5000,...}
     status = Column(String(16), nullable=False, default="active")
+
+
+class UserSession(Base):
+    """DB 会话表：cookie 存随机原文，库里只落 SHA-256——改密/禁用/登出即删行吊销。"""
+    __tablename__ = "user_sessions"
+
+    token_hash = Column(String(64), primary_key=True)
+    user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    expires_at = Column(DateTime(timezone=True), nullable=False, index=True)
+
+
+class AuditLog(Base):
+    """审计（§5 事件表）：只记认证+写操作；detail 永不落口令/密钥明文。"""
+    __tablename__ = "audit_logs"
+
+    id = Column(Integer, primary_key=True)
+    tenant_id = T()
+    user_email = Column(String(255), index=True)  # 登录失败时可空（还没主体）
+    action = Column(String(32), nullable=False, index=True)
+    target_type = Column(String(32))
+    target_id = Column(Integer)
+    detail = J(nullable=False, default=dict)
+    ip = Column(String(64))
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), index=True)
+
+
+class UserKbGrant(Base):
+    """库级授权（admin 隐式全库，不落行）。"""
+    __tablename__ = "user_kb_grants"
+    __table_args__ = (UniqueConstraint("user_id", "kb_id"),)
+
+    id = Column(Integer, primary_key=True)
+    user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    kb_id = Column(Integer, ForeignKey("knowledge_bases.id", ondelete="CASCADE"), nullable=False)
