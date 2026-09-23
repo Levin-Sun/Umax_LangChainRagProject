@@ -2,7 +2,8 @@ import { createApiClient } from "@umax/sdk-ts";
 import { P } from "./paths";
 import type { DocOut } from "./types";
 
-export type Client = Pick<ReturnType<typeof createApiClient>, "GET" | "POST" | "PATCH" | "DELETE">;
+// PUT 随 Task 8 grants 整集合替换端点入面（此前前端无幂等写面，未收录）
+export type Client = Pick<ReturnType<typeof createApiClient>, "GET" | "PUT" | "POST" | "PATCH" | "DELETE">;
 export const api: Client = createApiClient();
 
 export class ApiError extends Error {

@@ -12,6 +12,7 @@ export function fakeApi(
   const missing = (url: string, m: string) => { throw new Error(`fakeApi: 未存根 ${m} ${url}`); };
   return {
     GET: ((u: string, i?: unknown) => stubs.GET?.(u, i) ?? missing(u, "GET")),
+    PUT: ((u: string, i?: unknown) => stubs.PUT?.(u, i) ?? missing(u, "PUT")),
     POST: ((u: string, i?: unknown) => stubs.POST?.(u, i) ?? missing(u, "POST")),
     PATCH: ((u: string, i?: unknown) => stubs.PATCH?.(u, i) ?? missing(u, "PATCH")),
     DELETE: ((u: string, i?: unknown) => stubs.DELETE?.(u, i) ?? missing(u, "DELETE")),
