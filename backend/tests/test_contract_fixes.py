@@ -10,9 +10,11 @@ from fastapi.testclient import TestClient
 from app.core.config import get_settings
 from app.main import INT32_MAX, INT32_MIN, create_app
 from app.models import Document, KnowledgeBase, ModelConfig
+from tests.conftest import login, seed_user
 from tests.test_models_api import FakeEmbedder
 
 SECRET = "contract-fixes-secret"
+ADMIN = ("admin@umax.local", "Adm1n-Pass-123")
 INT32_OVERFLOW = 2**31           # 越上界一格（PG INTEGER 存不下，修复①的动因）
 INT32_UNDERFLOW = -(2**31) - 1   # 越下界一格
 
@@ -24,10 +26,14 @@ MODEL_BODY = {"scenario": "chat", "provider": "deepseek",
 
 @pytest.fixture
 def client(engine, db, tmp_path):
+    """全员登录后：本文件的 422/400 断言必须登录态发出——FastAPI 先解依赖后校 body，
+    匿名请求会先撞 401，"格式违法被拒"与"未登录"两码就混成一团（阶段 2 换轨）。"""
     app = create_app(engine=engine, secret=SECRET,
                      embedder=FakeEmbedder(get_settings().embedding_dim),
                      upload_dir=str(tmp_path))
     with TestClient(app) as c:
+        seed_user(engine, *ADMIN, role="admin")
+        login(c, *ADMIN)
         yield c
 
 
@@ -147,6 +153,8 @@ def test_upload_filename_nul_normalized(engine, db, tmp_path):
                      upload_dir=str(tmp_path))
     # raise_server_exceptions=False：修复前的 ValueError 以 500 形态被断言捕获而非抛进测试
     with TestClient(app, raise_server_exceptions=False) as c:
+        seed_user(engine, *ADMIN, role="admin")
+        login(c, *ADMIN)
         kb = c.post("/api/v1/kb", json={"name": "k"}).json()["id"]
         boundary = "----contractfix8"
         body = (f"--{boundary}\r\n"

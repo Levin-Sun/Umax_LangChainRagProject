@@ -1,4 +1,5 @@
-# TDD 红灯：模型后台管理 API（§C 后台换模型/BYO-key 打码）+ 用量看板简版
+# 模型后台管理 API（§C 后台换模型/BYO-key 打码）+ 用量看板简版
+# 阶段 2 起 models/usage 是 admin 面：夹具统一播种 admin 账号并登录
 import hashlib
 import math
 
@@ -10,8 +11,10 @@ from app.core.config import get_settings
 from app.main import create_app
 from app.models import ModelConfig, UsageRecord
 from app.services.crypto import decrypt_secret, encrypt_secret
+from tests.conftest import login, seed_user
 
 SECRET = "gateway-master"
+ADMIN = ("admin@umax.local", "Adm1n-Pass-123")
 
 
 class FakeEmbedder:
@@ -35,6 +38,8 @@ def client(engine, db, tmp_path):
                      embedder=FakeEmbedder(get_settings().embedding_dim),
                      upload_dir=str(tmp_path))
     with TestClient(app) as c:
+        seed_user(engine, *ADMIN, role="admin")
+        login(c, *ADMIN)
         yield c
 
 
@@ -42,6 +47,8 @@ def client(engine, db, tmp_path):
 def client_no_secret(engine, db, tmp_path):
     app = create_app(engine=engine, secret="", embedder=None, upload_dir=str(tmp_path))
     with TestClient(app) as c:
+        seed_user(engine, *ADMIN, role="admin")
+        login(c, *ADMIN)
         yield c
 
 
@@ -121,7 +128,7 @@ def test_usage_summary_aggregates(client, db):
     assert set(rows) == {("chat", "m1"), ("chat", "m2"), ("embedding", "e1")}
 
 
-# ---- 问答端点与网关台账的配合 ----
+# ---- 问答端点与网关台账的配合（logged 约定退役后：记账单点在端点）----
 def _ask(client):
     kb = client.post("/api/v1/kb", json={"name": "k"}).json()
     client.post(f"/api/v1/kb/{kb['id']}/documents",
@@ -129,22 +136,31 @@ def _ask(client):
     return client.post("/api/v1/chat", json={"question": "生鲜 退货 政策", "kb_ids": [kb["id"]]})
 
 
+def _logged_client(engine, db, tmp_path, fn):
+    app = create_app(engine=engine, chat_fn=fn, upload_dir=str(tmp_path))
+    c = TestClient(app)
+    seed_user(engine, *ADMIN, role="admin")
+    login(c, *ADMIN)
+    return c
+
+
 def test_chat_usage_records_model_returned_by_chat_fn(engine, db, tmp_path):
     def fn(q, hits):
         return {"answer": "ok[1]", "prompt_tokens": 5, "completion_tokens": 2,
                 "model": "glm-4-flash", "latency_ms": 42}
-    app = create_app(engine=engine, chat_fn=fn, upload_dir=str(tmp_path))
-    with TestClient(app) as c:
-        assert _ask(c).status_code == 200
+    c = _logged_client(engine, db, tmp_path, fn)
+    assert _ask(c).status_code == 200
     rec = db.query(UsageRecord).one()  # 端点记账：记网关实际用成的模型，不是 .env 里那个
     assert (rec.model, rec.prompt_tokens, rec.latency_ms) == ("glm-4-flash", 5, 42)
 
 
-def test_chat_skips_endpoint_ledger_when_chat_fn_already_logged(engine, db, tmp_path):
+def test_chat_records_once_even_if_chat_fn_claims_logged(engine, db, tmp_path):
+    """logged 约定整体退役：网关不再自行记账，端点恒记一次——
+    chat_fn 返回 logged 键（旧网关形态）也不得让端点漏记或双记。"""
     def fn(q, hits):
         return {"answer": "ok[1]", "prompt_tokens": 5, "completion_tokens": 2,
-                "model": "m-g", "logged": True}  # 网关内部已记账
-    app = create_app(engine=engine, chat_fn=fn, upload_dir=str(tmp_path))
-    with TestClient(app) as c:
-        _ask(c)
-    assert db.query(UsageRecord).count() == 0
+                "model": "m-g", "logged": True}
+    c = _logged_client(engine, db, tmp_path, fn)
+    _ask(c)
+    rec = db.query(UsageRecord).one()
+    assert (rec.user_email, rec.model) == (ADMIN[0], "m-g")

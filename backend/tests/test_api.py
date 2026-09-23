@@ -1,5 +1,6 @@
-# TDD 红灯：FastAPI 服务层契约（知识库/文档/检索/问答/会话）
-# 决策：一期无鉴权（初始化向导与登录在后续任务）；chat/embedder 依赖注入，测试用假实现
+# FastAPI 服务层契约（知识库/文档/检索/问答/会话）
+# 决策：chat/embedder 依赖注入，测试用假实现；阶段 2 起全员登录——夹具播种 admin 账号并登录，
+# 匿名形态下的 401/越权矩阵由 test_permissions.py 专门负责
 import hashlib
 import math
 
@@ -9,6 +10,9 @@ from sqlalchemy.orm import Session
 
 from app.core.config import get_settings
 from app.main import create_app
+from tests.conftest import login, seed_user
+
+ADMIN = ("admin@umax.local", "Adm1n-Pass-123")
 
 
 class FakeEmbedder:
@@ -46,6 +50,8 @@ def app_client(engine, db: Session, embedder, chat_calls, tmp_path):
     app = create_app(engine=engine, embedder=embedder, chat_fn=fake_chat,
                      upload_dir=str(tmp_path))
     with TestClient(app) as c:
+        seed_user(engine, *ADMIN, role="admin")   # create_app 不播种（播种是生产装配的事）
+        login(c, *ADMIN)
         yield c
 
 
@@ -149,6 +155,7 @@ def test_chat_writes_usage_record(app_client, db: Session):
     app_client.post("/api/v1/chat", json={"question": "生鲜 退货 政策", "kb_ids": [kb["id"]]})
     rec = db.query(UsageRecord).one()
     assert (rec.scenario, rec.prompt_tokens, rec.completion_tokens) == ("chat", 100, 20)
+    assert rec.user_email == ADMIN[0], "台账归真实登录者（阶段 2 收口），不再是占位邮箱"
 
 
 def test_list_documents_per_kb(app_client):

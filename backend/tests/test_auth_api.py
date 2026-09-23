@@ -1,13 +1,13 @@
 # 认证端点全行为：登录/会话/me/登出/自助改密/吊销链/限流——账号体系的心脏，逐条对应 spec §2/§3.1
+import json
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
 
 import pytest
 from fastapi.testclient import TestClient
 
-from app.core.config import get_settings
 from app.main import create_app
 from app.models import User, UserSession
-from app.services.auth import hash_password
 from tests.conftest import login, seed_user
 
 ADMIN = ("admin@umax.local", "Adm1n-Pass-123")
@@ -71,6 +71,11 @@ def test_throttle_429_after_10_failures(client):
                            json={"email": ADMIN[0], "password": "bad"}).status_code == 401
     r = client.post("/api/v1/auth/login", json={"email": ADMIN[0], "password": "bad"})
     assert r.status_code == 429
+    # 评审收编③：detail 文案与契约里 429 的 description 一字对齐（代码/spec 两处措辞必然漂移）
+    spec = json.loads((Path(__file__).resolve().parents[2] / "contracts/openapi.json")
+                      .read_text(encoding="utf-8"))
+    desc = spec["paths"]["/api/v1/auth/login"]["post"]["responses"]["429"]["description"]
+    assert r.json()["detail"] == desc, f"detail {r.json()['detail']!r} != 契约 {desc!r}"
     r2 = client.post("/api/v1/auth/login", json={"email": MEMBER[0], "password": MEMBER[1]})
     assert r2.status_code == 204, "限流键含邮箱，不牵连他人"
 
@@ -147,3 +152,17 @@ def test_login_audit_events(client, engine, db):
         rows = s.query(AuditLog).order_by(AuditLog.id).all()
     assert [a.action for a in rows] == ["login_success", "login_failed", "logout"]
     assert all(a.ip for a in rows), "认证事件必带来源 ip"
+
+
+def test_change_password_401_description_keeps_business_text(client):
+    """评审收编②：同一状态码只有一个 description——responses 字典合并顺序决定谁胜出。
+    端点专属的"旧口令错误"必须盖过通用 _ERR_UNAUTH 的"需要登录"（未登录那条由 detail 承载）。"""
+    spec = json.loads((Path(__file__).resolve().parents[2] / "contracts/openapi.json")
+                      .read_text(encoding="utf-8"))
+    declared = spec["paths"]["/api/v1/auth/change-password"]["post"]["responses"]
+    assert declared["401"]["description"] == "旧口令错误"
+    # 未登录仍是 401（依赖先抛），文案由 detail 给（body 形状合法，避免混进 422 语义）
+    assert TestClient(client.app).post("/api/v1/auth/change-password",
+                                       json={"old_password": "Old-Pass-1",
+                                             "new_password": "New-Pass-1"}
+                                       ).json()["detail"] == "需要登录"

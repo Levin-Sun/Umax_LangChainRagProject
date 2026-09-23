@@ -47,6 +47,25 @@ def test_grant_unique_and_cascade(db: Session):
     db.rollback()
 
 
+def test_user_delete_cascades_sessions_and_grants(db: Session):
+    """任务 2 欠账（评审收编⑥）：端点层没有删用户路径，吊销链只删会话——
+    这里锁住真外键行为：账号一旦删除，其存活会话与库级授权必须随 CASCADE 消失，
+    否则残留 user_id 会让 get_user 解出"无主会话"或留下越权授权。"""
+    u = _mk_user(db)
+    kb = KnowledgeBase(tenant_id="default", name="kbC")
+    db.add(kb)
+    db.commit()
+    uid = u.id
+    db.add_all([UserKbGrant(user_id=uid, kb_id=kb.id),
+                UserSession(token_hash="c" * 64, user_id=uid,
+                            expires_at=datetime.now(timezone.utc) + timedelta(days=7))])
+    db.commit()
+    db.delete(db.get(User, uid))
+    db.commit()
+    assert db.query(UserSession).filter_by(user_id=uid).all() == []
+    assert db.query(UserKbGrant).filter_by(user_id=uid).all() == []
+
+
 def test_audit_log_row(db: Session):
     a = AuditLog(tenant_id="default", user_email="a@x.com", action="login_failed",
                  detail={"why": "bad"}, ip="127.0.0.1")

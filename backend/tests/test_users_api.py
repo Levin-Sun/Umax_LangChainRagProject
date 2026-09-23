@@ -68,6 +68,27 @@ def test_password_reset_kicks_target_sessions_but_not_operator(client, engine):
     login(target, MEMBER[0], "Reset-Pass-9")          # 新口令可重新登录
 
 
+def test_admin_self_password_reset_keeps_current_session(client, engine):
+    """评审收编⑦：管理员在 /users 里给自己重置口令——其他会话吊销、当前会话保留
+    （与 /auth/change-password 同语义），否则"改个口令把自己从管理页踢出去"。"""
+    from sqlalchemy.orm import Session
+
+    from app.models import UserSession
+
+    me = client.get("/api/v1/auth/me").json()
+    uid = [u["id"] for u in client.get("/api/v1/users").json() if u["email"] == me["email"]][0]
+    other = TestClient(client.app)
+    login(other, *ADMIN)                                 # 同账号第二设备也在线
+    assert client.patch(f"/api/v1/users/{uid}",
+                        json={"password": "Self-Reset-9"}).status_code == 200
+    assert client.get("/api/v1/auth/me").status_code == 200, "操作者当前会话必须保留"
+    assert other.get("/api/v1/auth/me").status_code == 401, "其他设备照旧吊销"
+    with Session(engine) as s:
+        assert s.query(UserSession).count() == 1, "只留发起这次操作的那一条"
+    fresh = TestClient(client.app)
+    login(fresh, ADMIN[0], "Self-Reset-9")               # 新口令可重新登录
+
+
 def test_disable_kicks_sessions(client, engine):
     uid = [u["id"] for u in client.get("/api/v1/users").json() if u["email"] == MEMBER[0]][0]
     target = TestClient(client.app)

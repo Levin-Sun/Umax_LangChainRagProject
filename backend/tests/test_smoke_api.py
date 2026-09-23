@@ -18,6 +18,12 @@ def test_full_chain_with_real_bailian(tmp_path, engine, db):
     app = build_production_app(upload_dir=str(tmp_path), engine=engine)
     client = TestClient(app)
 
+    # 全员登录收口（任务 6）：build_production_app 在 users 空表时按 ADMIN_EMAIL/ADMIN_PASSWORD
+    # 播种 admin——db 夹具清过表，故每次装配都会重播，建库前先拿会话
+    r = client.post("/api/v1/auth/login",
+                    json={"email": s.admin_email, "password": s.admin_password})
+    assert r.status_code == 204, f"播种的初始管理员登录失败：{r.status_code} {r.text}"
+
     kb = client.post("/api/v1/kb", json={"name": "冒烟库"}).json()
     raw = (s.docs_dir / "rag_dirty_doc_01.txt").read_bytes()
     doc = client.post(f"/api/v1/kb/{kb['id']}/documents",

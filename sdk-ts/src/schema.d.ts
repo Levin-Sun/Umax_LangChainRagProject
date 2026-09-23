@@ -4,40 +4,6 @@
  */
 
 export interface paths {
-    "/api/v1/admin/login": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /** Admin Login */
-        post: operations["admin_login_api_v1_admin_login_post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/admin/logout": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /** Admin Logout */
-        post: operations["admin_logout_api_v1_admin_logout_post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
     "/api/v1/audit": {
         parameters: {
             query?: never;
@@ -459,11 +425,6 @@ export interface components {
             /** Name */
             name: string;
         };
-        /** LegacyTokenLoginIn */
-        LegacyTokenLoginIn: {
-            /** Token */
-            token: string;
-        };
         /** LoginIn */
         LoginIn: {
             /** Email */
@@ -588,73 +549,6 @@ export interface components {
 }
 export type $defs = Record<string, never>;
 export interface operations {
-    admin_login_api_v1_admin_login_post: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["LegacyTokenLoginIn"];
-            };
-        };
-        responses: {
-            /** @description Successful Response */
-            204: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
-            /** @description 请求体解析失败 */
-            400: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorOut"];
-                };
-            };
-            /** @description 口令错误 */
-            401: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorOut"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    admin_logout_api_v1_admin_logout_post: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            204: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
-        };
-    };
     list_audit_api_v1_audit_get: {
         parameters: {
             query?: {
@@ -736,7 +630,7 @@ export interface operations {
                     "application/json": components["schemas"]["ErrorOut"];
                 };
             };
-            /** @description 需要登录 */
+            /** @description 旧口令错误 */
             401: {
                 headers: {
                     [name: string]: unknown;
@@ -901,6 +795,24 @@ export interface operations {
                     "application/json": components["schemas"]["ErrorOut"];
                 };
             };
+            /** @description 需要登录 */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOut"];
+                };
+            };
+            /** @description 需要管理员权限 */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOut"];
+                };
+            };
             /** @description Validation Error */
             422: {
                 headers: {
@@ -930,6 +842,15 @@ export interface operations {
                     "application/json": unknown;
                 };
             };
+            /** @description 需要登录 */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOut"];
+                };
+            };
         };
     };
     list_messages_api_v1_conversations__conv_id__messages_get: {
@@ -950,6 +871,15 @@ export interface operations {
                 };
                 content: {
                     "application/json": unknown;
+                };
+            };
+            /** @description 需要登录 */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOut"];
                 };
             };
             /** @description 会话不存在 */
@@ -990,6 +920,15 @@ export interface operations {
                 };
                 content: {
                     "application/json": unknown;
+                };
+            };
+            /** @description 需要登录 */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOut"];
                 };
             };
             /** @description 文档不存在 */
@@ -1045,8 +984,17 @@ export interface operations {
                     "application/json": components["schemas"]["ErrorOut"];
                 };
             };
-            /** @description 需要管理员登录 */
+            /** @description 需要登录 */
             401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOut"];
+                };
+            };
+            /** @description 需要管理员权限 */
+            403: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -1094,6 +1042,15 @@ export interface operations {
                     "application/json": unknown;
                 };
             };
+            /** @description 需要登录 */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOut"];
+                };
+            };
             /** @description 文档不存在 */
             404: {
                 headers: {
@@ -1134,8 +1091,17 @@ export interface operations {
                     "application/json": unknown;
                 };
             };
-            /** @description 需要管理员登录 */
+            /** @description 需要登录 */
             401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOut"];
+                };
+            };
+            /** @description 需要管理员权限 */
+            403: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -1201,6 +1167,15 @@ export interface operations {
                     "application/json": unknown;
                 };
             };
+            /** @description 需要登录 */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOut"];
+                };
+            };
         };
     };
     create_kb_api_v1_kb_post: {
@@ -1234,8 +1209,17 @@ export interface operations {
                     "application/json": components["schemas"]["ErrorOut"];
                 };
             };
-            /** @description 需要管理员登录 */
+            /** @description 需要登录 */
             401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOut"];
+                };
+            };
+            /** @description 需要管理员权限 */
+            403: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -1272,6 +1256,15 @@ export interface operations {
                 };
                 content: {
                     "application/json": unknown;
+                };
+            };
+            /** @description 需要登录 */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOut"];
                 };
             };
             /** @description 知识库不存在 */
@@ -1327,8 +1320,17 @@ export interface operations {
                     "application/json": components["schemas"]["ErrorOut"];
                 };
             };
-            /** @description 需要管理员登录 */
+            /** @description 需要登录 */
             401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOut"];
+                };
+            };
+            /** @description 需要管理员权限 */
+            403: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -1383,8 +1385,17 @@ export interface operations {
                     "application/json": unknown;
                 };
             };
-            /** @description 需要管理员登录 */
+            /** @description 需要登录 */
             401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOut"];
+                };
+            };
+            /** @description 需要管理员权限 */
+            403: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -1425,8 +1436,17 @@ export interface operations {
                     "application/json": components["schemas"]["ErrorOut"];
                 };
             };
-            /** @description 需要管理员登录 */
+            /** @description 需要登录 */
             401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOut"];
+                };
+            };
+            /** @description 需要管理员权限 */
+            403: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -1472,8 +1492,17 @@ export interface operations {
                 };
                 content?: never;
             };
-            /** @description 需要管理员登录 */
+            /** @description 需要登录 */
             401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOut"];
+                };
+            };
+            /** @description 需要管理员权限 */
+            403: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -1534,8 +1563,17 @@ export interface operations {
                     "application/json": components["schemas"]["ErrorOut"];
                 };
             };
-            /** @description 需要管理员登录 */
+            /** @description 需要登录 */
             401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOut"];
+                };
+            };
+            /** @description 需要管理员权限 */
+            403: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -1603,6 +1641,24 @@ export interface operations {
                     "application/json": components["schemas"]["ErrorOut"];
                 };
             };
+            /** @description 需要登录 */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOut"];
+                };
+            };
+            /** @description 需要管理员权限 */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOut"];
+                };
+            };
             /** @description Validation Error */
             422: {
                 headers: {
@@ -1632,8 +1688,17 @@ export interface operations {
                     "application/json": unknown;
                 };
             };
-            /** @description 需要管理员登录 */
+            /** @description 需要登录 */
             401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOut"];
+                };
+            };
+            /** @description 需要管理员权限 */
+            403: {
                 headers: {
                     [name: string]: unknown;
                 };

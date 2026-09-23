@@ -174,19 +174,6 @@
         "title": "KbIn",
         "type": "object"
       },
-      "LegacyTokenLoginIn": {
-        "properties": {
-          "token": {
-            "title": "Token",
-            "type": "string"
-          }
-        },
-        "required": [
-          "token"
-        ],
-        "title": "LegacyTokenLoginIn",
-        "type": "object"
-      },
       "LoginIn": {
         "properties": {
           "email": {
@@ -553,68 +540,6 @@
   },
   "openapi": "3.1.0",
   "paths": {
-    "/api/v1/admin/login": {
-      "post": {
-        "operationId": "admin_login_api_v1_admin_login_post",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/LegacyTokenLoginIn"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "204": {
-            "description": "Successful Response"
-          },
-          "400": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorOut"
-                }
-              }
-            },
-            "description": "请求体解析失败"
-          },
-          "401": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorOut"
-                }
-              }
-            },
-            "description": "口令错误"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "summary": "Admin Login"
-      }
-    },
-    "/api/v1/admin/logout": {
-      "post": {
-        "operationId": "admin_logout_api_v1_admin_logout_post",
-        "responses": {
-          "204": {
-            "description": "Successful Response"
-          }
-        },
-        "summary": "Admin Logout"
-      }
-    },
     "/api/v1/audit": {
       "get": {
         "operationId": "list_audit_api_v1_audit_get",
@@ -752,7 +677,7 @@
                 }
               }
             },
-            "description": "需要登录"
+            "description": "旧口令错误"
           },
           "422": {
             "content": {
@@ -908,6 +833,26 @@
             },
             "description": "请求体解析失败"
           },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            },
+            "description": "需要登录"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            },
+            "description": "需要管理员权限"
+          },
           "422": {
             "content": {
               "application/json": {
@@ -933,6 +878,16 @@
               }
             },
             "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            },
+            "description": "需要登录"
           }
         },
         "summary": "List Conversations"
@@ -962,6 +917,16 @@
               }
             },
             "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            },
+            "description": "需要登录"
           },
           "404": {
             "content": {
@@ -1011,6 +976,16 @@
               }
             },
             "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            },
+            "description": "需要登录"
           },
           "404": {
             "content": {
@@ -1087,7 +1062,17 @@
                 }
               }
             },
-            "description": "需要管理员登录"
+            "description": "需要登录"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            },
+            "description": "需要管理员权限"
           },
           "404": {
             "content": {
@@ -1137,6 +1122,16 @@
               }
             },
             "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            },
+            "description": "需要登录"
           },
           "404": {
             "content": {
@@ -1195,7 +1190,17 @@
                 }
               }
             },
-            "description": "需要管理员登录"
+            "description": "需要登录"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            },
+            "description": "需要管理员权限"
           },
           "404": {
             "content": {
@@ -1248,6 +1253,16 @@
               }
             },
             "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            },
+            "description": "需要登录"
           }
         },
         "summary": "List Kb"
@@ -1291,7 +1306,17 @@
                 }
               }
             },
-            "description": "需要管理员登录"
+            "description": "需要登录"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            },
+            "description": "需要管理员权限"
           },
           "422": {
             "content": {
@@ -1331,6 +1356,16 @@
               }
             },
             "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            },
+            "description": "需要登录"
           },
           "404": {
             "content": {
@@ -1407,7 +1442,17 @@
                 }
               }
             },
-            "description": "需要管理员登录"
+            "description": "需要登录"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            },
+            "description": "需要管理员权限"
           },
           "404": {
             "content": {
@@ -1463,7 +1508,17 @@
                 }
               }
             },
-            "description": "需要管理员登录"
+            "description": "需要登录"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            },
+            "description": "需要管理员权限"
           }
         },
         "summary": "List Models"
@@ -1507,7 +1562,17 @@
                 }
               }
             },
-            "description": "需要管理员登录"
+            "description": "需要登录"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            },
+            "description": "需要管理员权限"
           },
           "422": {
             "content": {
@@ -1561,7 +1626,17 @@
                 }
               }
             },
-            "description": "需要管理员登录"
+            "description": "需要登录"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            },
+            "description": "需要管理员权限"
           },
           "422": {
             "content": {
@@ -1638,7 +1713,17 @@
                 }
               }
             },
-            "description": "需要管理员登录"
+            "description": "需要登录"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            },
+            "description": "需要管理员权限"
           },
           "404": {
             "content": {
@@ -1706,6 +1791,26 @@
             },
             "description": "请求体解析失败"
           },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            },
+            "description": "需要登录"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            },
+            "description": "需要管理员权限"
+          },
           "422": {
             "content": {
               "application/json": {
@@ -1740,7 +1845,17 @@
                 }
               }
             },
-            "description": "需要管理员登录"
+            "description": "需要登录"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            },
+            "description": "需要管理员权限"
           }
         },
         "summary": "Usage Summary"

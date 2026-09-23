@@ -50,6 +50,11 @@ def test_documents_delete_event(client, engine, db):
 def test_audit_query_filters_and_paging(client):
     login_anon = TestClient(client.app)
     login_anon.post("/api/v1/auth/login", json={"email": ADMIN[0], "password": "bad"})
+    # 评审收编⑪：原先只有 2 条事件，page2 恒空 → "跨页 disjoint"断言空转。
+    # 补 5 次写操作（各一条 kb_created），保证两页都有行、翻页真的是同一序列的两段。
+    for i in range(5):
+        assert client.post("/api/v1/kb", json={"name": f"kb{i}"}).status_code == 201
+    assert len(client.get("/api/v1/audit", params={"limit": 200}).json()) >= 6, "事件量自证"
     r = client.get("/api/v1/audit", params={"action": "login_failed"})
     rows = r.json()
     assert rows and all(x["action"] == "login_failed" for x in rows)
@@ -58,6 +63,7 @@ def test_audit_query_filters_and_paging(client):
     assert len(client.get("/api/v1/audit", params={"limit": 1}).json()) == 1
     page1 = client.get("/api/v1/audit", params={"limit": 2, "offset": 0}).json()
     page2 = client.get("/api/v1/audit", params={"limit": 2, "offset": 2}).json()
+    assert len(page1) == len(page2) == 2, "两页都必须取到行，disjoint 才不是空转"
     assert page1 and {x["id"] for x in page1}.isdisjoint({x["id"] for x in page2})
     ids = [x["id"] for x in page1]
     assert ids == sorted(ids, reverse=True), "倒序返回（created_at,id 双键，测试内即 id 倒序）"

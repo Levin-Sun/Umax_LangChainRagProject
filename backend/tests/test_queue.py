@@ -1,11 +1,15 @@
-# TDD 红灯：ARQ 异步入库流水线（队列抽象注入，默认同步保持任务4语义）
+# 异步入库流水线（队列抽象注入，默认同步保持任务4语义）
+# 阶段 2 起 kb 写/文档写是 admin 面：夹具客户端统一登录 admin
 import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
 
 from app.main import create_app
 from app.worker import run_import
+from tests.conftest import login, seed_user
 from tests.test_api import FakeEmbedder
+
+ADMIN = ("admin@umax.local", "Adm1n-Pass-123")
 
 
 class RecordingQueue:
@@ -27,7 +31,10 @@ def _client(engine, tmp_path, embedder, queue=None):
                      chat_fn=lambda q, h: {"answer": "x", "prompt_tokens": 0,
                                            "completion_tokens": 0},
                      upload_dir=str(tmp_path), queue=queue)
-    return TestClient(app)
+    c = TestClient(app)
+    seed_user(engine, *ADMIN, role="admin")
+    login(c, *ADMIN)
+    return c
 
 
 def test_upload_with_queue_returns_pending_and_enqueues(engine, db, tmp_path, embedder):

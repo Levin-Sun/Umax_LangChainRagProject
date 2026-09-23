@@ -1,7 +1,9 @@
 # FastAPI 服务层：知识库/文档入库/检索/带引用问答/会话历史
-# 管理类端点（kb 写/models/usage）经 require_admin 守护：create_app(admin_token) 注入，
-# 生产由 build_production_app 从 ADMIN_TOKEN 配置接线；留空=不启用（开发/测试默认）
-import secrets
+# 鉴权收口（阶段 2·任务 6）：除 /health 与 /auth/login 外全部端点要求登录会话；
+# admin 面（kb 写/文档写/models/usage/users/grants/audit）另加角色校验，member 得 403。
+# 库级授权在检索层钳制（services/retrieval.allowed_kb_ids），不在展示层过滤。
+# 旧 ADMIN_TOKEN 共享口令方案（require_admin/admin_session/admin_hint//admin/*）已整体退役，
+# 不留兼容层；初始管理员由 build_production_app 按 ADMIN_EMAIL/ADMIN_PASSWORD 播种。
 from collections.abc import Callable, Iterator
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -166,11 +168,7 @@ class ModelPatchIn(BaseModel):
     enabled: StrictBool | None = None
 
 
-class LegacyTokenLoginIn(BaseModel):   # 旧 token 登录（/admin/login）：任务 6 连旧端点一并删除
-    token: Utf8Str
-
-
-class LoginIn(BaseModel):          # 新邮箱+口令登录（RBAC spec §2）
+class LoginIn(BaseModel):          # 邮箱+口令登录（RBAC spec §2）
     email: Utf8Str = Field(max_length=255)
     password: Utf8Str = Field(max_length=256)
 
@@ -256,37 +254,10 @@ def create_app(
     queue=None,          # ImportQueue 协议；None=同步入库
     mineru=None,         # MinerUClient；None=扫描件解析直接失败并说明原因
     secret: str | None = None,  # 网关主密钥（GATEWAY_SECRET），None=读配置
-    admin_token: str = "",      # 管理口令；""=鉴权不启用（生产由 build_production_app 接线）
 ) -> FastAPI:
     app = FastAPI(title="Umax RAG", version="0.1.0")
     s = get_settings()
     gateway_secret = s.gateway_secret if secret is None else secret
-
-    # 管理鉴权：cookie 即令牌的 bearer 形态（HttpOnly+SameSite=Lax），依赖内网/HTTPS 边界；
-    # 常数时间比对，未配置=全开放（开发形态），留空时 login 一律 401 不泄露"未配置"
-    _ERR_ADMIN = _ERR(401, "需要管理员登录")
-
-    def require_admin(request: Request) -> None:
-        if not admin_token or secrets.compare_digest(request.cookies.get("admin_session", ""),
-                                                     admin_token):
-            return
-        raise HTTPException(401, "需要管理员登录")
-
-    @app.post("/api/v1/admin/login", status_code=204,
-              responses={**_ERR(401, "口令错误"), **_ERR_BODY})
-    def admin_login(body: LegacyTokenLoginIn, response: Response):
-        if not admin_token or not secrets.compare_digest(body.token, admin_token):
-            raise HTTPException(401, "口令错误")
-        response.set_cookie("admin_session", admin_token, httponly=True,
-                            samesite="lax", max_age=7 * 24 * 3600, path="/")
-        # JS 可读的登录标记：Nav 显隐用；授权仍只认 HttpOnly 的 admin_session
-        response.set_cookie("admin_hint", "1", samesite="lax",
-                            max_age=7 * 24 * 3600, path="/")
-
-    @app.post("/api/v1/admin/logout", status_code=204)
-    def admin_logout(response: Response):
-        response.delete_cookie("admin_session", path="/")
-        response.delete_cookie("admin_hint", path="/")
 
     def get_session() -> Iterator[Session]:
         with Session(engine) as session:
@@ -319,19 +290,6 @@ def create_app(
             raise HTTPException(403, "需要管理员权限")
         return user
 
-    def get_optional_user(request: Request, session: Session = Depends(get_session)) -> User | None:
-        """任务 5 的过渡形态（写路径审计用）：登录收口在任务 6（旧 ADMIN_TOKEN 版 require_admin
-        本任务共存），存量写端点测试/未登录形态必须照常可用——故这里"能解析出主体就给 User，
-        给不出就 None"，绝不抛 401。审计语义 = "该端点的已登录操作者"，无主体则 user_email 空。
-        任务 6 把本依赖整体换成 get_user / require_admin_role（签名位置不变）。"""
-        try:
-            return get_user(request, session)
-        except HTTPException:
-            return None
-
-    def _operator_email(user: User | None) -> str | None:
-        return user.email if user is not None else None
-
     def allowed_kb_ids(session: Session, user: User) -> set[int] | None:
         """None=admin 隐式全库；member=授权集合（可为空集——消费端必须区分 None 与 set()）。"""
         if user.role == "admin":
@@ -345,7 +303,8 @@ def create_app(
                    session: Session = Depends(get_session)):
         key = f"{body.email}|{_client_ip(request)}"
         if throttle.blocked(key):
-            raise HTTPException(429, "失败次数过多，请 15 分钟后再试")
+            # 文案与 spec 里 429 的 description 一字对齐（评审收编③）：同一码两处措辞必然漂移
+            raise HTTPException(429, "失败次数过多，15 分钟后再试")
         u = session.query(User).filter_by(tenant_id="default", email=body.email).first()
         if not u or not verify_password(body.password, u.hashed_password) or u.status != "active":
             throttle.failure(key)
@@ -359,6 +318,8 @@ def create_app(
         audit_record(session, "login_success", user_email=u.email, target_type="user",
                      target_id=u.id, ip=_client_ip(request))
         session.commit()
+        # secure 标记留生产硬化：HTTPS 终结在反代后时加 secure=True 即可（评审收编⑤）；
+        # 当前 dev/测试是 http://127.0.0.1，加了 cookie 直接被丢弃，全链路登录态失效
         response.set_cookie(SESSION_COOKIE, plain, httponly=True, samesite="lax",
                             max_age=SESSION_TTL_DAYS * 24 * 3600, path="/")
 
@@ -380,8 +341,10 @@ def create_app(
 
     @app.post("/api/v1/auth/change-password", status_code=204,
               # 422 不覆写：FastAPI 默认 422（HTTPValidationError，detail 是数组）——用 _ERR(ErrorOut)
-              # 覆写会被 fuzz 判 response_schema_conformance 违约（JSON 解析失败先于依赖 401 发生）
-              responses={**_ERR(401, "旧口令错误"), **_ERR_UNAUTH, **_ERR_BODY})
+              # 覆写会被 fuzz 判 response_schema_conformance 违约（JSON 解析失败先于依赖 401 发生）。
+              # 401 合并顺序（评审收编②）：_ERR_UNAUTH 在前、业务文案在后——同一状态码只有一个
+              # description，端点专属的"旧口令错误"必须胜过通用"需要登录"（后者由 detail 承载）。
+              responses={**_ERR_UNAUTH, **_ERR(401, "旧口令错误"), **_ERR_BODY})
     def auth_change_password(body: ChangePasswordIn, request: Request,
                              user: User = Depends(get_user), session: Session = Depends(get_session)):
         if not verify_password(body.old_password, user.hashed_password):
@@ -458,7 +421,11 @@ def create_app(
             u.hashed_password = hash_password(body.password)
             changed.append("password")
         if {"role", "status", "password"} & set(changed):
-            _revoke_sessions(session, u.id)   # 角色/启停/重置口令变更一律全吊销（spec §2）
+            # 角色/启停/重置口令变更一律吊销（spec §2）；管理员自重置保留当前会话（评审收编⑦）——
+            # 与自助改密同语义：吊销的是"其他设备"，不是把操作者从正在做的管理动作里踢出去。
+            # 自降级/自禁用在上游已 400，故 except_hash 只会因 password 生效。
+            _revoke_sessions(session, u.id,
+                             except_hash=request.state.session_hash if u.id == admin.id else None)
         if changed:
             audit_record(session, "user_updated", user_email=admin.email, target_type="user",
                          target_id=u.id, detail={"fields": changed}, ip=_client_ip(request))
@@ -526,41 +493,53 @@ def create_app(
         return {"status": "ok"}
 
     # ---- 知识库 ----
-    @app.post("/api/v1/kb", status_code=201, dependencies=[Depends(require_admin)],
-              responses={**_ERR_BODY, **_ERR_ADMIN})
+    def _guard_kb_ids(allowed: set[int] | None, kb_ids: list[int] | None) -> None:
+        """显式点了未授权库 → 403（admin 的 allowed 是 None，直通）。"""
+        if allowed is not None and not set(kb_ids or []) <= allowed:
+            raise HTTPException(403, "无权访问指定知识库")
+
+    @app.post("/api/v1/kb", status_code=201,
+              responses={**_ERR_BODY, **_ERR_UNAUTH, **_ERR_FORBID})
     def create_kb(body: KbIn, request: Request,
-                  user: User | None = Depends(get_optional_user),
+                  admin: User = Depends(require_admin_role),
                   session: Session = Depends(get_session)):
         kb = KnowledgeBase(tenant_id="default", name=body.name, description=body.description,
                            embedding_model=s.embedding_model, chunk_target=s.chunk_target)
         session.add(kb)
         session.flush()
-        audit_record(session, "kb_created", user_email=_operator_email(user),
+        audit_record(session, "kb_created", user_email=admin.email,
                      target_type="kb", target_id=kb.id, detail={"name": body.name},
                      ip=_client_ip(request))
         session.commit()
         return {"id": kb.id, "name": kb.name, "description": kb.description}
 
-    @app.get("/api/v1/kb")
-    def list_kb(session: Session = Depends(get_session)):
+    @app.get("/api/v1/kb", responses=_ERR_UNAUTH)
+    def list_kb(user: User = Depends(get_user), session: Session = Depends(get_session)):
+        # member 的库列表在查询层过滤（不是前端隐藏）——空授权=空列表
+        allowed = allowed_kb_ids(session, user)
+        q = session.query(KnowledgeBase)
+        if allowed is not None:
+            q = q.filter(KnowledgeBase.id.in_(allowed))
         return [{"id": k.id, "name": k.name, "description": k.description}
-                for k in session.query(KnowledgeBase).order_by(KnowledgeBase.id)]
+                for k in q.order_by(KnowledgeBase.id)]
 
     @app.get("/api/v1/kb/{kb_id}/documents",
-             responses=_ERR(404, "知识库不存在"))
-    def list_documents(kb_id: PathId, session: Session = Depends(get_session)):
-        if not session.get(KnowledgeBase, kb_id):
+             responses={**_ERR(404, "知识库不存在"), **_ERR_UNAUTH})
+    def list_documents(kb_id: PathId, user: User = Depends(get_user),
+                       session: Session = Depends(get_session)):
+        allowed = allowed_kb_ids(session, user)
+        # 不在授权范围内的库与"不存在"同文案：探测不出别人的库 id 存不存在
+        if not session.get(KnowledgeBase, kb_id) or (allowed is not None and kb_id not in allowed):
             raise HTTPException(404, "知识库不存在")
         return [_doc_json(d) for d in session.query(Document)
                 .filter_by(kb_id=kb_id).order_by(Document.id)]
 
     # ---- 文档与入库 ----
     @app.post("/api/v1/kb/{kb_id}/documents", status_code=201,
-              dependencies=[Depends(require_admin)],
               responses={**_ERR(404, "知识库不存在"), **_ERR(415, "不支持的文件类型"),
-                         **_ERR_BODY, **_ERR_ADMIN})
+                         **_ERR_BODY, **_ERR_UNAUTH, **_ERR_FORBID})
     def upload_document(kb_id: PathId, request: Request, file: UploadFile = File(...),
-                        user: User | None = Depends(get_optional_user),
+                        admin: User = Depends(require_admin_role),
                         session: Session = Depends(get_session)):
         kb = session.get(KnowledgeBase, kb_id)
         if not kb:
@@ -580,7 +559,7 @@ def create_app(
         p.parent.mkdir(parents=True, exist_ok=True)
         p.write_bytes(raw)
         doc.storage_path = str(p)
-        audit_record(session, "document_uploaded", user_email=_operator_email(user),
+        audit_record(session, "document_uploaded", user_email=admin.email,
                      target_type="document", target_id=doc.id,
                      detail={"kb_id": kb_id, "name": name}, ip=_client_ip(request))
         session.commit()
@@ -591,27 +570,36 @@ def create_app(
                               chunk_target=s.chunk_target, chunk_min=s.chunk_min)
         return _doc_json(doc)
 
-    @app.get("/api/v1/documents/{doc_id}",
-             responses=_ERR(404, "文档不存在"))
-    def get_document(doc_id: PathId, session: Session = Depends(get_session)):
+    def _visible_doc(session: Session, user: User, doc_id: int) -> Document:
+        """按库级授权取文档：不可见（不存在/在未授权库）统一 404 同文案，探测不出差异。"""
         doc = session.get(Document, doc_id)
-        if not doc:
+        allowed = allowed_kb_ids(session, user)
+        if not doc or (allowed is not None and doc.kb_id not in allowed):
             raise HTTPException(404, "文档不存在")
-        return _doc_json(doc)
+        return doc
+
+    @app.get("/api/v1/documents/{doc_id}",
+             responses={**_ERR(404, "文档不存在"), **_ERR_UNAUTH})
+    def get_document(doc_id: PathId, user: User = Depends(get_user),
+                     session: Session = Depends(get_session)):
+        return _doc_json(_visible_doc(session, user, doc_id))
 
     @app.get("/api/v1/documents/{doc_id}/chunks",
-             responses=_ERR(404, "文档不存在"))
-    def preview_chunks(doc_id: PathId, session: Session = Depends(get_session)):
-        if not session.get(Document, doc_id):
-            raise HTTPException(404, "文档不存在")
+             responses={**_ERR(404, "文档不存在"), **_ERR_UNAUTH})
+    def preview_chunks(doc_id: PathId, user: User = Depends(get_user),
+                       session: Session = Depends(get_session)):
+        _visible_doc(session, user, doc_id)
         return [{"id": c.id, "chunk_index": c.chunk_index, "content": c.content,
                  "has_embedding": c.embedding is not None}
                 for c in session.query(Chunk).filter_by(document_id=doc_id)
                 .order_by(Chunk.chunk_index)]
 
-    @app.patch("/api/v1/documents/{doc_id}", dependencies=[Depends(require_admin)],
-               responses={**_ERR(404, "文档不存在"), **_ERR_BODY, **_ERR_ADMIN})
-    def patch_document(doc_id: PathId, body: DocPatchIn, session: Session = Depends(get_session)):
+    @app.patch("/api/v1/documents/{doc_id}",
+               responses={**_ERR(404, "文档不存在"), **_ERR_BODY,
+                          **_ERR_UNAUTH, **_ERR_FORBID})
+    def patch_document(doc_id: PathId, body: DocPatchIn,
+                       admin: User = Depends(require_admin_role),
+                       session: Session = Depends(get_session)):
         # 有意不记审计（spec §5 / 任务 5 表）：状态机内部推进（worker 回写 pending/ready/failed），
         # 不是人工写操作——记了只会淹没真实操作事件
         doc = session.get(Document, doc_id)
@@ -624,17 +612,16 @@ def create_app(
         return _doc_json(doc)
 
     @app.post("/api/v1/documents/{doc_id}/reprocess", status_code=202,
-              dependencies=[Depends(require_admin)],
-              responses={**_ERR(404, "文档不存在"), **_ERR_ADMIN})
+              responses={**_ERR(404, "文档不存在"), **_ERR_UNAUTH, **_ERR_FORBID})
     def reprocess(doc_id: PathId, request: Request,
-                  user: User | None = Depends(get_optional_user),
+                  admin: User = Depends(require_admin_role),
                   session: Session = Depends(get_session)):
         doc = session.get(Document, doc_id)
         if not doc:
             raise HTTPException(404, "文档不存在")
         # 审计只 add 不 commit：队列分支随下面的 commit 落库，同步分支随 ingest_document
         # 内部的 commit 落库——两条路径都是"操作真发生了才有事件"
-        audit_record(session, "document_reprocessed", user_email=_operator_email(user),
+        audit_record(session, "document_reprocessed", user_email=admin.email,
                      target_type="document", target_id=doc.id, detail={"kb_id": doc.kb_id},
                      ip=_client_ip(request))
         if queue is not None:
@@ -647,20 +634,30 @@ def create_app(
                               chunk_min=s.chunk_min)
         return _doc_json(doc)
 
-    # ---- 检索与问答 ----
-    @app.post("/api/v1/retrieve", responses=_ERR_BODY)
-    def retrieve_api(body: RetrieveIn, session: Session = Depends(get_session)):
+    # ---- 检索与问答：可见性在检索层钳制（SQL 谓词），命中集就是授权集的子集 ----
+    @app.post("/api/v1/retrieve", responses={**_ERR_BODY, **_ERR_UNAUTH, **_ERR_FORBID})
+    def retrieve_api(body: RetrieveIn, user: User = Depends(get_user),
+                     session: Session = Depends(get_session)):
+        allowed = allowed_kb_ids(session, user)
+        _guard_kb_ids(allowed, body.kb_ids)
         return retrieve(session, body.query, embedder=embedder, kb_ids=body.kb_ids,
+                        allowed_kb_ids=allowed,
                         recall_k=s.recall_k, top_k=body.top_k or s.rerank_top_n,
                         min_sim=s.min_sim)
 
-    @app.post("/api/v1/chat", responses=_ERR_BODY)
-    def chat(body: ChatIn, session: Session = Depends(get_session)):
+    @app.post("/api/v1/chat", responses={**_ERR_BODY, **_ERR_UNAUTH, **_ERR_FORBID})
+    def chat(body: ChatIn, user: User = Depends(get_user),
+             session: Session = Depends(get_session)):
+        allowed = allowed_kb_ids(session, user)
+        _guard_kb_ids(allowed, body.kb_ids)
         hits = retrieve(session, body.question, embedder=embedder, kb_ids=body.kb_ids,
+                        allowed_kb_ids=allowed,
                         recall_k=s.recall_k, top_k=s.rerank_top_n, min_sim=s.min_sim)
         conv = session.get(Conversation, body.conversation_id) if body.conversation_id else None
+        if conv is not None and conv.user_email != user.email:
+            raise HTTPException(404, "会话不存在")   # 跨用户会话与不存在同文案（同 list_messages）
         if conv is None:
-            conv = Conversation(tenant_id="default", user_email="default@local",
+            conv = Conversation(tenant_id="default", user_email=user.email,
                                 title=body.question[:32], kb_ids=body.kb_ids or [])
             session.add(conv)
             session.flush()
@@ -672,32 +669,36 @@ def create_app(
         else:
             out = chat_fn(body.question, hits)
             answer = out["answer"]
-            usage = {"prompt_tokens": out.get("prompt_tokens", 0),
-                     "completion_tokens": out.get("completion_tokens", 0)}
+            usage = {"prompt_tokens": out.get("prompt_tokens") or 0,
+                     "completion_tokens": out.get("completion_tokens") or 0}
             citations = [{"n": i, "doc_name": h["doc_name"], "chunk_id": h["id"],
                           "excerpt": h["content"][:80]} for i, h in enumerate(hits, 1)]
-            if not out.get("logged"):  # 网关 make_chat_fn 已自行记账，避免双记
-                session.add(UsageRecord(tenant_id="default", user_email="default@local",
-                                        scenario="chat", model=out.get("model") or s.chat_model,
-                                        prompt_tokens=usage["prompt_tokens"],
-                                        completion_tokens=usage["completion_tokens"],
-                                        latency_ms=out.get("latency_ms")))
+            # 记账单点在端点：网关 make_chat_fn 已交回记账职责（logged 约定退役），
+            # 这里必记且只记一次，台账归真实登录者而非占位邮箱
+            session.add(UsageRecord(tenant_id="default", user_email=user.email,
+                                    scenario="chat", model=out.get("model") or s.chat_model,
+                                    prompt_tokens=usage["prompt_tokens"],
+                                    completion_tokens=usage["completion_tokens"],
+                                    latency_ms=out.get("latency_ms")))
         session.add(Message(tenant_id="default", conversation_id=conv.id, role="assistant",
                             content=[{"type": "text", "text": answer}], citations=citations))
         session.commit()
         return {"conversation_id": conv.id, "answer": answer, "citations": citations,
                 "cited_docs": parse_citations(answer, hits), "usage": usage}
 
-    # ---- 会话历史 ----
-    @app.get("/api/v1/conversations")
-    def list_conversations(session: Session = Depends(get_session)):
+    # ---- 会话历史：按登录者隔离（admin 也没有特权看别人的会话）----
+    @app.get("/api/v1/conversations", responses=_ERR_UNAUTH)
+    def list_conversations(user: User = Depends(get_user), session: Session = Depends(get_session)):
         return [{"id": c.id, "title": c.title, "kb_ids": c.kb_ids}
-                for c in session.query(Conversation).order_by(Conversation.id)]
+                for c in session.query(Conversation).filter(Conversation.user_email == user.email)
+                .order_by(Conversation.id)]
 
     @app.get("/api/v1/conversations/{conv_id}/messages",
-             responses=_ERR(404, "会话不存在"))
-    def list_messages(conv_id: PathId, session: Session = Depends(get_session)):
-        if not session.get(Conversation, conv_id):
+             responses={**_ERR(404, "会话不存在"), **_ERR_UNAUTH})
+    def list_messages(conv_id: PathId, user: User = Depends(get_user),
+                      session: Session = Depends(get_session)):
+        conv = session.get(Conversation, conv_id)
+        if not conv or conv.user_email != user.email:
             raise HTTPException(404, "会话不存在")
         return [{"id": m.id, "role": m.role, "content": m.content, "citations": m.citations}
                 for m in session.query(Message).filter_by(conversation_id=conv_id)
@@ -717,11 +718,11 @@ def create_app(
                 "fallback_rank": m.fallback_rank, "enabled": m.enabled,
                 "api_key_masked": ("****" + plain[-4:]) if plain else ""}
 
-    @app.post("/api/v1/models", status_code=201, dependencies=[Depends(require_admin)],
+    @app.post("/api/v1/models", status_code=201,
               responses={**_ERR(400, "scenario 非法"), **_ERR(503, "未配置 GATEWAY_SECRET"),
-                         **_ERR_ADMIN})
+                         **_ERR_UNAUTH, **_ERR_FORBID})
     def create_model(body: ModelIn, request: Request,
-                     user: User | None = Depends(get_optional_user),
+                     admin: User = Depends(require_admin_role),
                      session: Session = Depends(get_session)):
         if body.scenario not in SCENARIOS:
             raise HTTPException(400, f"scenario 仅支持 {'/'.join(sorted(SCENARIOS))}")
@@ -733,25 +734,25 @@ def create_app(
         session.add(m)
         session.flush()
         # detail 只进非敏感定位字段：api_key/base_url/provider 明文一律不入审计
-        audit_record(session, "model_created", user_email=_operator_email(user),
+        audit_record(session, "model_created", user_email=admin.email,
                      target_type="model", target_id=m.id,
                      detail={"scenario": body.scenario, "model_name": body.model_name,
                              "fallback_rank": body.fallback_rank}, ip=_client_ip(request))
         session.commit()
         return _model_json(m)
 
-    @app.get("/api/v1/models", dependencies=[Depends(require_admin)],
-             responses=_ERR_ADMIN)
-    def list_models(session: Session = Depends(get_session)):
+    @app.get("/api/v1/models", responses={**_ERR_UNAUTH, **_ERR_FORBID})
+    def list_models(admin: User = Depends(require_admin_role), session: Session = Depends(get_session)):
         rows = session.query(ModelConfig).order_by(ModelConfig.scenario,
                                                    ModelConfig.fallback_rank, ModelConfig.id)
         return [_model_json(m) for m in rows]
 
-    @app.patch("/api/v1/models/{model_id}", dependencies=[Depends(require_admin)],
+    @app.patch("/api/v1/models/{model_id}",
                responses={**_ERR(400, "scenario 非法"), **_ERR(404, "模型配置不存在"),
-                          **_ERR(503, "未配置 GATEWAY_SECRET"), **_ERR_ADMIN})
+                          **_ERR(503, "未配置 GATEWAY_SECRET"),
+                          **_ERR_UNAUTH, **_ERR_FORBID})
     def patch_model(model_id: PathId, body: ModelPatchIn, request: Request,
-                    user: User | None = Depends(get_optional_user),
+                    admin: User = Depends(require_admin_role),
                     session: Session = Depends(get_session)):
         m = session.get(ModelConfig, model_id)
         if not m:
@@ -765,31 +766,32 @@ def create_app(
             data["encrypted_api_key"] = encrypt_secret(data.pop("api_key"), _require_secret())
         for k, v in data.items():
             setattr(m, k, v)
-        audit_record(session, "model_updated", user_email=_operator_email(user),
-                     target_type="model", target_id=m.id, detail={"fields": fields},
-                     ip=_client_ip(request))
+        if fields:   # 无变更不记审计（评审收编⑧/⑩ 统一裁定）：空 PATCH 是"什么都没改"，
+            # 记一条 fields=[] 的事件只会污染事件流——与 patch_user 的 `if changed:` 同一口径
+            audit_record(session, "model_updated", user_email=admin.email,
+                         target_type="model", target_id=m.id, detail={"fields": fields},
+                         ip=_client_ip(request))
         session.commit()
         return _model_json(m)
 
     @app.delete("/api/v1/models/{model_id}", status_code=204,
-                dependencies=[Depends(require_admin)],
-                responses={**_ERR(503, "未配置 GATEWAY_SECRET"), **_ERR_ADMIN})
+                responses={**_ERR(503, "未配置 GATEWAY_SECRET"), **_ERR_UNAUTH, **_ERR_FORBID})
     def delete_model(model_id: PathId, request: Request,
-                     user: User | None = Depends(get_optional_user),
+                     admin: User = Depends(require_admin_role),
                      session: Session = Depends(get_session)):
         m = session.get(ModelConfig, model_id)
         if m:
             model_name = m.model_name      # 删前取：行没了就查不到被删的是哪个模型
             session.delete(m)
-            audit_record(session, "model_deleted", user_email=_operator_email(user),
+            audit_record(session, "model_deleted", user_email=admin.email,
                          target_type="model", target_id=model_id,
                          detail={"model_name": model_name}, ip=_client_ip(request))
             session.commit()
 
     # ---- 用量看板简版（§C：成本折算的事实来源）----
-    @app.get("/api/v1/usage/summary", dependencies=[Depends(require_admin)],
-             responses=_ERR_ADMIN)
-    def usage_summary(session: Session = Depends(get_session)):
+    @app.get("/api/v1/usage/summary", responses={**_ERR_UNAUTH, **_ERR_FORBID})
+    def usage_summary(admin: User = Depends(require_admin_role),
+                      session: Session = Depends(get_session)):
         rows = (session.query(UsageRecord.scenario, UsageRecord.model,
                               func.count().label("calls"),
                               func.coalesce(func.sum(UsageRecord.prompt_tokens), 0),
@@ -818,6 +820,24 @@ def build_production_app(upload_dir: str = "uploads",
         engine = create_engine(s.sqlalchemy_url(), pool_pre_ping=True)
         import app.models  # noqa: F401  一键部署：启动即建表（正式迁移方案后续以 Alembic 接管）
         Base.metadata.create_all(engine)
+    # 老库一键升级的过渡 pragmatics（无 Alembic）：create_all 不给已存在的表加列，
+    # users.name/status 是任务 2 新增列——幂等 ADD COLUMN IF NOT EXISTS 补齐（fresh 库同样通过）
+    with engine.begin() as con:
+        con.execute(sa_text("ALTER TABLE users ADD COLUMN IF NOT EXISTS "
+                            "name VARCHAR(128) NOT NULL DEFAULT ''"))
+        con.execute(sa_text("ALTER TABLE users ADD COLUMN IF NOT EXISTS "
+                            "status VARCHAR(16) NOT NULL DEFAULT 'active'"))
+    # 播种初始管理员（spec §2）：users 空表时按 ADMIN_EMAIL/ADMIN_PASSWORD 落一条 role=admin，
+    # 口令 hash 后入库（明文永不落库）。测试装配 create_app 不播种，走 conftest.seed_user——
+    # 故这里只在 build_production_app 里做，且放在 engine 判定之后（注入 engine 也要播种）。
+    with Session(engine) as ses:   # ses 而非 s：s 已是 Settings，with 目标名会覆盖函数作用域
+        if ses.query(User).first() is None:
+            ses.add(User(tenant_id="default", email=s.admin_email, name="admin",
+                         hashed_password=hash_password(s.admin_password), role="admin"))
+            ses.commit()
+            import logging
+            logging.getLogger("umax").warning(
+                "已播种初始管理员 %s（ADMIN_EMAIL/ADMIN_PASSWORD）——部署后立即登录改密", s.admin_email)
     chat_fn = embedder = None
     if s.gateway_secret:
         from app.services.gateway import ModelGateway
@@ -841,14 +861,13 @@ def build_production_app(upload_dir: str = "uploads",
         from app.queue import ArqQueue
 
         queue = ArqQueue(redis_host=s.redis_host, redis_port=s.redis_port)
-    if not s.admin_token:
+    if not s.admin_email or not s.admin_password:
         import logging
 
         logging.getLogger("umax").warning(
-            "ADMIN_TOKEN 未配置：知识库写操作/模型管理/用量看板无鉴权开放，部署前必须配置")
+            "ADMIN_EMAIL/ADMIN_PASSWORD 未配置：将按默认账号播种初始管理员，部署后必须登录改密")
     return create_app(engine=engine, embedder=embedder, chat_fn=chat_fn,
-                      upload_dir=upload_dir, mineru=mineru, queue=queue,
-                      admin_token=s.admin_token)
+                      upload_dir=upload_dir, mineru=mineru, queue=queue)
 
 
 def main() -> None:

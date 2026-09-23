@@ -30,8 +30,6 @@ class Settings(BaseSettings):
     # 初始管理员播种（users 空表时生效；生产部署后应登录改密）
     admin_email: str = "admin@umax.local"
     admin_password: str = "umax-admin-dev"
-    # 管理员口令：非空则管理类端点（kb 写/models/usage）要求登录会话；留空=不启用（开发默认）
-    admin_token: str = ""
     # 入库调度：sync（开发默认）/ arq（生产，需 Redis）
     queue_backend: str = "sync"
     redis_host: str = "localhost"
