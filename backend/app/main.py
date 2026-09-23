@@ -8,7 +8,7 @@ from pathlib import Path
 from typing import Annotated
 from uuid import uuid4
 
-from fastapi import Depends, FastAPI, File, HTTPException, Request, Response, UploadFile
+from fastapi import Depends, FastAPI, File, HTTPException, Query, Request, Response, UploadFile
 from pydantic import BaseModel, BeforeValidator, Field, StrictBool
 from sqlalchemy import func, text as sa_text
 from sqlalchemy.engine import Engine
@@ -18,7 +18,7 @@ from starlette.routing import Match
 from starlette.types import ASGIApp, Receive, Scope, Send
 
 from app.core.config import get_settings
-from app.models import (Chunk, Conversation, Document, KnowledgeBase, Message,
+from app.models import (AuditLog, Chunk, Conversation, Document, KnowledgeBase, Message,
                         ModelConfig, User, UserKbGrant, UserSession, UsageRecord)
 from app.services.audit import record as audit_record
 from app.services.auth import (LoginThrottle, hash_password, new_session_token,
@@ -71,6 +71,22 @@ JsonInt = Annotated[int, BeforeValidator(_json_int)]
 PathId = Annotated[int, Field(ge=INT32_MIN, le=INT32_MAX)]     # 路径 id：字符串→int 保持 lax，只卡 int32
 ReqId = Annotated[int, BeforeValidator(_json_int32),           # body id：JSON integer 且卡 int32，
             Field(json_schema_extra={"minimum": INT32_MIN, "maximum": INT32_MAX})]  # schema 侧标准键
+
+
+def _query_int(v):
+    # 查询参数专用整数口径（任务 5 /audit 分页）：HTTP query 到 FastAPI 手上永远是字符串，
+    # 直接套 JsonInt 会把 limit=1 的 "1" 判成"不是 JSON integer"→422（分页端点不可用）；
+    # 数字串按值取整，垃圾串/bool/浮点串仍拒（422 由 FastAPI 默认声明入约）。
+    # 上下界不在这里卡——端点内钳位（limit 1..200 / offset ≥0），越界不是违法请求。
+    if isinstance(v, str):
+        try:
+            return int(v.strip())
+        except ValueError:
+            raise ValueError("查询参数不是整数") from None
+    return _json_int(v)
+
+
+QueryInt = Annotated[int, BeforeValidator(_query_int)]        # query 侧整数（limit/offset）
 
 
 def _clean_text(v):
@@ -303,6 +319,19 @@ def create_app(
             raise HTTPException(403, "需要管理员权限")
         return user
 
+    def get_optional_user(request: Request, session: Session = Depends(get_session)) -> User | None:
+        """任务 5 的过渡形态（写路径审计用）：登录收口在任务 6（旧 ADMIN_TOKEN 版 require_admin
+        本任务共存），存量写端点测试/未登录形态必须照常可用——故这里"能解析出主体就给 User，
+        给不出就 None"，绝不抛 401。审计语义 = "该端点的已登录操作者"，无主体则 user_email 空。
+        任务 6 把本依赖整体换成 get_user / require_admin_role（签名位置不变）。"""
+        try:
+            return get_user(request, session)
+        except HTTPException:
+            return None
+
+    def _operator_email(user: User | None) -> str | None:
+        return user.email if user is not None else None
+
     def allowed_kb_ids(session: Session, user: User) -> set[int] | None:
         """None=admin 隐式全库；member=授权集合（可为空集——消费端必须区分 None 与 set()）。"""
         if user.role == "admin":
@@ -469,6 +498,28 @@ def create_app(
         session.commit()
         return ids
 
+    # ---- 审计查询（spec §5，任务 5）：admin 独占，过滤+分页，倒序 ----
+    @app.get("/api/v1/audit", responses={**_ERR_UNAUTH, **_ERR_FORBID})
+    def list_audit(user: Annotated[str | None, Query(max_length=255)] = None,
+                   action: Annotated[str | None, Query(max_length=32)] = None,
+                   limit: QueryInt = 50, offset: QueryInt = 0,
+                   admin: User = Depends(require_admin_role),
+                   session: Session = Depends(get_session)):
+        limit = max(1, min(int(limit), 200))
+        offset = max(0, int(offset))
+        q = session.query(AuditLog)
+        if user:
+            q = q.filter(AuditLog.user_email == user)
+        if action:
+            q = q.filter(AuditLog.action == action)
+        # (created_at, id) 双键倒序：同事务内 created_at 相同（PG now()=事务起始时刻），
+        # 只按时间排会让同批行的分页顺序不确定——id 兜底后全序确定，分页可复现
+        rows = (q.order_by(AuditLog.created_at.desc(), AuditLog.id.desc())
+                .offset(offset).limit(limit).all())
+        return [{"id": r.id, "user_email": r.user_email, "action": r.action,
+                 "target_type": r.target_type, "target_id": r.target_id, "detail": r.detail,
+                 "ip": r.ip, "created_at": r.created_at.isoformat()} for r in rows]
+
     @app.get("/api/v1/health")
     def health(session: Session = Depends(get_session)):
         session.execute(sa_text("SELECT 1"))
@@ -477,10 +528,16 @@ def create_app(
     # ---- 知识库 ----
     @app.post("/api/v1/kb", status_code=201, dependencies=[Depends(require_admin)],
               responses={**_ERR_BODY, **_ERR_ADMIN})
-    def create_kb(body: KbIn, session: Session = Depends(get_session)):
+    def create_kb(body: KbIn, request: Request,
+                  user: User | None = Depends(get_optional_user),
+                  session: Session = Depends(get_session)):
         kb = KnowledgeBase(tenant_id="default", name=body.name, description=body.description,
                            embedding_model=s.embedding_model, chunk_target=s.chunk_target)
         session.add(kb)
+        session.flush()
+        audit_record(session, "kb_created", user_email=_operator_email(user),
+                     target_type="kb", target_id=kb.id, detail={"name": body.name},
+                     ip=_client_ip(request))
         session.commit()
         return {"id": kb.id, "name": kb.name, "description": kb.description}
 
@@ -502,7 +559,8 @@ def create_app(
               dependencies=[Depends(require_admin)],
               responses={**_ERR(404, "知识库不存在"), **_ERR(415, "不支持的文件类型"),
                          **_ERR_BODY, **_ERR_ADMIN})
-    def upload_document(kb_id: PathId, file: UploadFile = File(...),
+    def upload_document(kb_id: PathId, request: Request, file: UploadFile = File(...),
+                        user: User | None = Depends(get_optional_user),
                         session: Session = Depends(get_session)):
         kb = session.get(KnowledgeBase, kb_id)
         if not kb:
@@ -522,6 +580,9 @@ def create_app(
         p.parent.mkdir(parents=True, exist_ok=True)
         p.write_bytes(raw)
         doc.storage_path = str(p)
+        audit_record(session, "document_uploaded", user_email=_operator_email(user),
+                     target_type="document", target_id=doc.id,
+                     detail={"kb_id": kb_id, "name": name}, ip=_client_ip(request))
         session.commit()
         if queue is not None:
             queue.enqueue_import(doc.id)
@@ -551,6 +612,8 @@ def create_app(
     @app.patch("/api/v1/documents/{doc_id}", dependencies=[Depends(require_admin)],
                responses={**_ERR(404, "文档不存在"), **_ERR_BODY, **_ERR_ADMIN})
     def patch_document(doc_id: PathId, body: DocPatchIn, session: Session = Depends(get_session)):
+        # 有意不记审计（spec §5 / 任务 5 表）：状态机内部推进（worker 回写 pending/ready/failed），
+        # 不是人工写操作——记了只会淹没真实操作事件
         doc = session.get(Document, doc_id)
         if not doc:
             raise HTTPException(404, "文档不存在")
@@ -563,10 +626,17 @@ def create_app(
     @app.post("/api/v1/documents/{doc_id}/reprocess", status_code=202,
               dependencies=[Depends(require_admin)],
               responses={**_ERR(404, "文档不存在"), **_ERR_ADMIN})
-    def reprocess(doc_id: PathId, session: Session = Depends(get_session)):
+    def reprocess(doc_id: PathId, request: Request,
+                  user: User | None = Depends(get_optional_user),
+                  session: Session = Depends(get_session)):
         doc = session.get(Document, doc_id)
         if not doc:
             raise HTTPException(404, "文档不存在")
+        # 审计只 add 不 commit：队列分支随下面的 commit 落库，同步分支随 ingest_document
+        # 内部的 commit 落库——两条路径都是"操作真发生了才有事件"
+        audit_record(session, "document_reprocessed", user_email=_operator_email(user),
+                     target_type="document", target_id=doc.id, detail={"kb_id": doc.kb_id},
+                     ip=_client_ip(request))
         if queue is not None:
             doc.status, doc.error = "pending", None
             session.commit()
@@ -650,7 +720,9 @@ def create_app(
     @app.post("/api/v1/models", status_code=201, dependencies=[Depends(require_admin)],
               responses={**_ERR(400, "scenario 非法"), **_ERR(503, "未配置 GATEWAY_SECRET"),
                          **_ERR_ADMIN})
-    def create_model(body: ModelIn, session: Session = Depends(get_session)):
+    def create_model(body: ModelIn, request: Request,
+                     user: User | None = Depends(get_optional_user),
+                     session: Session = Depends(get_session)):
         if body.scenario not in SCENARIOS:
             raise HTTPException(400, f"scenario 仅支持 {'/'.join(sorted(SCENARIOS))}")
         m = ModelConfig(tenant_id="default", scenario=body.scenario, provider=body.provider,
@@ -659,6 +731,12 @@ def create_app(
                         capabilities=body.capabilities, is_default=body.is_default,
                         fallback_rank=body.fallback_rank, enabled=body.enabled)
         session.add(m)
+        session.flush()
+        # detail 只进非敏感定位字段：api_key/base_url/provider 明文一律不入审计
+        audit_record(session, "model_created", user_email=_operator_email(user),
+                     target_type="model", target_id=m.id,
+                     detail={"scenario": body.scenario, "model_name": body.model_name,
+                             "fallback_rank": body.fallback_rank}, ip=_client_ip(request))
         session.commit()
         return _model_json(m)
 
@@ -672,27 +750,40 @@ def create_app(
     @app.patch("/api/v1/models/{model_id}", dependencies=[Depends(require_admin)],
                responses={**_ERR(400, "scenario 非法"), **_ERR(404, "模型配置不存在"),
                           **_ERR(503, "未配置 GATEWAY_SECRET"), **_ERR_ADMIN})
-    def patch_model(model_id: PathId, body: ModelPatchIn, session: Session = Depends(get_session)):
+    def patch_model(model_id: PathId, body: ModelPatchIn, request: Request,
+                    user: User | None = Depends(get_optional_user),
+                    session: Session = Depends(get_session)):
         m = session.get(ModelConfig, model_id)
         if not m:
             raise HTTPException(404, "模型配置不存在")
         data = body.model_dump(exclude_none=True)
+        # detail 只进字段名（调用方请求改哪些字段），值一律不落——尤其 api_key 明文
+        fields = sorted(data.keys())
         if "scenario" in data and data["scenario"] not in SCENARIOS:
             raise HTTPException(400, f"scenario 仅支持 {'/'.join(sorted(SCENARIOS))}")
         if "api_key" in data:
             data["encrypted_api_key"] = encrypt_secret(data.pop("api_key"), _require_secret())
         for k, v in data.items():
             setattr(m, k, v)
+        audit_record(session, "model_updated", user_email=_operator_email(user),
+                     target_type="model", target_id=m.id, detail={"fields": fields},
+                     ip=_client_ip(request))
         session.commit()
         return _model_json(m)
 
     @app.delete("/api/v1/models/{model_id}", status_code=204,
                 dependencies=[Depends(require_admin)],
                 responses={**_ERR(503, "未配置 GATEWAY_SECRET"), **_ERR_ADMIN})
-    def delete_model(model_id: PathId, session: Session = Depends(get_session)):
+    def delete_model(model_id: PathId, request: Request,
+                     user: User | None = Depends(get_optional_user),
+                     session: Session = Depends(get_session)):
         m = session.get(ModelConfig, model_id)
         if m:
+            model_name = m.model_name      # 删前取：行没了就查不到被删的是哪个模型
             session.delete(m)
+            audit_record(session, "model_deleted", user_email=_operator_email(user),
+                         target_type="model", target_id=model_id,
+                         detail={"model_name": model_name}, ip=_client_ip(request))
             session.commit()
 
     # ---- 用量看板简版（§C：成本折算的事实来源）----
