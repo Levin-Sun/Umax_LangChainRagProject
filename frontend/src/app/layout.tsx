@@ -18,8 +18,8 @@ export default async function RootLayout({ children }: { children: React.ReactNo
   const t = (await cookies()).get(THEME_COOKIE)?.value;
   const themeClass = t === "dark" || t === "sepia" ? t : undefined;
   return (
-    <html lang="zh" className={themeClass}>
-      <body className={`${inter.variable} bg-background text-foreground antialiased`}>
+    <html lang="zh" className={`${inter.variable}${themeClass ? ` ${themeClass}` : ""}`}>
+      <body className="bg-background text-foreground antialiased">
         <Nav />
         {children}
       </body>
