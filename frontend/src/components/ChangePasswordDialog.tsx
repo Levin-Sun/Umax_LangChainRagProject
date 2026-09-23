@@ -20,6 +20,8 @@ export default function ChangePasswordDialog({ api, onClose, onChanged }:
   const [busy, setBusy] = useState(false);
 
   async function submit() {
+    if (busy) return;  // 收编⑰：提交中回车/再次触发不再并发发第二个请求（Enter 走 form.submit 绕过按钮 disabled）
+    if (newPw.length < 8) { setFormErr("新口令至少 8 位"); return; }  // 收编⑱：与后端 new_password min_length=8 对齐
     if (newPw !== confirm) { setFormErr("两次输入的新口令不一致"); return; }
     setFormErr(null);
     setErr(null);

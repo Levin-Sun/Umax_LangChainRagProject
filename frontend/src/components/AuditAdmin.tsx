@@ -25,6 +25,8 @@ export default function AuditAdmin({ api }: { api: Client }) {
   const [actionInput, setActionInput] = useState("");
   // applied=已提交查询条件（翻页保持）；offset 步进；limit 固定 PAGE
   const [applied, setApplied] = useState({ user: "", action: "", offset: 0 });
+  // 收编⑲：tick 保证「条件未变仍在 offset 0 点查询」也强制重取（否则 useAsync 依赖不变 → 查询按钮读起来像坏了）
+  const [tick, setTick] = useState(0);
   const q = useAsync(
     () => call(api.GET(P.audit, {
       params: { query: {
@@ -32,14 +34,14 @@ export default function AuditAdmin({ api }: { api: Client }) {
         limit: PAGE, offset: applied.offset,
       } },
     })) as Promise<AuditOut[]>,
-    [applied.user, applied.action, applied.offset]);
+    [applied.user, applied.action, applied.offset, tick]);
   const rows = q.data ?? [];
 
   return (
     <div className="mx-auto w-full max-w-5xl space-y-6 px-6 py-6">
       <AdminBanner error={q.error} />
       <form className="flex flex-wrap items-end gap-3 rounded-xl border border-border bg-card px-6 py-5 shadow-sm"
-            onSubmit={(e) => { e.preventDefault(); setApplied({ user: userInput.trim(), action: actionInput, offset: 0 }); }}>
+            onSubmit={(e) => { e.preventDefault(); setApplied({ user: userInput.trim(), action: actionInput, offset: 0 }); setTick((t) => t + 1); }}>
         <label className="block space-y-1">
           <span className="text-h3 font-medium text-ink-2">用户</span>
           <Input placeholder="邮箱" value={userInput} className="h-9 w-56 rounded-lg border-border"

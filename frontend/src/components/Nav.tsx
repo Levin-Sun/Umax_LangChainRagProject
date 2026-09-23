@@ -1,6 +1,7 @@
 "use client";
 // 顶栏导航：登录态由 useAuth() 驱动（admin_hint 已退役）——admin 见全套管理链接，
-// member/匿名只剩「聊天」；已登录右侧显 用户名+改密+退出（退出后回聊天页）。
+// member/匿名只剩「聊天」；已登录右侧显 用户名+改密+退出。
+// 退出 push("/") 回聊天页——但全员登录下聊天页对匿名即跳 /admin/login，故实际落登录页（收编⑬：原注释误导）。
 // 改密成功后（ChangePasswordDialog.onChanged）logout 并跳登录页——新口令需重新登录。
 import { useState } from "react";
 import Link from "next/link";

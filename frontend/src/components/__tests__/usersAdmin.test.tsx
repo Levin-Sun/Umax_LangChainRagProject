@@ -4,7 +4,7 @@ import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import UsersAdmin from "@/components/UsersAdmin";
 import { P } from "@/lib/paths";
-import { fakeApi, ok } from "@/lib/testkit";
+import { fakeApi, ok, fail } from "@/lib/testkit";
 import { describe, expect, it, vi } from "vitest";
 
 const ME = { email: "admin@x.com", name: "admin", role: "admin" as const, kb_ids: null };
@@ -59,4 +59,34 @@ it("禁用走 PATCH status；当前登录者行无降级/禁用按钮", async ()
   await waitFor(() => expect(PATCH).toHaveBeenCalledWith(P.user, expect.objectContaining({
     params: { path: { user_id: 2 } }, body: { status: "disabled" },
   })));
+});
+
+it("收编⑯：库列表出错时授权保存禁用，防静默清空整集合", async () => {
+  const PUT = vi.fn(() => ok([]));
+  renderAdmin(fakeApi({ GET: (u) => u === P.kb ? fail("库列表炸了", 500) : ok(rows), PUT }));
+  const devRow = within(await screen.findByRole("row", { name: /dev@x\.com/ }));
+  await userEvent.click(devRow.getByRole("button", { name: "授权" }));
+  const dialog = await screen.findByRole("dialog", { name: /dev@x\.com/ });
+  const save = within(dialog).getByRole("button", { name: "保存" });
+  expect(save).toBeDisabled();
+  await userEvent.click(save); // 禁用态下点击不应发 PUT
+  expect(PUT).not.toHaveBeenCalled();
+});
+
+it("收编⑯：库列表加载中授权保存禁用", async () => {
+  renderAdmin(fakeApi({ GET: (u) => u === P.kb ? new Promise(() => {}) : ok(rows) }));
+  const devRow = within(await screen.findByRole("row", { name: /dev@x\.com/ }));
+  await userEvent.click(devRow.getByRole("button", { name: "授权" }));
+  const dialog = await screen.findByRole("dialog", { name: /dev@x\.com/ });
+  expect(within(dialog).getByRole("button", { name: "保存" })).toBeDisabled();
+});
+
+it("收编⑱：重置口令不足 8 位时保存禁用并给文案", async () => {
+  renderAdmin(fakeApi({ GET: (u) => u === P.kb ? ok([]) : ok(rows), PATCH: vi.fn(() => ok(rows[1])) }));
+  const devRow = within(await screen.findByRole("row", { name: /dev@x\.com/ }));
+  await userEvent.click(devRow.getByRole("button", { name: "重置口令" }));
+  await userEvent.type(devRow.getByLabelText("新口令"), "Ab1!");
+  await userEvent.type(devRow.getByLabelText("确认新口令"), "Ab1!");
+  expect(devRow.getByText("新口令至少 8 位")).toBeInTheDocument();
+  expect(devRow.getByRole("button", { name: "保存" })).toBeDisabled();
 });

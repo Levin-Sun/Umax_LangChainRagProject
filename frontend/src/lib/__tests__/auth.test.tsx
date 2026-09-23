@@ -69,6 +69,15 @@ it("logout 走 P.authLogout 后 me 清空", async () => {
   expect(post).toHaveBeenCalledWith("/api/v1/auth/logout", expect.anything());
 });
 
+it("收编⑫：/auth/me 非 401 失败（500）解除骨架并降为匿名，不卡 loading/不抛未处理拒绝", async () => {
+  // 挂载即 refresh；fetchMe 对非 401 抛错——旧实现会让 loaded 永挂 false（全站卡骨架）
+  const spy = vi.spyOn(console, "error").mockImplementation(() => {});
+  const api = fakeApi({ GET: () => fail("网关炸了", 500) }) as never;
+  render(<AuthProvider client={api}><Probe client={api} /></AuthProvider>);
+  await waitFor(() => expect(screen.getByTestId("state")).toHaveTextContent("anon"));
+  spy.mockRestore();
+});
+
 it("useAuth 在 Provider 外抛错", () => {
   function Loose() { useAuth(); return null; }
   vi.spyOn(console, "error").mockImplementation(() => {}); // 预期内的渲染抛错不打堆栈噪音

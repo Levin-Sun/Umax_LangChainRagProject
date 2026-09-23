@@ -49,7 +49,7 @@ it("call captures HTTP status into ApiError; is401 matches 401 only", async () =
 it("AdminBanner turns 401 into login prompt, other errors stay plain", () => {
   const { unmount } = render(<AdminBanner error={new ApiError({ detail: "需要登录" }, 401)} />);
   const alert = screen.getByRole("alert");
-  expect(alert).toHaveTextContent("需要管理员登录"); // 401 特化文案是 AdminBanner 固定串，不透传 detail
+  expect(alert).toHaveTextContent("需要登录"); // 401 特化文案是 AdminBanner 固定串，不透传 detail（收编⑭：全员登录语义）
   expect(screen.getByRole("link", { name: "去登录" })).toHaveAttribute("href", "/admin/login");
   unmount();
   render(<AdminBanner error={new ApiError({ detail: "网关写库炸了" }, 500)} />);

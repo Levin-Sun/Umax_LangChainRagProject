@@ -132,12 +132,16 @@ export default function UsersAdmin({ api, me }: { api: Client; me: AuthMe }) {
                       重置口令
                     </Button>
                     {resetFor === u.id && (
-                      <span className="ml-2 inline-flex items-center gap-1.5">
+                      <span className="ml-2 inline-flex flex-wrap items-center gap-1.5">
                         <Input aria-label="新口令" type="password" placeholder="新口令" className="h-7 w-28 rounded-lg border-border"
                                value={resetPw} onChange={(e) => setResetPw(e.target.value)} />
                         <Input aria-label="确认新口令" type="password" placeholder="确认新口令" className="h-7 w-28 rounded-lg border-border"
                                value={resetPw2} onChange={(e) => setResetPw2(e.target.value)} />
-                        <Button size="sm" className="h-7 rounded-lg" disabled={rowBusy || !resetPw || resetPw !== resetPw2}
+                        {resetPw.length > 0 && resetPw.length < 8 && (
+                          <span className="text-caption text-destructive">新口令至少 8 位</span>
+                        )}
+                        <Button size="sm" className="h-7 rounded-lg"
+                                disabled={rowBusy || !resetPw || resetPw.length < 8 || resetPw !== resetPw2}
                                 onClick={() => patch(u, { password: resetPw })}>保存</Button>
                       </span>
                     )}
@@ -187,7 +191,9 @@ export default function UsersAdmin({ api, me }: { api: Client; me: AuthMe }) {
               {!kbs.loading && kbRows.length === 0 && <p className="text-caption text-ink-3">暂无知识库</p>}
             </div>
             <div className="flex gap-2">
-              <Button size="sm" className="h-8 rounded-lg" disabled={rowBusy} onClick={() => void saveGrant()}>保存</Button>
+              {/* 收编⑯：库列表 loading/出错时禁用保存——否则 kbRows 为空会静默把整集合替换为空（抹掉授权） */}
+              <Button size="sm" className="h-8 rounded-lg"
+                      disabled={rowBusy || kbs.loading || !!kbs.error} onClick={() => void saveGrant()}>保存</Button>
               <Button size="sm" variant="ghost" className="h-8 rounded-lg text-ink-3" disabled={rowBusy}
                       onClick={() => setGrantFor(null)}>取消</Button>
             </div>

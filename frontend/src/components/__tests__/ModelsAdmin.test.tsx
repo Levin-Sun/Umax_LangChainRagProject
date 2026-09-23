@@ -45,9 +45,9 @@ it("renders 503 detail from backend (gateway secret missing)", async () => {
 });
 
 it("401 from protected list offers login entry", async () => {
-  const api = fakeApi({ GET: async () => fail("需要管理员登录", 401) });
+  const api = fakeApi({ GET: async () => fail("需要登录", 401) });
   render(<ModelsAdmin api={api} />);
-  expect(await screen.findByRole("alert")).toHaveTextContent("需要管理员登录");
+  expect(await screen.findByRole("alert")).toHaveTextContent("需要登录");
   expect(screen.getByRole("link", { name: "去登录" })).toHaveAttribute("href", "/admin/login");
 });
 

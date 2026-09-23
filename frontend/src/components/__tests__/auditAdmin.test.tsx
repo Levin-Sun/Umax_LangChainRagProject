@@ -31,6 +31,16 @@ it("查询与翻页：query 参数逐次装配", async () => {
   })));
 });
 
+it("收编⑲：条件未变仍在首页点查询也强制重取（查询按钮不像坏了）", async () => {
+  const GET = vi.fn(() => ok([auditRow(1)]));
+  render(<AuditAdmin api={fakeApi({ GET })} />);
+  await screen.findByRole("row", { name: /login_failed/ });
+  const before = GET.mock.calls.length;
+  // 不改任何过滤条件，停在 offset 0 再点查询——旧实现 setApplied 值全等 → useAsync 依赖不变 → 不重取
+  await userEvent.click(screen.getByRole("button", { name: "查询" }));
+  await waitFor(() => expect(GET.mock.calls.length).toBeGreaterThan(before));
+});
+
 it("空结果渲染空态不渲染表行", async () => {
   render(<AuditAdmin api={fakeApi({ GET: () => ok([]) })} />);
   await screen.findByText("没有匹配的审计记录");

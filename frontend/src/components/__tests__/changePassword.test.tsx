@@ -29,3 +29,26 @@ it("两次新口令不一致：前端拦截，不发请求", async () => {
   expect(await screen.findByText("两次输入的新口令不一致")).toBeInTheDocument();
   expect(POST).not.toHaveBeenCalled();
 });
+
+it("收编⑱：新口令短于 8 位前端拦截并上文案，不发请求", async () => {
+  const POST = vi.fn();
+  render(<ChangePasswordDialog api={fakeApi({ POST })} onClose={vi.fn()} />);
+  await fill("Old-Pass-9", "Ab1!", "Ab1!");  // 两遍一致但不足 8 位
+  expect(await screen.findByText("新口令至少 8 位")).toBeInTheDocument();
+  expect(POST).not.toHaveBeenCalled();
+});
+
+it("收编⑰：提交进行中回车重入不再发第二个请求（busy 防护）", async () => {
+  let settle: ((v: unknown) => void) | undefined;
+  const POST = vi.fn(() => new Promise((r) => { settle = r; }));
+  render(<ChangePasswordDialog api={fakeApi({ POST })} onClose={vi.fn()} />);
+  await userEvent.type(screen.getByLabelText("旧口令"), "Old-Pass-9");
+  await userEvent.type(screen.getByLabelText("新口令"), "New-Pass-9");
+  await userEvent.type(screen.getByLabelText("确认新口令"), "New-Pass-9");
+  await userEvent.click(screen.getByRole("button", { name: "确认修改" }));
+  expect(POST).toHaveBeenCalledOnce();
+  // busy=true、POST 仍 pending：回车再次触发 form.submit()，旧实现会并发第二个请求
+  await userEvent.type(screen.getByLabelText("确认新口令"), "{Enter}");
+  expect(POST).toHaveBeenCalledOnce();
+  settle?.({ data: undefined, error: undefined, response: new Response() });
+});

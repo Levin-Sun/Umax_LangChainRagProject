@@ -1,6 +1,9 @@
 # 审计统一写入口：只 add 行不 commit——与各写端点同事务，保证"操作成功才有审计"
 from app.models import AuditLog
 
+# ACTIONS 是审计动作的单一事实源（SCENARIO_PATTERN 同款收口思路）：前端
+# frontend/src/components/AuditAdmin.tsx 的 AUDIT_ACTIONS 下拉镜像必须与此集合逐字一致，
+# 由 backend/tests/test_audit_actions_sync.py 守护漂移（加动作漏改任一处即测试红）。
 ACTIONS = {
     "login_success", "login_failed", "logout",
     "user_created", "user_updated", "grants_updated",

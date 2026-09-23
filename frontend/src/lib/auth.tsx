@@ -25,8 +25,11 @@ export function AuthProvider({ children, client = defaultApi }:
   }, [client]);
 
   const refresh = useCallback(async () => {
-    setMe(await fetchMe());
-    setLoaded(true);
+    // 收编⑫：/auth/me 非 401 失败（网关抖动/500）也必须解除骨架并降为匿名态，
+    // 否则 loaded 永挂 false → 全站卡骨架，且 useEffect 的 void refresh() 抛未处理拒绝。
+    try { setMe(await fetchMe()); }
+    catch { setMe(null); }
+    finally { setLoaded(true); }
   }, [fetchMe]);
 
   useEffect(() => { void refresh(); }, [refresh]);
