@@ -10,10 +10,12 @@ import { P } from "@/lib/paths";
 import { useAsync, usePolling } from "@/lib/hooks";
 import type { BatchUploadItem, ChunkOut, DocOut, KbOut } from "@/lib/types";
 
+// 0.1MB（104857.6 B）以上一律按 MB 显示（1 位小数）——KB 在几十万字节时读起来更长，
+// 也占列宽；不足 0.1MB 才用 KB（1 位小数）保证小文件仍可读
 const fmtBytes = (n: number | null) => {
   if (!n) return "—";
   if (n < 1024) return `${n} B`;
-  if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`;
+  if (n < 1024 * 1024 * 0.1) return `${(n / 1024).toFixed(1)} KB`;
   return `${(n / 1024 / 1024).toFixed(1)} MB`;
 };
 
@@ -112,8 +114,10 @@ export default function KbAdmin({ api }: { api: Client }) {
   return (
     // 抽屉占固定宽（360）+ 库列表（224）：容器仍卡 max-w-5xl 时中间列只剩 ~370px，
     // 表格最小内容宽度撑破所在列、直接画到抽屉上（真机踩过）。开抽屉时放宽上限。
-    <div className={`mx-auto flex w-full gap-6 px-6 py-6 ${chunks ? "max-w-[1700px]" : "max-w-5xl"}`}>
-      <aside className="w-56 shrink-0 space-y-3">
+    // 固定视口高度：三列各自内部滚动，长内容（如几十个切块）不再把整页撑长带动页面滚动
+    <div className={`mx-auto flex h-[calc(100vh-3rem)] w-full gap-6 overflow-hidden px-6 py-6 ${
+      chunks ? "max-w-[1700px]" : "max-w-5xl"}`}>
+      <aside className="w-56 shrink-0 space-y-3 overflow-y-auto">
         <form className="flex gap-2" onSubmit={(e) => { e.preventDefault(); createKb(); }}>
           <Input aria-label="新知识库名" placeholder="新知识库名" className="h-9 rounded-lg border-border"
                  value={newName} onChange={(e) => setNewName(e.target.value)} />
@@ -133,7 +137,7 @@ export default function KbAdmin({ api }: { api: Client }) {
           ))}
         </ul>
       </aside>
-      <section className="min-w-0 flex-1">
+      <section className="min-w-0 flex-1 overflow-y-auto">
         {!kbId && (
           <div className="flex h-40 items-center justify-center rounded-xl border border-dashed border-border text-caption text-ink-3">
             选择或新建一个知识库
@@ -189,11 +193,14 @@ export default function KbAdmin({ api }: { api: Client }) {
                       {d.error && <p className="mt-0.5 max-w-60 truncate text-caption text-destructive" title={d.error}>{d.error}</p>}</td>
                     <td className="whitespace-nowrap pr-3 text-right font-medium xl:pr-4">{fmtBytes(d.size_bytes)}</td>
                     <td className="whitespace-nowrap pr-3 text-ink-3 xl:pr-4">{fmtTime(d.created_at)}</td>
-                    <td className="space-x-1 text-right">
-                      {d.status === "failed" && <Button size="sm" variant="outline" className="h-7 rounded-lg" onClick={() => reprocess(d)}>重试入库</Button>}
-                      <Button size="sm" variant="ghost" className="h-7 rounded-lg text-ink-1" onClick={() => viewChunks(d)}>看切块</Button>
-                      <Button size="sm" variant="ghost" className="h-7 rounded-lg text-destructive hover:text-destructive"
-                              onClick={() => setDeleteFor(d)}>删除</Button>
+                    <td className="pl-3 pr-1 text-right">
+                      {/* inline-flex + nowrap：两个按钮始终同一行，不因列窄而叠成两行 */}
+                      <span className="inline-flex items-center gap-1 whitespace-nowrap">
+                        {d.status === "failed" && <Button size="sm" variant="outline" className="h-7 rounded-lg" onClick={() => reprocess(d)}>重试</Button>}
+                        <Button size="sm" variant="ghost" className="h-7 rounded-lg text-ink-1" onClick={() => viewChunks(d)}>看切块</Button>
+                        <Button size="sm" variant="ghost" className="h-7 rounded-lg text-destructive hover:text-destructive"
+                                onClick={() => setDeleteFor(d)}>删除</Button>
+                      </span>
                     </td>
                   </tr>
                 ))}

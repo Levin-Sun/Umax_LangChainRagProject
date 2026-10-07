@@ -50,7 +50,7 @@ describe("KbAdmin 轮询", () => {
     // 裁决（任务5）：先选库才会拉 doc 列表，否则永远看不到失败行
     await userEvent.click(await screen.findByText("库"));
     expect(await screen.findByText("解析炸了")).toBeInTheDocument();
-    await userEvent.click(screen.getByRole("button", { name: "重试入库" }));
+    await userEvent.click(screen.getByRole("button", { name: "重试" }));
     expect(reprocess).toHaveBeenCalled();
   });
 
@@ -204,4 +204,27 @@ it("拖拽文件到上传区即上传（多个走批量端点）", async () => {
   fireEvent.drop(zone, { dataTransfer: { files } });
   await waitFor(() => expect(POST).toHaveBeenCalledWith(P.kbDocsBatch,
     expect.objectContaining({ params: { path: { kb_id: 1 } } })));
+});
+
+// ---- 大小单位（体验反馈）：≥0.1MB 用 MB 一位小数，不足才用 KB ----
+it("大小按 0.1MB 分档：大文件用 MB，小文件用 KB", async () => {
+  const mk = (id: number, name: string, size: number): DocOut => ({
+    id, kb_id: 1, name, status: "ready", error: null, size_bytes: size,
+    created_at: "2026-10-07T10:00:00+00:00" });
+  render(<KbAdmin api={fakeApi({
+    GET: (u) => (u === P.kb ? ok([{ id: 1, name: "库A", description: null }])
+      : ok([mk(1, "大.docx", 9_017_941), mk(2, "中.pdf", 104_858), mk(3, "小.md", 1234)])),
+  })} />);
+  await screen.findByText("库A");
+  await userEvent.click(screen.getByText("库A"));
+  const row = (n: string) => screen.findByRole("row", { name: new RegExp(n) });
+  expect(within(await row("大\\.docx")).getByText("8.6 MB")).toBeInTheDocument();
+  expect(within(await row("中\\.pdf")).getByText("0.1 MB")).toBeInTheDocument();   // 恰在 0.1MB 档
+  expect(within(await row("小\\.md")).getByText("1.2 KB")).toBeInTheDocument();
+  // 看切块与删除同处一个 nowrap 容器（保证并排一行，不叠两行）
+  const big = await row("大\\.docx");
+  const actions = big.querySelector("span.inline-flex.whitespace-nowrap");
+  expect(actions).not.toBeNull();
+  expect(within(actions as HTMLElement).getByRole("button", { name: "看切块" })).toBeInTheDocument();
+  expect(within(actions as HTMLElement).getByRole("button", { name: "删除" })).toBeInTheDocument();
 });
