@@ -5,6 +5,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import { ErrorBanner } from "@/components/ErrorBanner";
 import { call, callVoid, type Client } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
@@ -28,7 +29,7 @@ function answerParts(answer: string, citations: Citation[], onCite: (c: Citation
 
 // 乐观上屏：send() 先以 out=null 的 pending turn 立即渲染提问气泡，
 // POST 成功后按 key 就地填答案，失败按 key 摘除——提问不再等后端回包。
-interface LocalTurn { key: number; convId: number | null; question: string; out: ChatOut | null }
+interface LocalTurn { key: number; convId: number | null; question: string; images: string[]; out: ChatOut | null }
 
 export default function ChatApp({ api }: { api: Client }) {
   // 任务 7 换轨：/auth/me 就绪前不发业务请求（匿名只会处处 401）；loaded 无 me → 弹回登录页。
@@ -44,18 +45,44 @@ export default function ChatApp({ api }: { api: Client }) {
   const [sendErr, setSendErr] = useState<unknown>(null);
   const [turns, setTurns] = useState<LocalTurn[]>([]);
   const [cite, setCite] = useState<Citation | null>(null);
+  // 传图提问（阶段 2 放开）：随问图片以 data URL 进消息 content part
+  const [pending, setPending] = useState<string[]>([]);
+  const [imgErr, setImgErr] = useState<string | null>(null);
+  const fileRef = useRef<HTMLInputElement>(null);
   // activeConv 仅由点击设置——useAsync deps 变化 = 用户点了某个会话 = 拉历史
   const [activeConv, setActiveConv] = useState<number | null>(null);
   const taRef = useRef<HTMLTextAreaElement>(null);
   const seq = useRef(0);
+  const [q, setQ] = useState("");
   const convs = useAsync(
-    () => (ready ? call(api.GET(P.conversations)) as Promise<ConversationOut[]>
+    () => (ready ? call(api.GET(P.conversations,
+      { params: { query: q.trim() ? { q: q.trim() } : undefined } })) as Promise<ConversationOut[]>
                  : Promise.resolve([] as ConversationOut[])),
-    [ready]);
+    [ready, q]);
   const msgs = useAsync(
     () => (!ready || activeConv === null ? Promise.resolve([] as MessageOut[])
       : call(api.GET(P.convMessages, { params: { path: { conv_id: activeConv } } })) as Promise<MessageOut[]>),
     [activeConv, ready]);
+
+  function pickImages(files: FileList | null) {
+    setImgErr(null);
+    const imgs: File[] = [];
+    for (const f of Array.from(files ?? [])) {
+      if (!/^image\/(png|jpeg|jpg|webp|gif|svg\+xml)$/.test(f.type)) {
+        setImgErr(`不支持的图片格式：${f.name}（仅 PNG/JPEG/WebP/GIF/SVG）`); continue;
+      }
+      if (f.size > 1_500_000) { setImgErr(`图片过大（≤1.5MB）：${f.name}`); continue; }
+      imgs.push(f);
+    }
+    const rest = pending.length + imgs.length;
+    if (rest > 3) { setImgErr("最多附带 3 张图片"); return; }
+    Promise.all(imgs.map((f) => new Promise<string>((res, rej) => {
+      const r = new FileReader();
+      r.onload = () => res(r.result as string);
+      r.onerror = () => rej(new Error("读取文件失败"));
+      r.readAsDataURL(f);
+    }))).then((urls) => setPending((prev) => [...prev, ...urls])).catch(() => setImgErr("读取文件失败"));
+  }
 
   async function delConversation(id: number) {
     try {
@@ -82,13 +109,15 @@ export default function ChatApp({ api }: { api: Client }) {
     const q = question.trim();
     if (!q || sending) return;
     const key = ++seq.current;
-    setTurns((t) => [...t, { key, convId, question: q, out: null }]);
+    const turnImages = pending;
+    setTurns((t) => [...t, { key, convId, question: q, images: turnImages, out: null }]);
     setQuestion("");
+    setPending([]);
     setSending(true);
     setSendErr(null);
     try {
       const out = (await call(api.POST(P.chat, {
-        body: { question: q, conversation_id: convId },
+        body: { question: q, conversation_id: convId, images: turnImages },
       }))) as unknown as ChatOut;
       setConvId(out.conversation_id);
       setTurns((t) => t.map((x) => (x.key === key ? { ...x, convId: out.conversation_id, out } : x)));
@@ -96,6 +125,7 @@ export default function ChatApp({ api }: { api: Client }) {
       convs.reload();
     } catch (e) {
       setTurns((t) => t.filter((x) => x.key !== key));
+      setPending((prev) => [...prev, ...turnImages]);
       setSendErr(e);
     } finally {
       setSending(false);
@@ -123,7 +153,10 @@ export default function ChatApp({ api }: { api: Client }) {
   const shown: MessageOut[] = [
     ...(msgs.data ?? []),
     ...turns.filter((t) => t.convId === convId).flatMap((t, i) => {
-      const q: MessageOut = { id: -1000 - i, role: "user", content: [{ type: "text", text: t.question }], citations: null };
+      const q: MessageOut = { id: -1000 - i, role: "user",
+        content: [{ type: "text", text: t.question },
+                  ...t.images.map((u) => ({ type: "image_url" as const, image_url: { url: u } }))],
+        citations: null };
       if (!t.out) return [q];
       return [q, { id: -1001 - i, role: "assistant" as const, content: [{ type: "text" as const, text: t.out.answer }], citations: t.out.citations }];
     }),
@@ -136,6 +169,9 @@ export default function ChatApp({ api }: { api: Client }) {
                 variant="outline" size="sm" onClick={() => openConversation(null)}>
           新建会话
         </Button>
+        <Input aria-label="搜索会话" placeholder="搜索会话…" value={q}
+               className="mt-2 h-8 rounded-lg border-border bg-card text-body"
+               onChange={(e) => setQ(e.target.value)} />
         <ul className="mt-3 space-y-0.5">
           {(convs.data ?? []).map((c) => (
             <li key={c.id} className="group relative">
@@ -157,8 +193,11 @@ export default function ChatApp({ api }: { api: Client }) {
           <div className="mx-auto w-full max-w-[760px] space-y-6 px-4 py-6">
             {shown.map((m, i) => m.role === "user" ? (
               <div key={`${m.id}:${i}`} className="flex justify-end">
-                <div className="max-w-[85%] whitespace-pre-wrap rounded-2xl rounded-br-md bg-secondary px-4 py-2.5 text-body text-ink-2">
-                  {m.content.map((p, j) => p.type === "text" && <p key={j}>{p.text}</p>)}
+                <div className="max-w-[85%] space-y-1.5 rounded-2xl rounded-br-md bg-secondary px-4 py-2.5 text-body text-ink-2">
+                  {m.content.map((p, j) => p.type === "image_url"
+                    ? <img key={j} src={p.image_url?.url} alt="随问图片"
+                           className="max-h-48 rounded-lg border border-border" />
+                    : <p key={j}>{p.text}</p>)}
                 </div>
               </div>
             ) : (
@@ -176,6 +215,19 @@ export default function ChatApp({ api }: { api: Client }) {
         </div>
         <form className="px-4 pb-5" onSubmit={(e) => { e.preventDefault(); send(); }}>
           <div className="mx-auto w-full max-w-[760px] rounded-2xl border border-border bg-card shadow-sm transition-colors focus-within:border-ring">
+            {pending.length > 0 && (
+              <div className="flex flex-wrap gap-2 px-4 pt-3">
+                {pending.map((u, i) => (
+                  <span key={i} className="relative">
+                    <img src={u} alt={`待发送图片 ${i + 1}`} className="h-14 rounded-lg border border-border" />
+                    <button aria-label={`移除图片 ${i + 1}`}
+                            className="absolute -right-1.5 -top-1.5 h-4.5 w-4.5 rounded-full bg-ink-3 px-1 text-caption text-card"
+                            onClick={() => setPending((prev) => prev.filter((_, j) => j !== i))}>✕</button>
+                  </span>
+                ))}
+              </div>
+            )}
+            {imgErr && <p className="px-4 pt-2 text-caption text-destructive">{imgErr}</p>}
             <textarea ref={taRef} aria-label="提问" rows={1}
                       placeholder="就知识库内容提问…" value={question}
                       disabled={sending}
@@ -185,7 +237,17 @@ export default function ChatApp({ api }: { api: Client }) {
                       }}
                       className="block max-h-40 w-full resize-none bg-transparent px-4 pt-3.5 text-body text-ink-1 outline-none placeholder:text-ink-3" />
             <div className="flex items-center justify-between px-3 pb-2.5 pt-1">
-              <span className="select-none text-caption text-ink-3">Enter 发送 · Shift+Enter 换行</span>
+              <span className="flex items-center gap-1.5">
+                <input ref={fileRef} type="file" accept="image/png,image/jpeg,image/webp,image/gif,image/svg+xml"
+                       multiple className="hidden"
+                       onChange={(e) => { pickImages(e.target.files); e.target.value = ""; }} />
+                <Button type="button" variant="ghost" size="sm" className="h-7 rounded-lg px-2 text-caption text-ink-3"
+                        disabled={sending} onClick={() => fileRef.current?.click()}
+                        title="随问附图（≤3 张，单张 ≤1.5MB）">
+                  📎 图片
+                </Button>
+                <span className="select-none text-caption text-ink-3">Enter 发送 · Shift+Enter 换行</span>
+              </span>
               <Button type="submit" size="sm" disabled={!question.trim() || sending}
                       className="h-8 rounded-full px-4">
                 发送

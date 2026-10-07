@@ -179,3 +179,55 @@ it("deletes a conversation via DELETE and clears it from the list", async () => 
   })));
   await waitFor(() => expect(screen.queryByText("退货政策")).not.toBeInTheDocument());
 });
+
+// ---- 会话搜索 + 传图提问（阶段 2 放开）----
+it("搜索框输入 → GET /conversations 带 q 参数", async () => {
+  const GET = vi.fn((u: string, init?: unknown) =>
+    u.includes("/auth/me") ? ok(ME) : ok([]));
+  render(<AuthProvider client={fakeApi({ GET }) as never}><ChatApp api={fakeApi({ GET }) as never} /></AuthProvider>);
+  await screen.findByLabelText("搜索会话");
+  await waitFor(() => expect(GET.mock.calls.some(([u]) => String(u).startsWith(P.conversations))).toBe(true));
+  await userEvent.type(screen.getByLabelText("搜索会话"), "退货");
+  await waitFor(() => {
+    // openapi-fetch 把 query 放在 init.params（拦到的是方法签名，非最终 URL）；取最后一次调用
+    const call = GET.mock.calls.filter(([u]) => String(u).startsWith(P.conversations)).at(-1);
+    expect(((call?.[1] ?? {}) as { params?: { query?: { q?: string } } }).params?.query?.q).toBe("退货");
+  });
+});
+
+it("附加图片 → 预览条出现 → 发送时 body 带 images", async () => {
+  const POST = vi.fn(() => ok({ ...chatOut, conversation_id: 1 }));
+  const file = new File(["pngbytes"], "shot.png", { type: "image/png" });
+  const full = fakeApi({
+    GET: (u) => (u.includes("/auth/me") ? ok(ME)
+      : u === P.conversations ? ok([]) : u === P.convMessages ? ok([]) : undefined),
+    POST,
+  });
+  render(<AuthProvider client={full as never}><ChatApp api={full as never} /></AuthProvider>);
+  await screen.findByLabelText("提问");   // 等主区渲染完，隐藏 file input 才存在
+  // 隐藏的 file input 直取（📎 按钮只是它的开启器）
+  const input = document.querySelector('input[type="file"]') as HTMLInputElement;
+  await userEvent.upload(input, file);
+  expect(await screen.findByAltText("待发送图片 1")).toBeInTheDocument();
+  await userEvent.type(screen.getByLabelText("提问"), "图里是什么");
+  await userEvent.click(screen.getByRole("button", { name: "发送" }));
+  await waitFor(() => expect(POST).toHaveBeenCalledWith(P.chat, expect.objectContaining({
+    body: expect.objectContaining({ question: "图里是什么", images: [expect.stringMatching(/^data:image\/png;base64,/)] }),
+  })));
+  // 乐观气泡即含图片
+  expect(screen.getAllByAltText("随问图片").length).toBeGreaterThan(0);
+});
+
+it("历史消息里的 image part 渲染成图片", async () => {
+  const withImg: MessageOut[] = [
+    { id: 1, role: "user", content: [{ type: "text", text: "看图" }, { type: "image_url", image_url: { url: "data:image/png;base64,AAA" } }], citations: null },
+  ];
+  const full = fakeApi({
+    GET: (u) => (u.includes("/auth/me") ? ok(ME)
+      : u === P.conversations ? ok(convs) : u === P.convMessages ? ok(withImg) : undefined),
+  });
+  render(<AuthProvider client={full as never}><ChatApp api={full as never} /></AuthProvider>);
+  await screen.findByText("退货政策");
+  await userEvent.click(screen.getByText("退货政策"));
+  expect(await screen.findByAltText("随问图片")).toHaveAttribute("src", "data:image/png;base64,AAA");
+});

@@ -73,3 +73,8 @@ def make_chat_fn(client: ChatClient) -> Callable[[str, list[dict]], dict]:
                 "completion_tokens": out["completion_tokens"]}
 
     return chat_fn
+
+
+# 视觉场景提示词（传图提问）：描述喂给检索与生成，非多模态向量检索的务实替代（§3.2③）
+VISION_PROMPT = ("请用简洁中文描述这张图片：图表/流程图要写出关键节点与数字，"
+                 "截图要转写可见文字，照片要说明主体。供知识库检索与问答使用。")

@@ -85,6 +85,32 @@ class ModelGateway:
             return out
         raise GatewayError("全部 chat 模型均调用失败")
 
+    def vision(self, image_data_url: str) -> dict:
+        """视觉场景（传图提问）：vision 模型把图转文字描述。记账交回端点（同 chat 口径）。"""
+        from app.services.chat import VISION_PROMPT
+
+        providers = self.providers("vision")
+        if not providers:
+            raise NoProviderError("没有已启用的 vision 模型配置（model_configs 表为空？）")
+        for p in providers:  # fallback 链同 chat
+            client = ChatClient(api_key=p.api_key, base_url=p.base_url, model=p.model_name,
+                                transport=self._transport, sleep=self._sleep, timeout=self._timeout)
+            messages = [{"role": "user", "content": [
+                {"type": "text", "text": VISION_PROMPT},
+                {"type": "image_url", "image_url": {"url": image_data_url}}]}]
+            t0 = time.monotonic()
+            try:
+                out = client.complete(messages)
+            except Exception:
+                continue
+            return {"caption": out["text"], "prompt_tokens": out["prompt_tokens"],
+                    "completion_tokens": out["completion_tokens"], "model": p.model_name,
+                    "latency_ms": int((time.monotonic() - t0) * 1000)}
+        raise GatewayError("全部 vision 模型均调用失败")
+
+    def make_vision_fn(self) -> Callable[[str], dict]:
+        return lambda image_url: self.vision(image_url)
+
     def make_chat_fn(self) -> Callable[[str, list[dict]], dict]:
         """适配 chat_fn 协议：网关内部不记账（log=False），台账统一由问答端点按登录者记一次。"""
         def chat_fn(query: str, hits: Sequence[dict]) -> dict:

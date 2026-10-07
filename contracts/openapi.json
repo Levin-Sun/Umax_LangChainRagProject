@@ -177,6 +177,21 @@
             ],
             "title": "Conversation Id"
           },
+          "images": {
+            "anyOf": [
+              {
+                "items": {
+                  "pattern": "^data:image/(?:png|jpeg|jpg|webp|gif|svg\\+xml);base64,",
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Images"
+          },
           "kb_ids": {
             "anyOf": [
               {
@@ -1453,6 +1468,25 @@
     "/api/v1/conversations": {
       "get": {
         "operationId": "list_conversations_api_v1_conversations_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "q",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 64,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Q"
+            }
+          }
+        ],
         "responses": {
           "200": {
             "content": {
@@ -1471,6 +1505,16 @@
               }
             },
             "description": "需要登录"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
           },
           "428": {
             "content": {

@@ -20,7 +20,7 @@ _EXPECTED_BASE = {
     ("/api/v1/documents/{doc_id}/reprocess", "post"): {"401", "403", "404"},
     ("/api/v1/documents/{doc_id}/chunks", "get"): {"401", "404"},
     ("/api/v1/retrieve", "post"): {"401", "403"},
-    ("/api/v1/chat", "post"): {"401", "403", "404"},
+    ("/api/v1/chat", "post"): {"400", "401", "403", "404"},
     ("/api/v1/conversations", "get"): {"401"},
     ("/api/v1/conversations/{conv_id}/messages", "get"): {"401", "404"},
     ("/api/v1/conversations/{conv_id}", "delete"): {"401", "404"},

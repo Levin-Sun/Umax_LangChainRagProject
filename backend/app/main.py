@@ -134,10 +134,17 @@ class RetrieveIn(BaseModel):
     top_k: JsonInt | None = None
 
 
+# 传图提问（阶段 2 放开）：data URL 直存消息 content part（与白标 logo 同闸：类型白名单+大小上限）
+IMAGE_PATTERN = "^data:image/(?:png|jpeg|jpg|webp|gif|svg\+xml);base64,"
+IMAGE_MAX = 2_000_000        # 单张 base64 字符上限 ≈ 1.5MB 二进制
+IMAGE_COUNT_MAX = 3
+
+
 class ChatIn(BaseModel):
     question: Utf8Str
     kb_ids: list[ReqId] | None = None
     conversation_id: ReqId | None = None
+    images: list[Annotated[Utf8Str, Field(json_schema_extra={"pattern": IMAGE_PATTERN})]] | None = None
 
 
 class DocPatchIn(BaseModel):
@@ -343,6 +350,7 @@ def create_app(
     engine: Engine,
     embedder=None,
     chat_fn: Callable[[str, list[dict]], dict] | None = None,
+    vision_fn: Callable[[str], dict] | None = None,   # (image_data_url) -> {caption,...}；None=无视觉模型
     upload_dir: str = "uploads",
     queue=None,          # ImportQueue 协议；None=同步入库
     mineru=None,         # MinerUClient；None=扫描件解析直接失败并说明原因
@@ -782,7 +790,35 @@ def create_app(
              session: Session = Depends(get_session)):
         allowed = allowed_kb_ids(session, user)
         _guard_kb_ids(allowed, body.kb_ids)
-        hits = retrieve(session, body.question, embedder=embedder, kb_ids=body.kb_ids,
+        # 传图提问（阶段 2）：先校验图片，再由 vision 模型转文字描述，拼进检索与生成的问题
+        images = body.images or []
+        if len(images) > IMAGE_COUNT_MAX:
+            raise HTTPException(400, f"最多附带 {IMAGE_COUNT_MAX} 张图片")
+        for u in images:
+            if not LOGO_RE.match(u):
+                raise HTTPException(400, "图片仅支持 data:image/* base64")
+            if len(u) > IMAGE_MAX:
+                raise HTTPException(400, "单张图片过大（≤2MB）")
+        captions: list[str] = []
+        for u in images:
+            if vision_fn is None:
+                break   # 未配视觉模型：文字照常答（图片仍随消息存储可回看）
+            try:
+                out = vision_fn(u)
+            except Exception as exc:
+                import logging
+                logging.getLogger("umax").warning("vision 描述失败，跳过该图：%s", exc)
+                continue
+            captions.append(out["caption"])
+            session.add(UsageRecord(tenant_id="default", user_email=user.email,
+                                    scenario="vision", model=out.get("model") or s.chat_model,
+                                    prompt_tokens=out.get("prompt_tokens") or 0,
+                                    completion_tokens=out.get("completion_tokens") or 0,
+                                    latency_ms=out.get("latency_ms")))
+        query = body.question
+        if captions:
+            query += "\n\n【随问图片描述】\n" + "\n".join(captions)
+        hits = retrieve(session, query, embedder=embedder, kb_ids=body.kb_ids,
                         allowed_kb_ids=allowed,
                         recall_k=s.recall_k, top_k=s.rerank_top_n, min_sim=s.min_sim)
         # 终审收口①：给了 id 就必须"存在且归调用者"——不存在与跨用户同文案（同 list_messages），
@@ -796,14 +832,16 @@ def create_app(
                                 title=body.question[:32], kb_ids=body.kb_ids or [])
             session.add(conv)
             session.flush()
+        user_parts: list[dict] = [{"type": "text", "text": body.question}]
+        user_parts += [{"type": "image_url", "image_url": {"url": u}} for u in images]
         session.add(Message(tenant_id="default", conversation_id=conv.id, role="user",
-                            content=[{"type": "text", "text": body.question}]))
+                            content=user_parts))
 
         if not hits or chat_fn is None:
             answer, usage, citations = MISS_ANSWER, {"prompt_tokens": 0, "completion_tokens": 0}, []
         else:
             try:
-                out = chat_fn(body.question, hits)
+                out = chat_fn(query, hits)
             # 模型在两次问答之间被停用/删光/全挂：不把 500 甩用户脸上，转未命中兜底
             except Exception as exc:
                 import logging
@@ -832,10 +870,18 @@ def create_app(
 
     # ---- 会话历史：按登录者隔离（admin 也没有特权看别人的会话）----
     @app.get("/api/v1/conversations", responses={**_ERR_LOGIN_GATE})
-    def list_conversations(user: User = Depends(get_user), session: Session = Depends(get_session)):
+    def list_conversations(q: Annotated[str | None, Query(max_length=64)] = None,
+                           user: User = Depends(get_user),
+                           session: Session = Depends(get_session)):
+        # 会话搜索（backlog）：标题子串匹配，仅本人会话；q 里的 LIKE 通配符按字面剔除
+        query = session.query(Conversation).filter(Conversation.user_email == user.email)
+        if q:
+            literal = q.replace("%", "").replace("_", "").replace("\\", "")
+            if not literal:
+                return []   # 纯通配符按字面语义＝无标题含这些字符
+            query = query.filter(Conversation.title.ilike(f"%{literal}%"))
         return [{"id": c.id, "title": c.title, "kb_ids": c.kb_ids}
-                for c in session.query(Conversation).filter(Conversation.user_email == user.email)
-                .order_by(Conversation.id)]
+                for c in query.order_by(Conversation.id)]
 
     @app.delete("/api/v1/conversations/{conv_id}", status_code=204,
                 responses={**_ERR(404, "会话不存在"), **_ERR_LOGIN_GATE})
@@ -1212,6 +1258,7 @@ def build_production_app(upload_dir: str = "uploads",
         # 后台登记第一个模型立即接线；表空且无百炼 → chat MISS / 入库 BM25-only 降级
         chat_fn = with_gateway_fallback(gw.make_chat_fn(), bailian_chat)
         embedder = FallbackEmbedder(gw.make_embedder(), bailian_embedder)
+        vision_fn = gw.make_vision_fn()   # 未配 vision 场景时端点内按文字问答降级
     else:
         chat_fn, embedder = bailian_chat, bailian_embedder
     mineru = MinerUClient(s.mineru_base_url) if s.mineru_base_url else None

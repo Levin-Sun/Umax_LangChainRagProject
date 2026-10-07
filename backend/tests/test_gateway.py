@@ -213,3 +213,44 @@ def test_embedder_fallback_composition(engine, db):
     assert FallbackEmbedder(Gw(), None).embed(["a", "b"]) == [None, None]
     # 空表有直连 → 走直连
     assert FallbackEmbedder(Gw(), Direct()).embed(["a"]) == [[0.0] * 4]
+
+
+# ---- 视觉场景（传图提问放开）：vision 走 vision 场景模型、prompt 含 data URL、失败 fallback ----
+def _vision_handler(fail_models=()):
+    def handler(request):
+        body = json.loads(request.content)
+        if body["model"] in fail_models:
+            return httpx.Response(500, json={"error": "boom"})
+        content = body["messages"][0]["content"]
+        url = next(p["image_url"]["url"] for p in content if p["type"] == "image_url")
+        return httpx.Response(200, json={
+            "choices": [{"message": {"content": f"[{body['model']}] 图述({url[:20]}…)"}}],
+            "usage": {"prompt_tokens": 50, "completion_tokens": 20}})
+    return handler
+
+
+def test_vision_routes_vision_scenario_and_passes_data_url(engine, db):
+    _seed(engine, "vision", "v-model")
+    _seed(engine, "chat", "c-model")   # chat 模型不该被 vision 调用
+    gw = ModelGateway(engine, secret=SECRET, transport=httpx.MockTransport(_vision_handler()),
+                      sleep=lambda s: None)
+    out = gw.vision("data:image/png;base64,AAAA")
+    assert out["caption"].startswith("[v-model] 图述(data:image/png;base6")
+    assert out["prompt_tokens"] == 50 and out["model"] == "v-model"
+
+
+def test_vision_falls_back_to_next_provider(engine, db):
+    _seed(engine, "vision", "v-bad", rank=0)
+    _seed(engine, "vision", "v-good", rank=1)
+    gw = ModelGateway(engine, secret=SECRET,
+                      transport=httpx.MockTransport(_vision_handler(fail_models={"v-bad"})),
+                      sleep=lambda s: None)
+    assert gw.vision("data:image/png;base64,AAAA")["model"] == "v-good"
+
+
+def test_vision_without_provider_raises_no_provider(engine, db):
+    from app.services.gateway import NoProviderError
+    gw = ModelGateway(engine, secret=SECRET, transport=httpx.MockTransport(_vision_handler()),
+                      sleep=lambda s: None)
+    with pytest.raises(NoProviderError):
+        gw.vision("data:image/png;base64,AAAA")

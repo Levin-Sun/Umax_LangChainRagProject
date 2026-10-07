@@ -504,6 +504,8 @@ export interface components {
         ChatIn: {
             /** Conversation Id */
             conversation_id?: number | null;
+            /** Images */
+            images?: string[] | null;
             /** Kb Ids */
             kb_ids?: number[] | null;
             /** Question */
@@ -1333,7 +1335,9 @@ export interface operations {
     };
     list_conversations_api_v1_conversations_get: {
         parameters: {
-            query?: never;
+            query?: {
+                q?: string | null;
+            };
             header?: never;
             path?: never;
             cookie?: never;
@@ -1356,6 +1360,15 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ErrorOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
             /** @description 首次登录必须修改初始口令 */

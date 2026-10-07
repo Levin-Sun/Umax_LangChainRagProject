@@ -111,3 +111,106 @@ def test_delete_conversation_owner_only_cascades(engine, db, tmp_path):
     with Session(engine) as s:
         assert s.query(Message).filter_by(conversation_id=conv).count() == 0
     assert all(x["id"] != conv for x in c.get("/api/v1/conversations").json())
+
+
+# ---- 会话搜索（backlog：覆盖归档诉求的痛点——找得回，而不是归起来）----
+def test_list_conversations_search_by_title(engine, db, tmp_path):
+    from fastapi.testclient import TestClient
+
+    from app.main import create_app
+    from tests.conftest import login, seed_user
+
+    app = create_app(engine=engine, secret="s", embedder=None,
+                     chat_fn=lambda q, h: {"answer": "a", "prompt_tokens": 1, "completion_tokens": 1},
+                     upload_dir=str(tmp_path))
+    seed_user(engine, "a@x.com", "Passw0rd-1", role="admin")
+    c = TestClient(app)
+    login(c, "a@x.com", "Passw0rd-1")
+    for q in ("退货政策是什么", "FBA 备货计划", "退货时限几天"):
+        c.post("/api/v1/chat", json={"question": q})
+    assert len(c.get("/api/v1/conversations").json()) == 3
+    hit = c.get("/api/v1/conversations", params={"q": "退货"}).json()
+    assert {x["title"] for x in hit} == {"退货政策是什么", "退货时限几天"}
+    assert c.get("/api/v1/conversations", params={"q": "不存在词"}).json() == []
+    # 通配符不当作语法：字面匹配
+    assert len(c.get("/api/v1/conversations", params={"q": "%"}).json()) == 0
+
+
+# ---- 传图提问放开（阶段 2；数据结构一期已按多模态预留）----
+PNG_1PX = ("data:image/png;base64,"
+           "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR4nGNgYGBgAAAABQAB"
+           "h6FO1AAAAABJRU5ErkJggg==")
+
+
+def _vision_app(engine, tmp_path, vision_fn=None):
+    from fastapi.testclient import TestClient
+
+    from app.main import create_app
+    from tests.conftest import login, seed_user
+
+    seen = {}
+
+    def chat(query, hits):
+        seen["query"] = query
+        return {"answer": "答[1]", "prompt_tokens": 1, "completion_tokens": 1}
+
+    app = create_app(engine=engine, secret="s", embedder=None, chat_fn=chat,
+                     vision_fn=vision_fn, upload_dir=str(tmp_path))
+    seed_user(engine, "a@x.com", "Passw0rd-1", role="admin")
+    c = TestClient(app)
+    login(c, "a@x.com", "Passw0rd-1")
+    return c, seen
+
+
+def test_chat_with_images_stores_multimodal_parts(engine, db, tmp_path):
+    c, seen = _vision_app(engine, tmp_path)
+    r = c.post("/api/v1/chat", json={"question": "这张图里是什么", "images": [PNG_1PX]})
+    assert r.status_code == 200, r.text
+    conv = r.json()["conversation_id"]
+    msgs = c.get(f"/api/v1/conversations/{conv}/messages").json()
+    parts = msgs[0]["content"]
+    assert parts[0] == {"type": "text", "text": "这张图里是什么"}
+    assert parts[1]["type"] == "image_url" and parts[1]["image_url"]["url"] == PNG_1PX
+
+
+def test_chat_image_validation(engine, db, tmp_path):
+    c, _ = _vision_app(engine, tmp_path)
+    assert c.post("/api/v1/chat", json={"question": "q", "images": ["https://x/a.png"]}).status_code == 400
+    assert c.post("/api/v1/chat", json={"question": "q", "images": ["data:text/html;base64,PGI+"]}).status_code == 400
+    assert c.post("/api/v1/chat", json={"question": "q",
+                                        "images": ["data:image/png;base64," + "A" * 2_000_001]}).status_code == 400
+    assert c.post("/api/v1/chat", json={"question": "q", "images": [PNG_1PX] * 4}).status_code == 400
+    assert c.post("/api/v1/chat", json={"question": "q", "images": []}).status_code == 200  # 空数组=没图
+
+
+def test_vision_caption_feeds_retrieval_and_generation_and_usage(engine, db, tmp_path):
+    from sqlalchemy.orm import Session
+
+    from app.models import UsageRecord
+
+    def vision_fn(data_url):
+        return {"caption": "图片：退款流程图，含 7 个自然日字样", "prompt_tokens": 50,
+                "completion_tokens": 30, "model": "fake-vision"}
+
+    c, seen = _vision_app(engine, tmp_path, vision_fn=vision_fn)
+    raw = "售后规则：商品自签收后 7 个自然日内可退货。" * 5
+    kb = c.post("/api/v1/kb", json={"name": "k"}).json()
+    c.post(f"/api/v1/kb/{kb['id']}/documents", files={"file": ("a.txt", raw.encode(), "text/plain")})
+    r = c.post("/api/v1/chat", json={"question": "图里的流程要几天", "images": [PNG_1PX]})
+    assert r.status_code == 200
+    # 图片描述进生成提示词（命中检索+模型都能看到）
+    assert "退款流程图" in seen["query"]
+    with Session(engine) as s:
+        rows = s.query(UsageRecord).filter_by(scenario="vision").all()
+        assert len(rows) == 1 and rows[0].model == "fake-vision"
+        assert rows[0].completion_tokens == 30
+
+
+def test_chat_images_without_vision_model_degrades_to_text(engine, db, tmp_path):
+    c, seen = _vision_app(engine, tmp_path, vision_fn=None)
+    kb = c.post("/api/v1/kb", json={"name": "k"}).json()
+    raw = "售后规则：商品自签收后 7 个自然日内可退货。" * 5
+    c.post(f"/api/v1/kb/{kb['id']}/documents", files={"file": ("a.txt", raw.encode(), "text/plain")})
+    r = c.post("/api/v1/chat", json={"question": "退货要几个自然日", "kb_ids": [kb["id"]], "images": [PNG_1PX]})
+    assert r.status_code == 200   # 没配视觉模型：文字照常答，图片仍在消息里可回看
+    assert "图片描述" not in seen["query"]
