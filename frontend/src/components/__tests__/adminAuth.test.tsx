@@ -22,8 +22,8 @@ vi.mock("next/navigation", () => ({
   }),
 }));
 
-const ADMIN: AuthMe = { email: "a@x.com", name: "阿管", role: "admin", kb_ids: null };
-const MEMBER: AuthMe = { email: "m@x.com", name: "阿员", role: "member", kb_ids: [7] };
+const ADMIN: AuthMe = { email: "a@x.com", name: "阿管", role: "admin", kb_ids: null, must_change_password: false };
+const MEMBER: AuthMe = { email: "m@x.com", name: "阿员", role: "member", kb_ids: [7], must_change_password: false };
 
 // 登录后 me 才可读的门闩式假后端：POST /auth/login 前 me=401，成功后 me=ok(me)
 function loginApi(me: AuthMe) {

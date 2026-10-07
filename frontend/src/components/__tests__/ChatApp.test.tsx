@@ -14,7 +14,7 @@ vi.mock("next/navigation", () => ({
   usePathname: () => "/",
   useRouter: () => ({ push: () => {}, replace: (to: string) => { nav.replaced.push(to); } }),
 }));
-const ME: AuthMe = { email: "a@x.com", name: "阿管", role: "admin", kb_ids: null };
+const ME: AuthMe = { email: "a@x.com", name: "阿管", role: "admin", kb_ids: null, must_change_password: false };
 // 包一层：/auth/me 恒 200（admin），其余透传给业务假 api
 type LooseCall = (u: string, init?: unknown) => unknown;
 const withAuth = (biz: typeof api) => fakeApi({

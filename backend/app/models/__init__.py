@@ -26,6 +26,8 @@ class User(Base):
     name = Column(String(128), nullable=False, default="", server_default="")
     status = Column(String(16), nullable=False, default="active", server_default="active")  # active/disabled
     role = Column(String(16), nullable=False, default="member")  # admin / member
+    # 首登强改密门闸：口令非本人设定（播种/管理员代发代重置）即置位，本人经 /auth/change-password 解除
+    must_change_password = Column(Boolean, nullable=False, default=False, server_default="false")
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
 

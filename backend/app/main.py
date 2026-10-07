@@ -268,6 +268,15 @@ def create_app(
     throttle = LoginThrottle()   # 每 app 实例独立计数：测试互污染为零
 
     _ERR_UNAUTH, _ERR_FORBID = _ERR(401, "需要登录"), _ERR(403, "需要管理员权限")
+    # 首登强改密（初始化向导收尾）：口令非本人设定的账号未改密前，全部受护端点 428——
+    # 与 403 分轨（403 专属 admin 面，双轨守卫不被稀释），豁免仅 auth 三件套：
+    # me（前端靠它知道该弹改密框）/logout（随时可走人）/change-password（解除门闸的唯一通道）
+    MUST_CHANGE_EXEMPT = ("/api/v1/auth/me", "/api/v1/auth/logout", "/api/v1/auth/change-password")
+    _ERR_MUST_CHANGE = _ERR(428, "首次登录必须修改初始口令")
+    # _ERR_GATE：admin 面全量（401+403+428）；_ERR_LOGIN_GATE：member 面（401+428，无 403——
+    # 403 声明面必须仍与 admin 面精确重合，双轨守卫不被稀释）
+    _ERR_GATE = {**_ERR_UNAUTH, **_ERR_FORBID, **_ERR_MUST_CHANGE}
+    _ERR_LOGIN_GATE = {**_ERR_UNAUTH, **_ERR_MUST_CHANGE}
 
     def _now() -> datetime:
         return datetime.now(timezone.utc)
@@ -276,12 +285,15 @@ def create_app(
         return request.client.host if request.client else "unknown"
 
     def get_user(request: Request, session: Session = Depends(get_session)) -> User:
-        """cookie→会话→账号三点一线，任一断 401（禁用的存活会话也断在这）——所有受护端点的统一依赖。"""
+        """cookie→会话→账号三点一线，任一断 401（禁用的存活会话也断在这）——所有受护端点的统一依赖。
+        首登强改密：口令非本人设定（must_change_password）未改密前，除 auth 三件套外一律 428。"""
         token = request.cookies.get(SESSION_COOKIE)
         row = session.get(UserSession, token_digest(token)) if token else None
         user = session.get(User, row.user_id) if row else None
         if not row or row.expires_at <= _now() or not user or user.status != "active":
             raise HTTPException(401, "需要登录")
+        if user.must_change_password and request.url.path not in MUST_CHANGE_EXEMPT:
+            raise HTTPException(428, "首次登录必须修改初始口令")
         request.state.user, request.state.session_hash = user, row.token_hash
         return user
 
@@ -337,7 +349,8 @@ def create_app(
     def auth_me(user: User = Depends(get_user), session: Session = Depends(get_session)):
         allowed = allowed_kb_ids(session, user)
         return {"email": user.email, "name": user.name, "role": user.role,
-                "kb_ids": None if allowed is None else sorted(allowed)}
+                "kb_ids": None if allowed is None else sorted(allowed),
+                "must_change_password": user.must_change_password}
 
     @app.post("/api/v1/auth/change-password", status_code=204,
               # 422 不覆写：FastAPI 默认 422（HTTPValidationError，detail 是数组）——用 _ERR(ErrorOut)
@@ -350,6 +363,7 @@ def create_app(
         if not verify_password(body.old_password, user.hashed_password):
             raise HTTPException(401, "旧口令错误")
         user.hashed_password = hash_password(body.new_password)
+        user.must_change_password = False   # 本人设定了新口令，门闸解除
         session.query(UserSession).filter(
             UserSession.user_id == user.id,
             UserSession.token_hash != request.state.session_hash).delete()   # 踢其他设备，留当前
@@ -375,13 +389,13 @@ def create_app(
             q = q.filter(UserSession.token_hash != except_hash)
         q.delete()
 
-    @app.get("/api/v1/users", responses={**_ERR_UNAUTH, **_ERR_FORBID})
+    @app.get("/api/v1/users", responses={**_ERR_GATE})
     def list_users(admin: User = Depends(require_admin_role), session: Session = Depends(get_session)):
         g = _grants_map(session)
         return [_user_json(u, g) for u in session.query(User).order_by(User.id)]
 
     @app.post("/api/v1/users", status_code=201,
-              responses={**_ERR(400, "email 重复或 role 非法"), **_ERR_UNAUTH, **_ERR_FORBID, **_ERR_BODY})
+              responses={**_ERR(400, "email 重复或 role 非法"), **_ERR_GATE, **_ERR_BODY})
     def create_user_api(body: UserIn, request: Request,
                         admin: User = Depends(require_admin_role), session: Session = Depends(get_session)):
         if body.role not in ROLES:
@@ -389,7 +403,8 @@ def create_app(
         if session.query(User).filter_by(tenant_id="default", email=body.email).first():
             raise HTTPException(400, "该邮箱已存在")
         u = User(tenant_id="default", email=body.email, name=body.name or body.email.split("@")[0],
-                 hashed_password=hash_password(body.password), role=body.role, status="active")
+                 hashed_password=hash_password(body.password), role=body.role, status="active",
+                 must_change_password=True)   # 口令是 admin 代发的，首登必须本人改
         session.add(u)
         session.flush()
         audit_record(session, "user_created", user_email=admin.email, target_type="user",
@@ -399,7 +414,7 @@ def create_app(
 
     @app.patch("/api/v1/users/{user_id}",
                responses={**_ERR(400, "不能对当前登录管理员降级/禁用，role/status 非法"),
-                          **_ERR(404, "用户不存在"), **_ERR_UNAUTH, **_ERR_FORBID, **_ERR_BODY})
+                          **_ERR(404, "用户不存在"), **_ERR_GATE, **_ERR_BODY})
     def patch_user(user_id: PathId, body: UserPatchIn, request: Request,
                    admin: User = Depends(require_admin_role), session: Session = Depends(get_session)):
         u = session.get(User, user_id)
@@ -423,6 +438,9 @@ def create_app(
         if body.password:
             u.hashed_password = hash_password(body.password)
             changed.append("password")
+            # 重置的口令是 admin 输的：目标用户回到门闸后；admin 重置自己不算（口令仍是本人输的，自锁无意义）
+            if u.id != admin.id:
+                u.must_change_password = True
         if {"role", "status", "password"} & set(changed):
             # 角色/启停/重置口令变更一律吊销（spec §2）；管理员自重置保留当前会话（评审收编⑦）——
             # 与自助改密同语义：吊销的是"其他设备"，不是把操作者从正在做的管理动作里踢出去。
@@ -437,7 +455,7 @@ def create_app(
 
     @app.get("/api/v1/users/{user_id}/grants",
              responses={**_ERR(400, "管理员隐式全库，无授权表"), **_ERR(404, "用户不存在"),
-                        **_ERR_UNAUTH, **_ERR_FORBID})
+                        **_ERR_GATE})
     def get_grants(user_id: PathId, admin: User = Depends(require_admin_role),
                    session: Session = Depends(get_session)):
         u = session.get(User, user_id)
@@ -449,7 +467,7 @@ def create_app(
 
     @app.put("/api/v1/users/{user_id}/grants",
              responses={**_ERR(400, "管理员无授权表 / 知识库不存在"), **_ERR(404, "用户不存在"),
-                        **_ERR_UNAUTH, **_ERR_FORBID, **_ERR_BODY})
+                        **_ERR_GATE, **_ERR_BODY})
     def put_grants(user_id: PathId, body: GrantsIn, request: Request,
                    admin: User = Depends(require_admin_role), session: Session = Depends(get_session)):
         u = session.get(User, user_id)
@@ -469,7 +487,7 @@ def create_app(
         return ids
 
     # ---- 审计查询（spec §5，任务 5）：admin 独占，过滤+分页，倒序 ----
-    @app.get("/api/v1/audit", responses={**_ERR_UNAUTH, **_ERR_FORBID})
+    @app.get("/api/v1/audit", responses={**_ERR_GATE})
     def list_audit(user: Annotated[str | None, Query(max_length=255)] = None,
                    action: Annotated[str | None, Query(max_length=32)] = None,
                    limit: QueryInt = 50, offset: QueryInt = 0,
@@ -502,7 +520,7 @@ def create_app(
             raise HTTPException(403, "无权访问指定知识库")
 
     @app.post("/api/v1/kb", status_code=201,
-              responses={**_ERR_BODY, **_ERR_UNAUTH, **_ERR_FORBID})
+              responses={**_ERR_BODY, **_ERR_GATE})
     def create_kb(body: KbIn, request: Request,
                   admin: User = Depends(require_admin_role),
                   session: Session = Depends(get_session)):
@@ -516,7 +534,7 @@ def create_app(
         session.commit()
         return {"id": kb.id, "name": kb.name, "description": kb.description}
 
-    @app.get("/api/v1/kb", responses=_ERR_UNAUTH)
+    @app.get("/api/v1/kb", responses={**_ERR_LOGIN_GATE})
     def list_kb(user: User = Depends(get_user), session: Session = Depends(get_session)):
         # member 的库列表在查询层过滤（不是前端隐藏）——空授权=空列表
         allowed = allowed_kb_ids(session, user)
@@ -527,7 +545,7 @@ def create_app(
                 for k in q.order_by(KnowledgeBase.id)]
 
     @app.get("/api/v1/kb/{kb_id}/documents",
-             responses={**_ERR(404, "知识库不存在"), **_ERR_UNAUTH})
+             responses={**_ERR(404, "知识库不存在"), **_ERR_LOGIN_GATE})
     def list_documents(kb_id: PathId, user: User = Depends(get_user),
                        session: Session = Depends(get_session)):
         allowed = allowed_kb_ids(session, user)
@@ -540,7 +558,7 @@ def create_app(
     # ---- 文档与入库 ----
     @app.post("/api/v1/kb/{kb_id}/documents", status_code=201,
               responses={**_ERR(404, "知识库不存在"), **_ERR(415, "不支持的文件类型"),
-                         **_ERR_BODY, **_ERR_UNAUTH, **_ERR_FORBID})
+                         **_ERR_BODY, **_ERR_GATE})
     def upload_document(kb_id: PathId, request: Request, file: UploadFile = File(...),
                         admin: User = Depends(require_admin_role),
                         session: Session = Depends(get_session)):
@@ -582,13 +600,13 @@ def create_app(
         return doc
 
     @app.get("/api/v1/documents/{doc_id}",
-             responses={**_ERR(404, "文档不存在"), **_ERR_UNAUTH})
+             responses={**_ERR(404, "文档不存在"), **_ERR_LOGIN_GATE})
     def get_document(doc_id: PathId, user: User = Depends(get_user),
                      session: Session = Depends(get_session)):
         return _doc_json(_visible_doc(session, user, doc_id))
 
     @app.get("/api/v1/documents/{doc_id}/chunks",
-             responses={**_ERR(404, "文档不存在"), **_ERR_UNAUTH})
+             responses={**_ERR(404, "文档不存在"), **_ERR_LOGIN_GATE})
     def preview_chunks(doc_id: PathId, user: User = Depends(get_user),
                        session: Session = Depends(get_session)):
         _visible_doc(session, user, doc_id)
@@ -598,8 +616,7 @@ def create_app(
                 .order_by(Chunk.chunk_index)]
 
     @app.patch("/api/v1/documents/{doc_id}",
-               responses={**_ERR(404, "文档不存在"), **_ERR_BODY,
-                          **_ERR_UNAUTH, **_ERR_FORBID})
+               responses={**_ERR(404, "文档不存在"), **_ERR_BODY, **_ERR_GATE})
     def patch_document(doc_id: PathId, body: DocPatchIn,
                        admin: User = Depends(require_admin_role),
                        session: Session = Depends(get_session)):
@@ -615,7 +632,7 @@ def create_app(
         return _doc_json(doc)
 
     @app.post("/api/v1/documents/{doc_id}/reprocess", status_code=202,
-              responses={**_ERR(404, "文档不存在"), **_ERR_UNAUTH, **_ERR_FORBID})
+              responses={**_ERR(404, "文档不存在"), **_ERR_GATE})
     def reprocess(doc_id: PathId, request: Request,
                   admin: User = Depends(require_admin_role),
                   session: Session = Depends(get_session)):
@@ -638,7 +655,7 @@ def create_app(
         return _doc_json(doc)
 
     # ---- 检索与问答：可见性在检索层钳制（SQL 谓词），命中集就是授权集的子集 ----
-    @app.post("/api/v1/retrieve", responses={**_ERR_BODY, **_ERR_UNAUTH, **_ERR_FORBID})
+    @app.post("/api/v1/retrieve", responses={**_ERR_BODY, **_ERR_GATE})
     def retrieve_api(body: RetrieveIn, user: User = Depends(get_user),
                      session: Session = Depends(get_session)):
         allowed = allowed_kb_ids(session, user)
@@ -648,8 +665,7 @@ def create_app(
                         recall_k=s.recall_k, top_k=body.top_k or s.rerank_top_n,
                         min_sim=s.min_sim)
 
-    @app.post("/api/v1/chat", responses={**_ERR(404, "会话不存在"), **_ERR_BODY,
-                                         **_ERR_UNAUTH, **_ERR_FORBID})
+    @app.post("/api/v1/chat", responses={**_ERR(404, "会话不存在"), **_ERR_BODY, **_ERR_GATE})
     def chat(body: ChatIn, user: User = Depends(get_user),
              session: Session = Depends(get_session)):
         allowed = allowed_kb_ids(session, user)
@@ -694,14 +710,14 @@ def create_app(
                 "cited_docs": parse_citations(answer, hits), "usage": usage}
 
     # ---- 会话历史：按登录者隔离（admin 也没有特权看别人的会话）----
-    @app.get("/api/v1/conversations", responses=_ERR_UNAUTH)
+    @app.get("/api/v1/conversations", responses={**_ERR_LOGIN_GATE})
     def list_conversations(user: User = Depends(get_user), session: Session = Depends(get_session)):
         return [{"id": c.id, "title": c.title, "kb_ids": c.kb_ids}
                 for c in session.query(Conversation).filter(Conversation.user_email == user.email)
                 .order_by(Conversation.id)]
 
     @app.get("/api/v1/conversations/{conv_id}/messages",
-             responses={**_ERR(404, "会话不存在"), **_ERR_UNAUTH})
+             responses={**_ERR(404, "会话不存在"), **_ERR_LOGIN_GATE})
     def list_messages(conv_id: PathId, user: User = Depends(get_user),
                       session: Session = Depends(get_session)):
         conv = session.get(Conversation, conv_id)
@@ -727,7 +743,7 @@ def create_app(
 
     @app.post("/api/v1/models", status_code=201,
               responses={**_ERR(400, "scenario 非法"), **_ERR(503, "未配置 GATEWAY_SECRET"),
-                         **_ERR_UNAUTH, **_ERR_FORBID})
+                         **_ERR_GATE})
     def create_model(body: ModelIn, request: Request,
                      admin: User = Depends(require_admin_role),
                      session: Session = Depends(get_session)):
@@ -748,7 +764,7 @@ def create_app(
         session.commit()
         return _model_json(m)
 
-    @app.get("/api/v1/models", responses={**_ERR_UNAUTH, **_ERR_FORBID})
+    @app.get("/api/v1/models", responses={**_ERR_GATE})
     def list_models(admin: User = Depends(require_admin_role), session: Session = Depends(get_session)):
         rows = session.query(ModelConfig).order_by(ModelConfig.scenario,
                                                    ModelConfig.fallback_rank, ModelConfig.id)
@@ -756,8 +772,7 @@ def create_app(
 
     @app.patch("/api/v1/models/{model_id}",
                responses={**_ERR(400, "scenario 非法"), **_ERR(404, "模型配置不存在"),
-                          **_ERR(503, "未配置 GATEWAY_SECRET"),
-                          **_ERR_UNAUTH, **_ERR_FORBID})
+                          **_ERR(503, "未配置 GATEWAY_SECRET"), **_ERR_GATE})
     def patch_model(model_id: PathId, body: ModelPatchIn, request: Request,
                     admin: User = Depends(require_admin_role),
                     session: Session = Depends(get_session)):
@@ -782,7 +797,7 @@ def create_app(
         return _model_json(m)
 
     @app.delete("/api/v1/models/{model_id}", status_code=204,
-                responses={**_ERR(503, "未配置 GATEWAY_SECRET"), **_ERR_UNAUTH, **_ERR_FORBID})
+                responses={**_ERR(503, "未配置 GATEWAY_SECRET"), **_ERR_GATE})
     def delete_model(model_id: PathId, request: Request,
                      admin: User = Depends(require_admin_role),
                      session: Session = Depends(get_session)):
@@ -796,7 +811,7 @@ def create_app(
             session.commit()
 
     # ---- 用量看板简版（§C：成本折算的事实来源）----
-    @app.get("/api/v1/usage/summary", responses={**_ERR_UNAUTH, **_ERR_FORBID})
+    @app.get("/api/v1/usage/summary", responses={**_ERR_GATE})
     def usage_summary(admin: User = Depends(require_admin_role),
                       session: Session = Depends(get_session)):
         rows = (session.query(UsageRecord.scenario, UsageRecord.model,
@@ -834,17 +849,20 @@ def build_production_app(upload_dir: str = "uploads",
                             "name VARCHAR(128) NOT NULL DEFAULT ''"))
         con.execute(sa_text("ALTER TABLE users ADD COLUMN IF NOT EXISTS "
                             "status VARCHAR(16) NOT NULL DEFAULT 'active'"))
+        con.execute(sa_text("ALTER TABLE users ADD COLUMN IF NOT EXISTS "
+                            "must_change_password BOOLEAN NOT NULL DEFAULT FALSE"))
     # 播种初始管理员（spec §2）：users 空表时按 ADMIN_EMAIL/ADMIN_PASSWORD 落一条 role=admin，
     # 口令 hash 后入库（明文永不落库）。测试装配 create_app 不播种，走 conftest.seed_user——
     # 故这里只在 build_production_app 里做，且放在 engine 判定之后（注入 engine 也要播种）。
     with Session(engine) as ses:   # ses 而非 s：s 已是 Settings，with 目标名会覆盖函数作用域
         if ses.query(User).first() is None:
             ses.add(User(tenant_id="default", email=s.admin_email, name="admin",
-                         hashed_password=hash_password(s.admin_password), role="admin"))
+                         hashed_password=hash_password(s.admin_password), role="admin",
+                         must_change_password=True))   # 初始口令是模板口令，首登强改密（初始化向导第一屏）
             ses.commit()
             import logging
             logging.getLogger("umax").warning(
-                "已播种初始管理员 %s（ADMIN_EMAIL/ADMIN_PASSWORD）——部署后立即登录改密", s.admin_email)
+                "已播种初始管理员 %s（ADMIN_EMAIL/ADMIN_PASSWORD）——首次登录强制修改口令", s.admin_email)
     chat_fn = embedder = None
     if s.gateway_secret:
         from app.services.gateway import ModelGateway

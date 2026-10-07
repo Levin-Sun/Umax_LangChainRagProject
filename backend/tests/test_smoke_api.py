@@ -23,6 +23,13 @@ def test_full_chain_with_real_bailian(tmp_path, engine, db):
     r = client.post("/api/v1/auth/login",
                     json={"email": s.admin_email, "password": s.admin_password})
     assert r.status_code == 204, f"播种的初始管理员登录失败：{r.status_code} {r.text}"
+    # 首登强改密（初始化向导第一屏）：播种 admin 带门闸标记，改密后业务端点才放行
+    assert client.get("/api/v1/health").status_code == 200
+    assert client.post("/api/v1/kb", json={}).status_code == 428, "未改密的管理员应被 428 门闸拦下"
+    r = client.post("/api/v1/auth/change-password",
+                    json={"old_password": s.admin_password, "new_password": "Smoke-New-Pass-1"})
+    assert r.status_code == 204, f"首登改密失败：{r.status_code} {r.text}"
+    # 改密语义=留当前会话踢其他设备，故 client 无需重登即可继续
 
     kb = client.post("/api/v1/kb", json={"name": "冒烟库"}).json()
     raw = (s.docs_dir / "rag_dirty_doc_01.txt").read_bytes()

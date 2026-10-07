@@ -8,7 +8,7 @@ import { AuthProvider, useAuth } from "@/lib/auth";
 import { call, callVoid, setUnauthorizedHandler } from "@/lib/api";
 import { fakeApi, ok, fail } from "@/lib/testkit";
 
-const ME = { email: "a@x.com", name: "a", role: "admin" as const, kb_ids: null };
+const ME = { email: "a@x.com", name: "a", role: "admin" as const, kb_ids: null, must_change_password: false };
 
 function Probe({ client }: { client: never }) {
   const { me, loaded, login } = useAuth();

@@ -20,8 +20,8 @@ vi.mock("next/navigation", () => ({
   }),
 }));
 
-const ADMIN: AuthMe = { email: "a@x.com", name: "阿管", role: "admin", kb_ids: null };
-const MEMBER: AuthMe = { email: "m@x.com", name: "阿员", role: "member", kb_ids: [7] };
+const ADMIN: AuthMe = { email: "a@x.com", name: "阿管", role: "admin", kb_ids: null, must_change_password: false };
+const MEMBER: AuthMe = { email: "m@x.com", name: "阿员", role: "member", kb_ids: [7], must_change_password: false };
 
 const authed = (me: AuthMe | null, post = vi.fn(() => ok(undefined))) =>
   fakeApi({ GET: (u) => (u.includes("/auth/me") ? (me ? ok(me) : fail("需要登录", 401)) : ok([])), POST: post });

@@ -1,6 +1,7 @@
 # 契约 fuzz 的前提：错误码必须出现在 spec 里，否则 schemathesis 把合法响应判成违约。
-# 任务 6 整体重写为"双轨守卫"：全员登录后 401 声明面=受护端点全集，403 声明面=admin 面全集
-# ——新增端点忘挂登录依赖/忘挂角色依赖，都会在对应手法轨上曝光（旧"admin 面=401 全集"已废）。
+# 任务 6 建立"双轨守卫"（401=登录面、403=admin 面），首登强改密新增"轨三"：
+# 428=受护端点全集减 auth 三件套（me/logout/change-password 豁免）——口令非本人设定的账号
+# 未改密前除豁免端点外一律 428。三轨各自锁定一个收口维度：忘挂登录/角色/门闸都会在对应轨上曝光。
 from pathlib import Path
 
 import json
@@ -8,8 +9,8 @@ import json
 SPEC = json.loads((Path(__file__).resolve().parents[2] / "contracts/openapi.json")
                   .read_text(encoding="utf-8"))
 
-# 全受护端点声明 401；admin 面加 403；逐端点业务码保留（400/404/415/503/429 按各端点实态）
-EXPECTED = {
+# 全受护端点声明 401+428；admin 面加 403；逐端点业务码保留（400/404/415/503/429 按各端点实态）
+_EXPECTED_BASE = {
     ("/api/v1/kb", "post"): {"401", "403"},
     ("/api/v1/kb", "get"): {"401"},
     ("/api/v1/kb/{kb_id}/documents", "get"): {"401", "404"},
@@ -38,6 +39,12 @@ EXPECTED = {
     ("/api/v1/users/{user_id}/grants", "put"): {"400", "401", "403", "404"},
     ("/api/v1/audit", "get"): {"401", "403"},
 }
+# 首登门闸豁免集：me（前端靠它知道该弹改密框）/logout（随时可走人）/change-password（解除门闸
+# 唯一通道）；login 不走 get_user，天然不在此门闸的声明面内
+MUST_CHANGE_EXEMPT = {("/api/v1/auth/me", "get"), ("/api/v1/auth/logout", "post"),
+                      ("/api/v1/auth/change-password", "post"), ("/api/v1/auth/login", "post")}
+EXPECTED = {(p, m): codes | {"428"} if (p, m) not in MUST_CHANGE_EXEMPT else codes
+            for (p, m), codes in _EXPECTED_BASE.items()}
 
 # 匿名可达端点：健康检查 + 登录本身（登录声明 401 是"邮箱或口令错误"，不是受护）
 ANONYMOUS = {("/api/v1/health", "get"), ("/api/v1/auth/login", "post")}
@@ -72,3 +79,11 @@ def test_admin_surface_is_exactly_403_declared():
 def test_health_declares_no_errors():
     declared = set(SPEC["paths"]["/api/v1/health"]["get"]["responses"])
     assert declared == {"200"}, f"/health 声明面应为纯 200，实得 {declared}"
+
+
+# 轨三：首登门闸面 = 声明 428 的端点全集 = 受护端点全集减豁免三件套——新端点挂了登录却忘挂
+# 门闸（或在豁免端点上误挂 428），都在这里曝光
+def test_must_change_surface_is_exactly_428_declared():
+    gate_surface = _all_declared("428")
+    want = {p for p in EXPECTED if p not in MUST_CHANGE_EXEMPT}
+    assert gate_surface == want, f"首登门闸声明面漂移：{gate_surface ^ want}"

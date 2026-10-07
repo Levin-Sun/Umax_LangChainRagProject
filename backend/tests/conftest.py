@@ -43,13 +43,15 @@ def db(engine: Engine) -> Session:
 
 
 # ---- RBAC 测试助手（任务 3 起共享）----
-def seed_user(engine, email: str, password: str, *, role: str = "member", name: str = "") -> int:
+def seed_user(engine, email: str, password: str, *, role: str = "member", name: str = "",
+              must_change_password: bool = False) -> int:
     """直写 users 表（绕过端点，端点行为另有测试）。返回 user id。"""
     from app.models import User
     from app.services.auth import hash_password
     with Session(engine) as s:
         u = User(tenant_id="default", email=email, name=name or email.split("@")[0],
-                 hashed_password=hash_password(password), role=role, status="active")
+                 hashed_password=hash_password(password), role=role, status="active",
+                 must_change_password=must_change_password)
         s.add(u)
         s.commit()
         return u.id

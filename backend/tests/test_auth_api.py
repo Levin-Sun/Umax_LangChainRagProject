@@ -31,7 +31,8 @@ def client(engine, db, tmp_path):
 def test_login_sets_httponly_cookie_and_me_returns_profile(client):
     login(client, *ADMIN)
     me = client.get("/api/v1/auth/me").json()
-    assert me == {"email": ADMIN[0], "name": "总管", "role": "admin", "kb_ids": None}
+    assert me == {"email": ADMIN[0], "name": "总管", "role": "admin", "kb_ids": None,
+                  "must_change_password": False}  # seed_user 直建账号：口令是测试自设的，无门闸
     assert any(c == "umax_session" for c in client.cookies)  # httpx 已托管会话 cookie（Cookies 迭代出名字符串）
     r = client.post("/api/v1/auth/login", json={"email": MEMBER[0], "password": MEMBER[1]})
     assert r.status_code == 204

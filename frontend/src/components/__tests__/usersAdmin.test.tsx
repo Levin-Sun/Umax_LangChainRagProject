@@ -7,7 +7,7 @@ import { P } from "@/lib/paths";
 import { fakeApi, ok, fail } from "@/lib/testkit";
 import { describe, expect, it, vi } from "vitest";
 
-const ME = { email: "admin@x.com", name: "admin", role: "admin" as const, kb_ids: null };
+const ME = { email: "admin@x.com", name: "admin", role: "admin" as const, kb_ids: null, must_change_password: false };
 const rows = [
   { id: 1, email: "admin@x.com", name: "admin", role: "admin", status: "active",
     created_at: "2026-09-23T08:00:00", kb_ids: null },
