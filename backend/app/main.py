@@ -7,7 +7,7 @@
 from collections.abc import Callable, Iterator
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from typing import Annotated
+from typing import Annotated, Literal
 from uuid import uuid4
 
 import re
@@ -42,6 +42,10 @@ SCENARIOS = {"chat", "embedding", "rerank", "vision"}
 # 与已入库 contracts/openapi.json 逐字一致，改集合必须走契约工作流重导 spec）。
 # 终审收口 I3：原为手写正则字面量，与运行时校验集合存在漂移风险。
 SCENARIO_PATTERN = "^(" + "|".join(sorted(SCENARIOS)) + ")$"
+# 文档解析状态机（模型注释同源：pending → parsing → ready / failed）——单一事实源派生 Literal，
+# 进 spec 成 enum：后端拒绝未知状态、前端拿到字面量联合类型（此前 spec 里是裸 string，两端靠约定）
+DOC_STATUSES = ("pending", "parsing", "ready", "failed")
+
 # role/status 枚举同款派生（任务 4）：约束写进 schema，运行时校验集合是同一事实源，防漂移
 ROLES = {"admin", "member"}
 USER_STATUSES = {"active", "disabled"}
@@ -90,9 +94,15 @@ def _build_commit() -> str:
     if env:
         return env[:40]
     try:
-        return subprocess.run(["git", "rev-parse", "--short", "HEAD"],
-                              cwd=Path(__file__).resolve().parents[2],
-                              capture_output=True, text=True, timeout=3).stdout.strip() or "unknown"
+        repo = Path(__file__).resolve().parents[2]
+        sha = subprocess.run(["git", "rev-parse", "--short", "HEAD"], cwd=repo,
+                             capture_output=True, text=True, timeout=3).stdout.strip()
+        if not sha:
+            return "unknown"
+        # 工作区有未提交改动时标 -dirty：排查"改了不生效"时不该把未提交的改动误当成已生效
+        dirty = subprocess.run(["git", "status", "--porcelain"], cwd=repo,
+                               capture_output=True, text=True, timeout=3).stdout.strip()
+        return f"{sha}-dirty" if dirty else sha
     except Exception:
         return "unknown"
 
@@ -157,6 +167,27 @@ Utf8Str = Annotated[str, BeforeValidator(_utf8_str)]           # 落库字符串
 JsonSafe = Annotated[dict, BeforeValidator(_utf8_str)]         # JSONB 列（capabilities）递归过闸
 
 
+DocStatus = Literal[*DOC_STATUSES]   # 3.11+ 解包写法：与 DOC_STATUSES 不会漂移
+
+
+class DocOut(BaseModel):
+    # 不给默认值：_doc_json 恒返回全部键，spec 里就该是必现字段（有默认会被标成可选，
+    # 前端类型随之变宽松——契约与实现的一致性优先于"以后可能加字段"的顾虑）
+    id: int
+    kb_id: int
+    name: str
+    status: DocStatus
+    error: str | None
+    size_bytes: int | None
+
+
+class BatchUploadItemOut(BaseModel):
+    """批量上传的逐文件结果：部分成功语义——坏文件只在它自己那行有 error。"""
+    name: str
+    document: DocOut | None
+    error: str | None
+
+
 class KbIn(BaseModel):
     name: Utf8Str = Field(max_length=128)          # 修复⑨：varchar 列宽入约（PG String(128)）
     description: Utf8Str | None = None
@@ -169,7 +200,7 @@ class RetrieveIn(BaseModel):
 
 
 # 传图提问（阶段 2 放开）：data URL 直存消息 content part（与白标 logo 同闸：类型白名单+大小上限）
-IMAGE_PATTERN = "^data:image/(?:png|jpeg|jpg|webp|gif|svg\+xml);base64,"
+IMAGE_PATTERN = r"^data:image/(?:png|jpeg|jpg|webp|gif|svg\+xml);base64,"
 IMAGE_MAX = 2_000_000        # 单张 base64 字符上限 ≈ 1.5MB 二进制
 IMAGE_COUNT_MAX = 3
 
@@ -182,7 +213,7 @@ class ChatIn(BaseModel):
 
 
 class DocPatchIn(BaseModel):
-    status: Utf8Str | None = Field(None, max_length=16)   # 修复⑨：PG String(16)
+    status: DocStatus | None = None   # 状态机封闭集合（enum 进 spec，未知状态 422）
     error: Utf8Str | None = None
 
 
@@ -759,23 +790,21 @@ def create_app(
                 .filter_by(kb_id=kb_id).order_by(Document.id)]
 
     # ---- 文档与入库 ----
-    @app.post("/api/v1/kb/{kb_id}/documents", status_code=201,
-              responses={**_ERR(404, "知识库不存在"), **_ERR(415, "不支持的文件类型"),
-                         **_ERR_BODY, **_ERR_GATE})
-    def upload_document(kb_id: PathId, request: Request, file: UploadFile = File(...),
-                        admin: User = Depends(require_license),
-                        session: Session = Depends(get_session)):
-        kb = session.get(KnowledgeBase, kb_id)
-        if not kb:
-            raise HTTPException(404, "知识库不存在")
-        # 修复⑧收口：multipart filename 不经 pydantic 验证链，是唯一的裸入口字符串——
-        # 取 basename（防目录注入）+ 过 NUL/孤立代理清洗闸 + 截 200（_doc_json 会回显给前端），
-        # 否则 \x00 直接进 Path 拼接/write_bytes/PG 即未声明 500
+    BATCH_MAX = 20   # 单批文件数上限：挡住"一次传一个文件夹"把单请求打成长时间占用
+
+    def _store_upload(session: Session, kb: KnowledgeBase, file: UploadFile,
+                      request: Request, admin: User) -> tuple[Document | None, str, str | None]:
+        """落盘 + 建 pending 文档 + 审计（不入库/不入队，由调用方决定后续）。返回 (doc, name, error)。
+
+        修复⑧收口：multipart filename 不经 pydantic 验证链，是唯一的裸入口字符串——
+        取 basename（防目录注入）+ 过 NUL/孤立代理清洗闸 + 截 200（_doc_json 会回显给前端）。
+        批量场景下"不支持的类型"只作逐项错误返回，不抛异常（一个坏文件不该拖垮整批）。
+        """
         name = _clean_text(Path(file.filename or "unnamed").name)[:200]
-        if not supported_ext(name):
-            raise HTTPException(415, f"暂不支持的文件类型：{name}（一期 .txt/.md，MinerU 接入后支持 PDF/Office）")
         raw = file.file.read()
-        doc = Document(tenant_id="default", kb_id=kb_id, name=name, status="pending",
+        if not supported_ext(name):
+            return None, name, f"暂不支持的文件类型：{name}"
+        doc = Document(tenant_id="default", kb_id=kb.id, name=name, status="pending",
                        size_bytes=len(raw), mime=file.content_type)
         session.add(doc)
         session.flush()
@@ -785,11 +814,70 @@ def create_app(
         doc.storage_path = str(p)
         audit_record(session, "document_uploaded", user_email=admin.email,
                      target_type="document", target_id=doc.id,
-                     detail={"kb_id": kb_id, "name": name}, ip=_client_ip(request))
+                     detail={"kb_id": kb.id, "name": name}, ip=_client_ip(request))
+        return doc, name, None
+
+    @app.post("/api/v1/kb/{kb_id}/documents/batch", status_code=201,
+              response_model=list[BatchUploadItemOut],
+              responses={**_ERR(400, f"单批最多 {BATCH_MAX} 个文件"), **_ERR(404, "知识库不存在"),
+                         **_ERR_BODY, **_ERR_GATE})
+    def upload_documents_batch(kb_id: PathId, request: Request,
+                               files: list[UploadFile] = File(...),
+                               admin: User = Depends(require_license),
+                               session: Session = Depends(get_session)):
+        """批量上传（§A）：逐文件给出结果，**部分成功**——坏文件只在自己那行报错。
+
+        与单文件端点的差异（有意）：不支持的扩展名不再整批 415，而是该行 error 字段。
+        """
+        kb = session.get(KnowledgeBase, kb_id)
+        if not kb:
+            raise HTTPException(404, "知识库不存在")
+        if len(files) > BATCH_MAX:
+            raise HTTPException(400, f"单批最多 {BATCH_MAX} 个文件")
+        stored: list[tuple[Document, bytes]] = []
+        results: list[dict] = []
+        for f in files:
+            doc, name, err = _store_upload(session, kb, f, request, admin)
+            if err or doc is None:
+                results.append({"name": name, "document": None, "error": err})
+                continue
+            stored.append((doc, read_stored(doc)))
+            results.append({"name": name, "document": _doc_json(doc), "error": None})
+        session.commit()
+        if queue is not None:
+            for doc, _raw in stored:
+                queue.enqueue_import(doc.id)
+            return results                       # pending，worker 逐个接手
+        # 同步模式：逐个入库并把结果回填到对应项（坏文件已经在上面的 results 里带着 error）
+        done: dict[int, dict] = {}
+        for doc, raw in stored:
+            doc = ingest_document(session, doc, raw, embedder=embedder, mineru=mineru,
+                                  **_chunk_params(session, kb))
+            done[doc.id] = _doc_json(doc)
+        return [{**item,
+                 "document": (done.get(item["document"]["id"], item["document"])
+                              if item["document"] else None)}
+                for item in results]
+
+    @app.post("/api/v1/kb/{kb_id}/documents", status_code=201,
+              response_model=DocOut,
+              responses={**_ERR(404, "知识库不存在"), **_ERR(415, "不支持的文件类型"),
+                         **_ERR_BODY, **_ERR_GATE})
+    def upload_document(kb_id: PathId, request: Request, file: UploadFile = File(...),
+                        admin: User = Depends(require_license),
+                        session: Session = Depends(get_session)):
+        kb = session.get(KnowledgeBase, kb_id)
+        if not kb:
+            raise HTTPException(404, "知识库不存在")
+        doc, name, err = _store_upload(session, kb, file, request, admin)
+        if err:
+            raise HTTPException(415, f"暂不支持的文件类型：{name}（一期 .txt/.md，MinerU 接入后支持 PDF/Office）")
+        assert doc is not None
         session.commit()
         if queue is not None:
             queue.enqueue_import(doc.id)
             return _doc_json(doc)  # pending，worker 接手
+        raw = read_stored(doc)
         doc = ingest_document(session, doc, raw, embedder=embedder, mineru=mineru,
                               **_chunk_params(session, kb))
         return _doc_json(doc)

@@ -5,6 +5,7 @@ export const P = {
   conversation: "/api/v1/conversations/{conv_id}",
   kb: "/api/v1/kb",
   kbDocs: "/api/v1/kb/{kb_id}/documents",
+  kbDocsBatch: "/api/v1/kb/{kb_id}/documents/batch",
   docReprocess: "/api/v1/documents/{doc_id}/reprocess",
   docChunks: "/api/v1/documents/{doc_id}/chunks",
   models: "/api/v1/models",

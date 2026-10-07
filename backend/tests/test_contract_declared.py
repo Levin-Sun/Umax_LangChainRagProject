@@ -15,6 +15,8 @@ _EXPECTED_BASE = {
     ("/api/v1/kb", "get"): {"401"},
     ("/api/v1/kb/{kb_id}/documents", "get"): {"401", "404"},
     ("/api/v1/kb/{kb_id}/documents", "post"): {"401", "403", "404", "415"},
+    # 批量上传：部分成功语义——坏文件走逐项 error 而非整批 415，故只声明 400（超上限）/404
+    ("/api/v1/kb/{kb_id}/documents/batch", "post"): {"400", "401", "403", "404"},
     ("/api/v1/documents/{doc_id}", "get"): {"401", "404"},
     ("/api/v1/documents/{doc_id}", "patch"): {"401", "403", "404"},
     ("/api/v1/documents/{doc_id}/reprocess", "post"): {"401", "403", "404"},

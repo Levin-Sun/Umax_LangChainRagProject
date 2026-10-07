@@ -1,6 +1,6 @@
 import { createApiClient } from "@umax/sdk-ts";
 import { P } from "./paths";
-import type { DocOut } from "./types";
+import type { BatchUploadItem, DocOut } from "./types";
 
 // PUT 随 Task 8 grants 整集合替换端点入面（此前前端无幂等写面，未收录）
 export type Client = Pick<ReturnType<typeof createApiClient>, "GET" | "PUT" | "POST" | "PATCH" | "DELETE">;
@@ -57,7 +57,14 @@ export async function callVoid(p: Promise<{ data?: unknown; error?: unknown; res
 export async function uploadDocument(client: Client, kbId: number, file: File): Promise<DocOut> {
   const form = new FormData();
   form.append("file", file, file.name);
-  // 后端 200 未建 response_model（spec 里是 unknown），DTO 断言集中在此
-  return (await call(client.POST(P.kbDocs,
-    { params: { path: { kb_id: kbId } }, body: form as never }))) as unknown as DocOut;
+  return await call(client.POST(P.kbDocs, { params: { path: { kb_id: kbId } }, body: form as never }));
+}
+
+// 批量上传（§A）：一次多选，逐文件结果——坏文件只在自己那行报错，不影响其余
+export async function uploadDocuments(client: Client, kbId: number,
+                                      files: File[]): Promise<BatchUploadItem[]> {
+  const form = new FormData();
+  for (const f of files) form.append("files", f, f.name);
+  return await call(client.POST(P.kbDocsBatch,
+    { params: { path: { kb_id: kbId } }, body: form as never }));
 }

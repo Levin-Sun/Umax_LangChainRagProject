@@ -5,10 +5,10 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import AdminBanner from "@/components/AdminBanner";
-import { call, uploadDocument, type Client } from "@/lib/api";
+import { call, uploadDocument, uploadDocuments, type Client } from "@/lib/api";
 import { P } from "@/lib/paths";
 import { useAsync, usePolling } from "@/lib/hooks";
-import type { ChunkOut, DocOut, KbOut } from "@/lib/types";
+import type { BatchUploadItem, ChunkOut, DocOut, KbOut } from "@/lib/types";
 
 const STATUS_LABEL: Record<string, string> = {
   pending: "排队中", parsing: "解析中", ready: "就绪", failed: "失败",
@@ -19,6 +19,7 @@ export default function KbAdmin({ api }: { api: Client }) {
   const [kbId, setKbId] = useState<number | null>(null);
   const [newName, setNewName] = useState("");
   const [busy, setBusy] = useState(false);
+  const [batchErrors, setBatchErrors] = useState<string[]>([]);
   const [actionErr, setActionErr] = useState<unknown>(null);
   const [chunks, setChunks] = useState<{ doc: DocOut; rows: ChunkOut[] } | null>(null);
   const kbs = useAsync(() => call(api.GET(P.kb)) as Promise<KbOut[]>);
@@ -39,12 +40,21 @@ export default function KbAdmin({ api }: { api: Client }) {
     }
   }
 
-  async function onFile(f: File | undefined) {
-    if (!f || kbId === null) return;
+  async function onFiles(list: FileList | null) {
+    const files = Array.from(list ?? []);
+    if (!files.length || kbId === null) return;
     setBusy(true);
     setActionErr(null);
+    setBatchErrors([]);
     try {
-      await uploadDocument(api, kbId, f);
+      if (files.length === 1) {
+        await uploadDocument(api, kbId, files[0]);
+      } else {
+        // 批量：部分成功语义——坏文件（不支持的类型等）只在这里逐行提示，其余照常入库
+        const items: BatchUploadItem[] = await uploadDocuments(api, kbId, files);
+        const bad = items.filter((i) => i.error).map((i) => `${i.name}：${i.error}`);
+        if (bad.length) setBatchErrors(bad);
+      }
       docs.reload();
     } catch (e) {
       setActionErr(e);
@@ -103,12 +113,21 @@ export default function KbAdmin({ api }: { api: Client }) {
           <div className="space-y-3 rounded-xl border border-border bg-card px-6 py-5 shadow-sm">
             <div className="flex items-center gap-3">
               <label className="text-body text-ink-2">
-                <input type="file" accept=".txt,.md,.pdf,.docx,.xlsx,.pptx" disabled={busy}
+                <input type="file" accept=".txt,.md,.pdf,.docx,.xlsx,.pptx" disabled={busy} multiple
+                       aria-label="上传文档"
                        className="text-body file:mr-3 file:cursor-pointer file:rounded-lg file:border-0 file:bg-secondary file:px-3 file:py-1.5 file:text-body hover:file:bg-accent"
-                       onChange={(e) => onFile(e.target.files?.[0])} />
+                       onChange={(e) => { void onFiles(e.target.files); e.target.value = ""; }} />
               </label>
               {busy && <Badge variant="secondary">上传中…</Badge>}
+              <span className="text-caption text-ink-3">可多选，一次最多 20 个文件</span>
             </div>
+            {batchErrors.length > 0 && (
+              <ul role="alert" className="space-y-0.5 rounded-lg border border-border bg-muted/60 px-3 py-2">
+                {batchErrors.map((m) => (
+                  <li key={m} className="text-caption text-destructive">{m}</li>
+                ))}
+              </ul>
+            )}
             <table className="w-full text-body text-ink-2">
               <thead><tr className="border-b border-border text-left text-h3 font-medium text-ink-2">
                 <th className="py-2 font-medium">文档</th><th className="font-medium">状态</th><th className="font-medium">大小</th><th /></tr></thead>

@@ -75,3 +75,47 @@ describe("KbAdmin 轮询", () => {
     await waitFor(() => expect(screen.queryByRole("alert")).not.toBeInTheDocument());
   });
 });
+
+// ---- 批量上传（§A）：多选走批量端点，坏文件只在结果区逐行提示，其余照常入库 ----
+it("多选文件 → 走批量端点，坏文件逐行报错", async () => {
+  const POST = vi.fn((u: string) => {
+    if (u === P.kbDocsBatch) {
+      // 服务端逐项结果：一个成功、一个失败（部分成功语义）
+      return ok([
+        { name: "好的.txt", document: { id: 1, kb_id: 1, name: "好的.txt", status: "ready", error: null, size_bytes: 10 }, error: null },
+        { name: "坏掉.txt", document: null, error: "暂不支持的文件类型：坏掉.txt" },
+      ]);
+    }
+    return ok({});   // 其它 POST（建库等）不应被本用例触发
+  });
+  render(<KbAdmin api={fakeApi({
+    GET: (u) => (u === P.kb ? ok([{ id: 1, name: "库A", description: null }])
+      : ok([{ id: 1, kb_id: 1, name: "好的.txt", status: "ready", error: null, size_bytes: 10 }])),
+    POST,
+  })} />);
+  await screen.findByText("库A");
+  await userEvent.click(screen.getByText("库A"));   // 先选库：上传区只在选中库后渲染
+  await screen.findByText("好的.txt");
+  const input = document.querySelector('input[type="file"]') as HTMLInputElement;
+  const files = [new File(["a"], "好的.txt", { type: "text/plain" }),
+                 new File(["b"], "坏掉.txt", { type: "text/plain" })];
+  await userEvent.upload(input, files);
+  await waitFor(() => expect(POST).toHaveBeenCalledWith(P.kbDocsBatch,
+    expect.objectContaining({ params: { path: { kb_id: 1 } } })));
+  expect(await screen.findByRole("alert")).toHaveTextContent("坏掉.txt：暂不支持的文件类型：坏掉.txt");
+});
+
+it("单文件仍走单文件端点（不批量）", async () => {
+  const POST = vi.fn(() => ok({ id: 9, kb_id: 1, name: "单个.txt", status: "ready", error: null, size_bytes: 3 }));
+  render(<KbAdmin api={fakeApi({
+    GET: (u) => (u === P.kb ? ok([{ id: 1, name: "库A", description: null }]) : ok([])),
+    POST,
+  })} />);
+  await screen.findByText("库A");
+  await userEvent.click(screen.getByText("库A"));
+  await screen.findByLabelText("上传文档");   // 上传区已在
+  const input = document.querySelector('input[type="file"]') as HTMLInputElement;
+  await userEvent.upload(input, new File(["x"], "单个.txt", { type: "text/plain" }));
+  await waitFor(() => expect(POST).toHaveBeenCalledWith(P.kbDocs,
+    expect.objectContaining({ params: { path: { kb_id: 1 } } })));
+});

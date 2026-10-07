@@ -316,6 +316,28 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/kb/{kb_id}/documents/batch": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Upload Documents Batch
+         * @description 批量上传（§A）：逐文件给出结果，**部分成功**——坏文件只在自己那行报错。
+         *
+         *     与单文件端点的差异（有意）：不支持的扩展名不再整批 415，而是该行 error 字段。
+         */
+        post: operations["upload_documents_batch_api_v1_kb__kb_id__documents_batch_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/license": {
         parameters: {
             query?: never;
@@ -553,10 +575,26 @@ export interface components {
             /** Name */
             name?: string | null;
         };
+        /**
+         * BatchUploadItemOut
+         * @description 批量上传的逐文件结果：部分成功语义——坏文件只在它自己那行有 error。
+         */
+        BatchUploadItemOut: {
+            document: components["schemas"]["DocOut"] | null;
+            /** Error */
+            error: string | null;
+            /** Name */
+            name: string;
+        };
         /** Body_upload_document_api_v1_kb__kb_id__documents_post */
         Body_upload_document_api_v1_kb__kb_id__documents_post: {
             /** File */
             file: string;
+        };
+        /** Body_upload_documents_batch_api_v1_kb__kb_id__documents_batch_post */
+        Body_upload_documents_batch_api_v1_kb__kb_id__documents_batch_post: {
+            /** Files */
+            files: string[];
         };
         /** BrandingPut */
         BrandingPut: {
@@ -583,12 +621,30 @@ export interface components {
             /** Question */
             question: string;
         };
+        /** DocOut */
+        DocOut: {
+            /** Error */
+            error: string | null;
+            /** Id */
+            id: number;
+            /** Kb Id */
+            kb_id: number;
+            /** Name */
+            name: string;
+            /** Size Bytes */
+            size_bytes: number | null;
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "pending" | "parsing" | "ready" | "failed";
+        };
         /** DocPatchIn */
         DocPatchIn: {
             /** Error */
             error?: string | null;
             /** Status */
-            status?: string | null;
+            status?: ("pending" | "parsing" | "ready" | "failed") | null;
         };
         /** ErrorOut */
         ErrorOut: {
@@ -2102,7 +2158,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
+                    "application/json": components["schemas"]["DocOut"];
                 };
             };
             /** @description 请求体解析失败 */
@@ -2143,6 +2199,86 @@ export interface operations {
             };
             /** @description 不支持的文件类型 */
             415: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+            /** @description 首次登录必须修改初始口令 */
+            428: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOut"];
+                };
+            };
+        };
+    };
+    upload_documents_batch_api_v1_kb__kb_id__documents_batch_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                kb_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "multipart/form-data": components["schemas"]["Body_upload_documents_batch_api_v1_kb__kb_id__documents_batch_post"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BatchUploadItemOut"][];
+                };
+            };
+            /** @description 请求体解析失败 */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOut"];
+                };
+            };
+            /** @description 需要登录 */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOut"];
+                };
+            };
+            /** @description 需要管理员权限 */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOut"];
+                };
+            };
+            /** @description 知识库不存在 */
+            404: {
                 headers: {
                     [name: string]: unknown;
                 };
