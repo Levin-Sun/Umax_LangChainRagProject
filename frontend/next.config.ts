@@ -3,6 +3,10 @@ import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
   transpilePackages: ["@umax/sdk-ts"],
+  // 构建产物目录可用 NEXT_DIST_DIR 覆盖：dev 服务器与生产构建共用 .next 会互相踩缓存
+  // （dev 跑着时执行 next build → dev 的 _buildManifest.js 被覆盖 → 页面 500）。
+  // 校验性构建用 NEXT_DIST_DIR=.next-verify，dev 的 .next 不受影响；Docker/正式构建不设此变量。
+  distDir: process.env.NEXT_DIST_DIR ?? ".next",
   // Docker 交付：standalone 产物自带精简 node_modules，运行镜像无需整仓（部署见 docs/DEPLOY.md）
   output: "standalone",
   // Turbopack 不跟随 file: 依赖的符号链接（"Can't resolve '@umax/sdk-ts'"，webpack 正常，

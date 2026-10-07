@@ -26,3 +26,6 @@ logs/
 # 系统文件
 .DS_Store
 Thumbs.db
+
+# 校验性构建产物（NEXT_DIST_DIR=.next-verify，避免踩坏 dev 的 .next）
+.next-verify/
