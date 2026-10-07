@@ -13,7 +13,8 @@ from uuid import uuid4
 import re
 
 from fastapi import Depends, FastAPI, File, HTTPException, Query, Request, Response, UploadFile
-from pydantic import BaseModel, BeforeValidator, Field, StrictBool
+from pydantic import (BaseModel, BeforeValidator, ConfigDict, Field, StrictBool,
+                      create_model as pydantic_create_model)  # 端点函数名 create_model 会遮蔽同名导入
 from sqlalchemy import func, text as sa_text
 from sqlalchemy.engine import Engine
 from sqlalchemy.orm import Session
@@ -33,6 +34,7 @@ from app.services.crypto import decrypt_secret, encrypt_secret
 from app.services.ingest import ingest_document, read_stored, supported_ext
 from app.services.license import load_license_status, machine_fingerprint
 from app.services.retrieval import retrieve
+from app.services.settings import DEFAULT_MISS_ANSWER, SettingsStore
 
 
 SCENARIOS = {"chat", "embedding", "rerank", "vision"}
@@ -260,7 +262,7 @@ _ERR = lambda code, msg: {code: {"model": ErrorOut, "description": msg}}  # noqa
 # fuzz 修复④：请求体不是合法 JSON 时 Starlette 直接回 400（FastAPI 默认 spec 只带 422）——按实声明
 _ERR_BODY = _ERR(400, "请求体解析失败")
 
-MISS_ANSWER = "资料里没有相关内容，无法回答。"
+MISS_ANSWER = DEFAULT_MISS_ANSWER   # 文案单一事实源在 services/settings（后台可改）
 
 
 def with_gateway_fallback(gw_fn: Callable | None,
@@ -359,6 +361,7 @@ def create_app(
     license_public_key: str | None = None,   # License 公钥；空=开发模式不校验
     license_file: str | None = None,         # 授权文件路径
     machine_fingerprint: str | None = None,  # 本机指纹（测试注入；None=现算）
+    settings_store=None,     # 运行时配置中心；None=按 engine+.env 现建
 ) -> FastAPI:
     app = FastAPI(title="Umax RAG", version="0.1.0")
     s = get_settings()
@@ -367,6 +370,9 @@ def create_app(
     def get_session() -> Iterator[Session]:
         with Session(engine) as session:
             yield session
+
+    # 运行时配置中心（§D）：提示词/检索/切块参数后台可改，每请求现读＝改完即生效
+    cfg = settings_store if settings_store is not None else SettingsStore(engine, s)
 
     # ==================== RBAC（spec 2026-09-23）：账号+DB 会话+库级授权 ====================
     SESSION_COOKIE, SESSION_TTL_DAYS = "umax_session", 7
@@ -672,8 +678,10 @@ def create_app(
     def create_kb(body: KbIn, request: Request,
                   admin: User = Depends(require_license),
                   session: Session = Depends(get_session)):
+        # 建库时锁定切分参数（§3.3）：取配置中心的生效值快照，此后改全局配置不影响已建的库
         kb = KnowledgeBase(tenant_id="default", name=body.name, description=body.description,
-                           embedding_model=s.embedding_model, chunk_target=s.chunk_target)
+                           embedding_model=s.embedding_model,
+                           chunk_target=cfg.effective()["chunk_target"])
         session.add(kb)
         session.flush()
         audit_record(session, "kb_created", user_email=admin.email,
@@ -736,7 +744,7 @@ def create_app(
             queue.enqueue_import(doc.id)
             return _doc_json(doc)  # pending，worker 接手
         doc = ingest_document(session, doc, raw, embedder=embedder, mineru=mineru,
-                              chunk_target=s.chunk_target, chunk_min=s.chunk_min)
+                              **_chunk_params(session, kb))
         return _doc_json(doc)
 
     def _visible_doc(session: Session, user: User, doc_id: int) -> Document:
@@ -798,9 +806,54 @@ def create_app(
             queue.enqueue_import(doc.id)
             return _doc_json(doc)
         doc = ingest_document(session, doc, read_stored(doc), embedder=embedder,
-                              mineru=mineru, chunk_target=s.chunk_target,
-                              chunk_min=s.chunk_min)
+                              mineru=mineru,
+                              **_chunk_params(session, session.get(KnowledgeBase, doc.kb_id)))
         return _doc_json(doc)
+
+    # 配置中心请求体：按 SPEC 动态建模——单字段约束自动进 OpenAPI schema
+    # （additionalProperties=false → 未知键 422；长度/范围由 Field 表达），
+    # 前端与 fuzz 都拿得到真实约束，"约束没进 spec" 的坑不再重演。
+    from typing import Optional as _Opt
+
+    _fields: dict = {}
+    for _key, _sp in cfg.spec.items():
+        _t = float if _sp.kind == "float" else (int if _sp.kind == "int" else str)
+        _kw: dict = {"default": None, "description": _sp.label}
+        if _sp.max_length is not None:
+            _kw["max_length"] = _sp.max_length
+        if _sp.minimum is not None:
+            _kw["ge"] = _sp.minimum
+        if _sp.maximum is not None:
+            _kw["le"] = _sp.maximum
+        _fields[_key] = (_Opt[_t], Field(**_kw))
+    SettingsPutIn = pydantic_create_model("SettingsPutIn",
+                                          __config__=ConfigDict(extra="forbid"), **_fields)
+
+    @app.get("/api/v1/settings", responses={**_ERR_GATE})
+    def get_settings_api(admin: User = Depends(require_admin_role)):
+        return cfg.snapshot()
+
+    @app.put("/api/v1/settings",
+             responses={**_ERR_GATE, **_ERR_BODY})
+    def put_settings_api(body: SettingsPutIn, request: Request,
+                         admin: User = Depends(require_license),
+                         session: Session = Depends(get_session)):
+        # 只处理客户端真正带上的字段（model_fields_set）：缺席=不动，显式 null=回默认
+        changes = {k: getattr(body, k) for k in body.model_fields_set}
+        if changes:
+            changed = cfg.put(session, changes, admin.email)
+            if changed:
+                audit_record(session, "settings_updated", user_email=admin.email,
+                             target_type="settings", detail={"fields": sorted(changed)},
+                             ip=_client_ip(request))
+                session.commit()
+        return cfg.snapshot()
+
+    def _chunk_params(session: Session, kb: KnowledgeBase | None) -> dict:
+        """切块参数：建库时锁定的值优先（§3.3「建库时锁定切分参数」），否则用当前配置。"""
+        c = cfg.effective()
+        return {"chunk_target": (kb.chunk_target if kb and kb.chunk_target else c["chunk_target"]),
+                "chunk_min": c["chunk_min"]}
 
     # ---- 检索与问答：可见性在检索层钳制（SQL 谓词），命中集就是授权集的子集 ----
     @app.post("/api/v1/retrieve", responses={**_ERR_BODY, **_ERR_GATE})
@@ -808,16 +861,18 @@ def create_app(
                      session: Session = Depends(get_session)):
         allowed = allowed_kb_ids(session, user)
         _guard_kb_ids(allowed, body.kb_ids)
+        c = cfg.effective()
         return retrieve(session, body.query, embedder=embedder, kb_ids=body.kb_ids,
                         allowed_kb_ids=allowed,
-                        recall_k=s.recall_k, top_k=body.top_k or s.rerank_top_n,
-                        min_sim=s.min_sim)
+                        recall_k=c["recall_k"], top_k=body.top_k or c["rerank_top_n"],
+                        min_sim=c["min_sim"])
 
     @app.post("/api/v1/chat", responses={**_ERR(404, "会话不存在"), **_ERR_BODY, **_ERR_GATE})
     def chat(body: ChatIn, user: User = Depends(get_user),
              session: Session = Depends(get_session)):
         allowed = allowed_kb_ids(session, user)
         _guard_kb_ids(allowed, body.kb_ids)
+        c = cfg.effective()   # 每请求现读配置：后台改检索参数/提示词即时生效
         # 传图提问（阶段 2）：先校验图片，再由 vision 模型转文字描述，拼进检索与生成的问题
         images = body.images or []
         if len(images) > IMAGE_COUNT_MAX:
@@ -848,7 +903,7 @@ def create_app(
             query += "\n\n【随问图片描述】\n" + "\n".join(captions)
         hits = retrieve(session, query, embedder=embedder, kb_ids=body.kb_ids,
                         allowed_kb_ids=allowed,
-                        recall_k=s.recall_k, top_k=s.rerank_top_n, min_sim=s.min_sim)
+                        recall_k=c["recall_k"], top_k=c["rerank_top_n"], min_sim=c["min_sim"])
         # 终审收口①：给了 id 就必须"存在且归调用者"——不存在与跨用户同文案（同 list_messages），
         # 否则"不存在→新建回 200 / 别人的→404"成了会话存在性探测口（spec §0：不可区分）。
         # 只有 conversation_id 缺席（null）才新建会话。
@@ -866,7 +921,7 @@ def create_app(
                             content=user_parts))
 
         if not hits or chat_fn is None:
-            answer, usage, citations = MISS_ANSWER, {"prompt_tokens": 0, "completion_tokens": 0}, []
+            answer, usage, citations = c["chat_miss_answer"], {"prompt_tokens": 0, "completion_tokens": 0}, []
         else:
             try:
                 out = chat_fn(query, hits)
@@ -876,7 +931,7 @@ def create_app(
                 logging.getLogger("umax").warning("chat 生成失败，转未命中兜底：%s", exc)
                 out = None
             if out is None:
-                answer, usage, citations = MISS_ANSWER, {"prompt_tokens": 0, "completion_tokens": 0}, []
+                answer, usage, citations = c["chat_miss_answer"], {"prompt_tokens": 0, "completion_tokens": 0}, []
             else:
                 answer = out["answer"]
                 usage = {"prompt_tokens": out.get("prompt_tokens") or 0,
@@ -1146,11 +1201,12 @@ def create_app(
             raise HTTPException(400, "messages 里没有 user 消息")
         # 作用域钳制在检索层（同 user_kb_grants 方向）：kb_ids=NULL 全库，数组=限定库
         allowed = set(k.kb_ids) if k.kb_ids is not None else None
+        c = cfg.effective()
         hits = retrieve(session, question, embedder=embedder, kb_ids=None,
-                        allowed_kb_ids=allowed, recall_k=s.recall_k,
-                        top_k=s.rerank_top_n, min_sim=s.min_sim)
+                        allowed_kb_ids=allowed, recall_k=c["recall_k"],
+                        top_k=c["rerank_top_n"], min_sim=c["min_sim"])
         if not hits or chat_fn is None:
-            answer, usage, citations = MISS_ANSWER, {"prompt_tokens": 0, "completion_tokens": 0}, []
+            answer, usage, citations = c["chat_miss_answer"], {"prompt_tokens": 0, "completion_tokens": 0}, []
         else:
             out = chat_fn(question, hits)
             answer = out["answer"]
@@ -1269,11 +1325,14 @@ def build_production_app(upload_dir: str = "uploads",
                 "已播种初始管理员 %s（ADMIN_EMAIL/ADMIN_PASSWORD）——首次登录强制修改口令", s.admin_email)
     chat_fn = embedder = vision_fn = None
     bailian_chat = bailian_embedder = None
+    cfg_store = SettingsStore(engine, s)          # 配置中心：端点与生成层共用同一实例
+    prompt_of = lambda key: (lambda: cfg_store.effective()[key])  # noqa: E731  每次调用现取
     if s.dashscope_api_key:
         # .env 百炼直连（阶段 0 链路）：作为网关表未配置时的开发/冒烟兜底
         bailian_chat = make_chat_fn(ChatClient(api_key=s.dashscope_api_key,
                                                base_url=s.dashscope_compat_base,
-                                               model=s.chat_model))
+                                               model=s.chat_model),
+                                    system_prompt=prompt_of("chat_system_prompt"))
         bailian_embedder = BailianEmbedder(api_key=s.dashscope_api_key,
                                            base_url=s.dashscope_compat_base,
                                            model=s.embedding_model,
@@ -1284,9 +1343,10 @@ def build_production_app(upload_dir: str = "uploads",
         gw = ModelGateway(engine, secret=s.gateway_secret)
         # 运行时换模型即生效（§C）：网关 fn 每次调用现读表，启动时表空不再"判死"——
         # 后台登记第一个模型立即接线；表空且无百炼 → chat MISS / 入库 BM25-only 降级
-        chat_fn = with_gateway_fallback(gw.make_chat_fn(), bailian_chat)
+        chat_fn = with_gateway_fallback(gw.make_chat_fn(system_prompt=prompt_of("chat_system_prompt")),
+                                        bailian_chat)
         embedder = FallbackEmbedder(gw.make_embedder(), bailian_embedder)
-        vision_fn = gw.make_vision_fn()   # 未配 vision 场景时端点内按文字问答降级
+        vision_fn = gw.make_vision_fn(vision_prompt=prompt_of("vision_prompt"))  # 未配 vision 场景则端点降级
     else:
         chat_fn, embedder = bailian_chat, bailian_embedder
     mineru = MinerUClient(s.mineru_base_url) if s.mineru_base_url else None
@@ -1305,7 +1365,7 @@ def build_production_app(upload_dir: str = "uploads",
     app = create_app(engine=engine, embedder=embedder, chat_fn=chat_fn,
                      upload_dir=upload_dir, mineru=mineru, queue=queue,
                      vision_fn=vision_fn, license_public_key=s.license_public_key,
-                     license_file=str(s.license_file))
+                     license_file=str(s.license_file), settings_store=cfg_store)
     app.state.wired = {"chat": chat_fn is not None, "embedder": embedder is not None,
                        "vision": vision_fn is not None, "mineru": mineru is not None,
                        "queue": queue is not None,

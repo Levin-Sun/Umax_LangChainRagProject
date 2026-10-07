@@ -20,6 +20,7 @@ export const P = {
   audit: "/api/v1/audit",
   branding: "/api/v1/branding",
   license: "/api/v1/license",
+  settings: "/api/v1/settings",
   apiKeys: "/api/v1/api-keys",
   apiKey: "/api/v1/api-keys/{key_id}",
 } as const;

@@ -85,10 +85,12 @@ class ModelGateway:
             return out
         raise GatewayError("全部 chat 模型均调用失败")
 
-    def vision(self, image_data_url: str) -> dict:
-        """视觉场景（传图提问）：vision 模型把图转文字描述。记账交回端点（同 chat 口径）。"""
-        from app.services.chat import VISION_PROMPT
+    def vision(self, image_data_url: str, *, prompt=None) -> dict:
+        """视觉场景（传图提问）：vision 模型把图转文字描述。记账交回端点（同 chat 口径）。
+        prompt 可传字符串/零参回调（后台可改的识图提示词）。"""
+        from app.services.chat import VISION_PROMPT, resolve_prompt as _rp
 
+        vision_prompt = _rp(prompt) if prompt else VISION_PROMPT
         providers = self.providers("vision")
         if not providers:
             raise NoProviderError("没有已启用的 vision 模型配置（model_configs 表为空？）")
@@ -96,7 +98,7 @@ class ModelGateway:
             client = ChatClient(api_key=p.api_key, base_url=p.base_url, model=p.model_name,
                                 transport=self._transport, sleep=self._sleep, timeout=self._timeout)
             messages = [{"role": "user", "content": [
-                {"type": "text", "text": VISION_PROMPT},
+                {"type": "text", "text": vision_prompt},
                 {"type": "image_url", "image_url": {"url": image_data_url}}]}]
             t0 = time.monotonic()
             try:
@@ -108,14 +110,17 @@ class ModelGateway:
                     "latency_ms": int((time.monotonic() - t0) * 1000)}
         raise GatewayError("全部 vision 模型均调用失败")
 
-    def make_vision_fn(self) -> Callable[[str], dict]:
-        return lambda image_url: self.vision(image_url)
+    def make_vision_fn(self, *, vision_prompt=None) -> Callable[[str], dict]:
+        return lambda image_url: self.vision(image_url, prompt=vision_prompt)
 
-    def make_chat_fn(self) -> Callable[[str, list[dict]], dict]:
-        """适配 chat_fn 协议：网关内部不记账（log=False），台账统一由问答端点按登录者记一次。"""
+    def make_chat_fn(self, *, system_prompt=None) -> Callable[[str, list[dict]], dict]:
+        """适配 chat_fn 协议：网关内部不记账（log=False），台账统一由问答端点按登录者记一次。
+        system_prompt：None/字符串/零参回调——每次调用现取，后台改提示词即时生效。"""
+        from app.services.chat import resolve_prompt
+
         def chat_fn(query: str, hits: Sequence[dict]) -> dict:
             out = self.chat(
-                [{"role": "system", "content": SYSTEM_PROMPT},
+                [{"role": "system", "content": resolve_prompt(system_prompt)},
                  {"role": "user", "content": build_user_prompt(query, hits)}],
                 log=False, kb_id=(hits[0].get("kb_id") if hits else None))
             return {"answer": out["text"], "prompt_tokens": out["prompt_tokens"],

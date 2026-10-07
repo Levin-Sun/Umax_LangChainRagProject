@@ -403,6 +403,24 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/settings": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Settings Api */
+        get: operations["get_settings_api_api_v1_settings_get"];
+        /** Put Settings Api */
+        put: operations["put_settings_api_api_v1_settings_put"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/usage/summary": {
         parameters: {
             query?: never;
@@ -647,6 +665,49 @@ export interface components {
             query: string;
             /** Top K */
             top_k?: number | null;
+        };
+        /** SettingsPutIn */
+        SettingsPutIn: {
+            /**
+             * Chat Miss Answer
+             * @description 未命中回答
+             */
+            chat_miss_answer?: string | null;
+            /**
+             * Chat System Prompt
+             * @description 问答系统提示词
+             */
+            chat_system_prompt?: string | null;
+            /**
+             * Chunk Min
+             * @description 切块最小长度
+             */
+            chunk_min?: number | null;
+            /**
+             * Chunk Target
+             * @description 切块目标长度
+             */
+            chunk_target?: number | null;
+            /**
+             * Min Sim
+             * @description 向量最低相似度
+             */
+            min_sim?: number | null;
+            /**
+             * Recall K
+             * @description 召回条数
+             */
+            recall_k?: number | null;
+            /**
+             * Rerank Top N
+             * @description 精排保留条数
+             */
+            rerank_top_n?: number | null;
+            /**
+             * Vision Prompt
+             * @description 识图提示词
+             */
+            vision_prompt?: string | null;
         };
         /** UserIn */
         UserIn: {
@@ -2446,6 +2507,122 @@ export interface operations {
         requestBody: {
             content: {
                 "application/json": components["schemas"]["RetrieveIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description 请求体解析失败 */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOut"];
+                };
+            };
+            /** @description 需要登录 */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOut"];
+                };
+            };
+            /** @description 需要管理员权限 */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+            /** @description 首次登录必须修改初始口令 */
+            428: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOut"];
+                };
+            };
+        };
+    };
+    get_settings_api_api_v1_settings_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description 需要登录 */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOut"];
+                };
+            };
+            /** @description 需要管理员权限 */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOut"];
+                };
+            };
+            /** @description 首次登录必须修改初始口令 */
+            428: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOut"];
+                };
+            };
+        };
+    };
+    put_settings_api_api_v1_settings_put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SettingsPutIn"];
             };
         };
         responses: {

@@ -20,4 +20,6 @@ export type ApiKeyCreated = ApiKeyOut & { key: string }
 export interface BrandingOut { brand_name: string; logo: string | null }
 // 授权状态（/license，admin 面）：enforced=false 表示未启用校验（开发模式）
 export interface LicenseOut { enforced: boolean; valid: boolean; reason: string | null; license_key: string | null; customer: string | null; issued_at: string | null; expires_at: string | null; days_left: number | null; features: Record<string, unknown>; machine_fingerprint: string }
+// 配置中心（/settings）：values=生效值、defaults=默认值、overridden=被后台改过的键
+export interface SettingsSnapshot { values: Record<string, string | number>; defaults: Record<string, string | number>; overridden: string[]; warnings: string[]; labels: Record<string, string>; help: Record<string, string> }
 export interface AuditOut { id: number; user_email: string; action: string; target_type: string | null; target_id: number | null; detail: Record<string, unknown>; ip: string | null; created_at: string }

@@ -60,12 +60,20 @@ class ChatClient:
         raise last_err  # type: ignore[misc]
 
 
-def make_chat_fn(client: ChatClient) -> Callable[[str, list[dict]], dict]:
-    """适配 API 层的 chat_fn 协议：(query, hits) -> {answer, prompt_tokens, completion_tokens}。"""
+def resolve_prompt(prompt) -> str:
+    """提示词可以是字符串，也可以是零参回调（运行时从配置中心现取——改完即生效，无需重启）。"""
+    if callable(prompt):
+        return prompt()
+    return prompt or SYSTEM_PROMPT
+
+
+def make_chat_fn(client: ChatClient, *, system_prompt=None) -> Callable[[str, list[dict]], dict]:
+    """适配 API 层的 chat_fn 协议：(query, hits) -> {answer, prompt_tokens, completion_tokens}。
+    system_prompt：None/字符串/零参回调（后台可改的系统提示词，见 services/settings）。"""
 
     def chat_fn(query: str, hits: list[dict]) -> dict:
         out = client.complete([
-            {"role": "system", "content": SYSTEM_PROMPT},
+            {"role": "system", "content": resolve_prompt(system_prompt)},
             {"role": "user", "content": build_user_prompt(query, hits)},
         ])
         return {"answer": out["text"],

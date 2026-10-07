@@ -24,6 +24,7 @@ const LINKS = [
   { href: "/admin/apikeys", label: "API" },
   { href: "/admin/branding", label: "品牌" },
   { href: "/admin/license", label: "授权" },
+  { href: "/admin/settings", label: "配置" },
 ];
 
 export function Nav() {
