@@ -28,6 +28,9 @@ class User(Base):
     role = Column(String(16), nullable=False, default="member")  # admin / member
     # 首登强改密门闸：口令非本人设定（播种/管理员代发代重置）即置位，本人经 /auth/change-password 解除
     must_change_password = Column(Boolean, nullable=False, default=False, server_default="false")
+    # 用户级成本闸门（§C）：日/月 token 上限，NULL=不限；达到即拦在调模型之前（usage_records 聚合）
+    daily_token_limit = Column(Integer)
+    monthly_token_limit = Column(Integer)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
 

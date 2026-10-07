@@ -26,6 +26,8 @@ export default function UsersAdmin({ api, me }: { api: Client; me: AuthMe }) {
   const [grantFor, setGrantFor] = useState<UserOut | null>(null);
   const [grantKbs, setGrantKbs] = useState<number[]>([]);
   const [resetFor, setResetFor] = useState<number | null>(null);
+  const [quotaFor, setQuotaFor] = useState<UserOut | null>(null);
+  const [quotaForm, setQuotaForm] = useState<{ daily: string; monthly: string }>({ daily: "", monthly: "" });
   const [resetPw, setResetPw] = useState("");
   const [resetPw2, setResetPw2] = useState("");
   const list = useAsync(() => call(api.GET(P.users)) as Promise<UserOut[]>);
@@ -85,6 +87,33 @@ export default function UsersAdmin({ api, me }: { api: Client; me: AuthMe }) {
     }
   }
 
+  function openQuota(u: UserOut) {
+    setRowErr(null);
+    setQuotaFor(u);
+    setQuotaForm({ daily: u.daily_token_limit?.toString() ?? "",
+                   monthly: u.monthly_token_limit?.toString() ?? "" });
+  }
+
+  async function saveQuota() {
+    if (!quotaFor || rowBusy) return;
+    setRowBusy(true);
+    setRowErr(null);
+    try {
+      // 空串 = 清空为不限（显式 null 才会被后端当真，缺席=不动）
+      await call(api.PATCH(P.user, {
+        params: { path: { user_id: quotaFor.id } },
+        body: { daily_token_limit: quotaForm.daily.trim() ? Number(quotaForm.daily) : null,
+                monthly_token_limit: quotaForm.monthly.trim() ? Number(quotaForm.monthly) : null },
+      }));
+      setQuotaFor(null);
+      list.reload();
+    } catch (e) {
+      setRowErr(e);
+    } finally {
+      setRowBusy(false);
+    }
+  }
+
   function openGrant(u: UserOut) {
     setRowErr(null);
     setGrantFor(u);
@@ -118,7 +147,8 @@ export default function UsersAdmin({ api, me }: { api: Client; me: AuthMe }) {
           <thead><tr className="border-b border-border bg-muted/60 text-left text-h3 font-medium text-ink-2">
             <th className="px-4 py-2.5 font-medium">邮箱</th><th className="py-2.5 font-medium">姓名</th>
             <th className="py-2.5 font-medium">角色</th><th className="py-2.5 font-medium">状态</th>
-            <th className="py-2.5 font-medium">授权库</th><th className="py-2.5 pr-4 font-medium">操作</th></tr></thead>
+            <th className="py-2.5 font-medium">授权库</th><th className="py-2.5 font-medium">配额（日/月 token）</th>
+            <th className="py-2.5 pr-4 font-medium">操作</th></tr></thead>
           <tbody>
             {rows.map((u) => {
               const self = me.email === u.email;
@@ -136,6 +166,8 @@ export default function UsersAdmin({ api, me }: { api: Client; me: AuthMe }) {
                   <td><Badge variant={u.status === "disabled" ? "destructive" : "secondary"} className="rounded-full font-normal">
                     {STATUS_LABEL[u.status] ?? u.status}</Badge></td>
                   <td className="font-medium">{u.role === "admin" ? "全部" : (u.kb_ids ?? []).join(", ") || "—"}</td>
+                  <td>{u.daily_token_limit === null && u.monthly_token_limit === null
+                    ? "不限" : `${u.daily_token_limit ?? "不限"} / ${u.monthly_token_limit ?? "不限"}`}</td>
                   <td className="space-x-1.5 pr-4">
                     {u.role === "member" && (
                       <Button size="sm" variant="outline" className="h-7 rounded-lg" disabled={rowBusy}
@@ -146,6 +178,8 @@ export default function UsersAdmin({ api, me }: { api: Client; me: AuthMe }) {
                                 disabled={rowBusy} onClick={() => patch(u, { status: "disabled" })}>禁用</Button>
                       : <Button size="sm" variant="ghost" className="h-7 rounded-lg" disabled={rowBusy}
                                 onClick={() => patch(u, { status: "active" })}>启用</Button>)}
+                    <Button size="sm" variant="outline" className="h-7 rounded-lg" disabled={rowBusy}
+                            onClick={() => openQuota(u)}>配额</Button>
                     <Button size="sm" variant="ghost" className="h-7 rounded-lg text-ink-1" disabled={rowBusy}
                             onClick={() => { setResetFor(resetFor === u.id ? null : u.id); setResetPw(""); setResetPw2(""); }}>
                       重置口令
@@ -195,6 +229,34 @@ export default function UsersAdmin({ api, me }: { api: Client; me: AuthMe }) {
         {formErr && <p className="text-body text-destructive">{formErr}</p>}
         <Button type="submit" disabled={busy} className="h-9 rounded-lg">{busy ? "提交中…" : "新建用户"}</Button>
       </form>
+      {quotaFor && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 px-4"
+             onClick={() => { if (!rowBusy) setQuotaFor(null); }}>
+          <form role="dialog" aria-label={`配额 ${quotaFor.email}`}
+                onClick={(e) => e.stopPropagation()}
+                onSubmit={(e) => { e.preventDefault(); void saveQuota(); }}
+                className="w-full max-w-sm space-y-3 rounded-xl border border-border bg-card px-6 py-5 shadow-lg">
+            <h3 className="text-h2 font-semibold text-ink-1">用量配额 · {quotaFor.name}</h3>
+            <p className="text-caption text-ink-3">
+              留空即不限。用量按 token 计（问答与识图；窗口为 UTC 自然日/自然月），达到上限后该用户提问会被拒绝。
+            </p>
+            {([["每日上限（tokens）", "daily", quotaForm.daily], ["每月上限（tokens）", "monthly", quotaForm.monthly]] as const).map(
+              ([label, key, val]) => (
+                <label key={key} className="block space-y-1">
+                  <span className="text-h3 font-medium text-ink-2">{label}</span>
+                  <Input aria-label={label} inputMode="numeric" placeholder="不限" disabled={rowBusy}
+                         className="h-9 rounded-lg border-border" value={val}
+                         onChange={(e) => setQuotaForm((p) => ({ ...p, [key]: e.target.value }))} />
+                </label>
+              ))}
+            <div className="flex gap-2">
+              <Button type="submit" size="sm" className="h-8 rounded-lg" disabled={rowBusy}>保存</Button>
+              <Button type="button" size="sm" variant="ghost" className="h-8 rounded-lg text-ink-3"
+                      disabled={rowBusy} onClick={() => setQuotaFor(null)}>取消</Button>
+            </div>
+          </form>
+        </div>
+      )}
       {grantFor && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 px-4"
              onClick={() => { if (!rowBusy) setGrantFor(null); }}>

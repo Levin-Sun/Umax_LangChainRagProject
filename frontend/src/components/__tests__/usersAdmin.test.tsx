@@ -127,3 +127,25 @@ it("删除：非本人行显删除按钮走 DELETE；本人行无删除", async 
     params: { path: { user_id: 2 } },
   })));
 });
+
+// ---- 用户级配额（§C）：行内展示 + 弹窗编辑（留空=不限，走 PATCH null） ----
+it("配额列展示；弹窗保存走 PATCH 带日/月上限", async () => {
+  const PATCH = vi.fn(() => ok(rows[1]));
+  const withQuota = [
+    { ...rows[0], daily_token_limit: null, monthly_token_limit: null },
+    { ...rows[1], daily_token_limit: 1000, monthly_token_limit: null },
+  ];
+  renderAdmin(fakeApi({ GET: (u) => (u === P.kb ? ok([]) : ok(withQuota)), PATCH }));
+  const devRow = await screen.findByRole("row", { name: /dev@x\.com/ });
+  expect(within(devRow).getByText("1000 / 不限")).toBeInTheDocument();
+  const adminRow = await screen.findByRole("row", { name: /admin@x\.com/ });
+  expect(within(adminRow).getByText("不限")).toBeInTheDocument();
+  await userEvent.click(within(adminRow).getByRole("button", { name: "配额" }));
+  const dialog = await screen.findByRole("dialog", { name: /admin@x\.com/ });
+  await userEvent.type(within(dialog).getByLabelText("每日上限（tokens）"), "500");
+  await userEvent.click(within(dialog).getByRole("button", { name: "保存" }));
+  await waitFor(() => expect(PATCH).toHaveBeenCalledWith(P.user, expect.objectContaining({
+    params: { path: { user_id: 1 } },
+    body: { daily_token_limit: 500, monthly_token_limit: null },
+  })));
+});

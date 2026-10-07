@@ -11,7 +11,7 @@ import { call, callVoid, type Client } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 import { P } from "@/lib/paths";
 import { useAsync } from "@/lib/hooks";
-import type { ChatOut, Citation, ConversationOut, MessageOut } from "@/lib/types";
+import type { ChatOut, Citation, ConversationOut, MessageOut, QuotaOut } from "@/lib/types";
 
 function answerParts(answer: string, citations: Citation[], onCite: (c: Citation) => void) {
   return answer.split(/(\[\d+\])/g).map((seg, i) => {
@@ -53,6 +53,10 @@ export default function ChatApp({ api }: { api: Client }) {
   const [activeConv, setActiveConv] = useState<number | null>(null);
   const taRef = useRef<HTMLTextAreaElement>(null);
   const seq = useRef(0);
+  const quota = useAsync(
+    () => (ready ? call(api.GET(P.usageMe)) as Promise<QuotaOut>
+                 : Promise.resolve(null as unknown as QuotaOut)),
+    [ready]);
   const [q, setQ] = useState("");
   const convs = useAsync(
     () => (ready ? call(api.GET(P.conversations,
@@ -123,6 +127,7 @@ export default function ChatApp({ api }: { api: Client }) {
       setTurns((t) => t.map((x) => (x.key === key ? { ...x, convId: out.conversation_id, out } : x)));
       setCite(null);
       convs.reload();
+      quota.reload();   // 用量变了，预警条跟着更新
     } catch (e) {
       setTurns((t) => t.filter((x) => x.key !== key));
       setPending((prev) => [...prev, ...turnImages]);
@@ -213,6 +218,14 @@ export default function ChatApp({ api }: { api: Client }) {
             <ErrorBanner error={msgs.error ?? convs.error ?? sendErr} />
           </div>
         </div>
+        {quota.data && (quota.data.near_limit || quota.data.exceeded) && (
+          <p role="status"
+             className={`mx-4 mb-2 rounded-lg px-3 py-2 text-caption ${quota.data.exceeded ? "text-destructive" : "text-ink-3"}`}>
+            {quota.data.exceeded
+              ? `token 配额已用尽（今日 ${quota.data.daily_used}/${quota.data.daily_limit ?? "不限"}，本月 ${quota.data.monthly_used}/${quota.data.monthly_limit ?? "不限"}），请联系管理员调整额度。`
+              : `token 用量已接近上限（今日 ${quota.data.daily_used}/${quota.data.daily_limit ?? "不限"}，本月 ${quota.data.monthly_used}/${quota.data.monthly_limit ?? "不限"}）。`}
+          </p>
+        )}
         <form className="px-4 pb-5" onSubmit={(e) => { e.preventDefault(); send(); }}>
           <div className="mx-auto w-full max-w-[760px] rounded-2xl border border-border bg-card shadow-sm transition-colors focus-within:border-ring">
             {pending.length > 0 && (

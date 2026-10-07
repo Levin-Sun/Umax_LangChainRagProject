@@ -421,6 +421,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/usage/me": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Usage Me */
+        get: operations["usage_me_api_v1_usage_me_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/usage/summary": {
         parameters: {
             query?: never;
@@ -430,6 +447,26 @@ export interface paths {
         };
         /** Usage Summary */
         get: operations["usage_summary_api_v1_usage_summary_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/usage/users": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Usage Users
+         * @description 按人看用量与限额（"谁快超了"的一眼视图；被拦状态由 exceeded 字段承载，不写审计避免刷屏）。
+         */
+        get: operations["usage_users_api_v1_usage_users_get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -694,6 +731,11 @@ export interface components {
              */
             min_sim?: number | null;
             /**
+             * Quota Warn Ratio
+             * @description 配额预警阈值
+             */
+            quota_warn_ratio?: number | null;
+            /**
              * Recall K
              * @description 召回条数
              */
@@ -711,8 +753,12 @@ export interface components {
         };
         /** UserIn */
         UserIn: {
+            /** Daily Token Limit */
+            daily_token_limit?: number | null;
             /** Email */
             email: string;
+            /** Monthly Token Limit */
+            monthly_token_limit?: number | null;
             /**
              * Name
              * @default
@@ -728,6 +774,10 @@ export interface components {
         };
         /** UserPatchIn */
         UserPatchIn: {
+            /** Daily Token Limit */
+            daily_token_limit?: number | null;
+            /** Monthly Token Limit */
+            monthly_token_limit?: number | null;
             /** Name */
             name?: string | null;
             /** Password */
@@ -1402,6 +1452,15 @@ export interface operations {
             };
             /** @description 首次登录必须修改初始口令 */
             428: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOut"];
+                };
+            };
+            /** @description 配额已用尽 */
+            429: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -2682,7 +2741,92 @@ export interface operations {
             };
         };
     };
+    usage_me_api_v1_usage_me_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description 需要登录 */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOut"];
+                };
+            };
+            /** @description 首次登录必须修改初始口令 */
+            428: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOut"];
+                };
+            };
+        };
+    };
     usage_summary_api_v1_usage_summary_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description 需要登录 */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOut"];
+                };
+            };
+            /** @description 需要管理员权限 */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOut"];
+                };
+            };
+            /** @description 首次登录必须修改初始口令 */
+            428: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOut"];
+                };
+            };
+        };
+    };
+    usage_users_api_v1_usage_users_get: {
         parameters: {
             query?: never;
             header?: never;

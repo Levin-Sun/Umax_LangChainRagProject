@@ -24,6 +24,8 @@ const withAuth = (biz: typeof api) => fakeApi({
 
 
 const convs: ConversationOut[] = [{ id: 1, title: "退货政策", kb_ids: [] }];
+const QUOTA = { daily_used: 0, daily_limit: null, monthly_used: 0, monthly_limit: null,
+                near_limit: false, exceeded: false, warn_ratio: 0.8 };
 const history: MessageOut[] = [
   { id: 1, role: "user", content: [{ type: "text", text: "退货几天？" }], citations: null },
   { id: 2, role: "assistant", content: [{ type: "text", text: "据资料，退货需7天响应[1]。" }],
@@ -37,7 +39,7 @@ const chatOut: ChatOut = {
 
 const api = fakeApi({
   GET: async (url) => (url === P.conversations ? ok(convs)
-    : url === P.convMessages ? ok(history) : undefined),
+    : url === P.convMessages ? ok(history) : url === P.usageMe ? ok(QUOTA) : undefined),
   POST: async () => ok(chatOut),
 });
 
@@ -57,7 +59,7 @@ it("asks question, shows inline citation chip, allows second question", async ()
   const asked: unknown[] = [];
   const api2 = fakeApi({
     GET: async (url) => (url === P.conversations ? ok(convs)
-      : url === P.convMessages ? ok(history) : undefined),
+      : url === P.convMessages ? ok(history) : url === P.usageMe ? ok(QUOTA) : undefined),
     POST: async (url, init) => {
       asked.push((init as { body: { question: string } }).body.question);
       return ok(chatOut);
@@ -91,7 +93,7 @@ it("shows the question immediately while the answer is still pending", async () 
   let resolvePost: ((v: unknown) => void) | undefined;
   const api5 = fakeApi({
     GET: async (url) => (url === P.conversations ? ok(convs)
-      : url === P.convMessages ? ok([] as MessageOut[]) : undefined),
+      : url === P.convMessages ? ok([] as MessageOut[]) : url === P.usageMe ? ok(QUOTA) : undefined),
     POST: () => new Promise((r) => { resolvePost = r; }),
   });
   const full5 = withAuth(api5);
@@ -110,7 +112,7 @@ it("shows the question immediately while the answer is still pending", async () 
 it("removes the pending question and shows banner when send fails", async () => {
   const api6 = fakeApi({
     GET: async (url) => (url === P.conversations ? ok(convs)
-      : url === P.convMessages ? ok([] as MessageOut[]) : undefined),
+      : url === P.convMessages ? ok([] as MessageOut[]) : url === P.usageMe ? ok(QUOTA) : undefined),
     POST: async () => fail("模型不可用", 503),
   });
   const full6 = withAuth(api6);
@@ -124,7 +126,7 @@ it("removes the pending question and shows banner when send fails", async () => 
 it("re-clicking the currently open conversation keeps the local answer on screen", async () => {
   const api4 = fakeApi({
     GET: async (url) => (url === P.conversations ? ok(convs)
-      : url === P.convMessages ? ok([] as MessageOut[]) : undefined),
+      : url === P.convMessages ? ok([] as MessageOut[]) : url === P.usageMe ? ok(QUOTA) : undefined),
     POST: async () => ok(chatOut),
   });
   const full4 = withAuth(api4);
@@ -167,7 +169,7 @@ it("deletes a conversation via DELETE and clears it from the list", async () => 
   const full = fakeApi({
     GET: (u) => (u.includes("/auth/me") ? ok(ME)
       : u === P.conversations ? ok(listed)
-      : u === P.convMessages ? ok(history) : undefined),
+      : u === P.convMessages ? ok(history) : u === P.usageMe ? ok(QUOTA) : undefined),
     DELETE,
   });
   render(<AuthProvider client={full as never}><ChatApp api={full as never} /></AuthProvider>);
@@ -200,7 +202,8 @@ it("附加图片 → 预览条出现 → 发送时 body 带 images", async () =>
   const file = new File(["pngbytes"], "shot.png", { type: "image/png" });
   const full = fakeApi({
     GET: (u) => (u.includes("/auth/me") ? ok(ME)
-      : u === P.conversations ? ok([]) : u === P.convMessages ? ok([]) : undefined),
+      : u === P.conversations ? ok([]) : u === P.convMessages ? ok([])
+      : u === P.usageMe ? ok(QUOTA) : undefined),
     POST,
   });
   render(<AuthProvider client={full as never}><ChatApp api={full as never} /></AuthProvider>);
@@ -224,10 +227,32 @@ it("历史消息里的 image part 渲染成图片", async () => {
   ];
   const full = fakeApi({
     GET: (u) => (u.includes("/auth/me") ? ok(ME)
-      : u === P.conversations ? ok(convs) : u === P.convMessages ? ok(withImg) : undefined),
+      : u === P.conversations ? ok(convs) : u === P.convMessages ? ok(withImg)
+      : u === P.usageMe ? ok(QUOTA) : undefined),
   });
   render(<AuthProvider client={full as never}><ChatApp api={full as never} /></AuthProvider>);
   await screen.findByText("退货政策");
   await userEvent.click(screen.getByText("退货政策"));
   expect(await screen.findByAltText("随问图片")).toHaveAttribute("src", "data:image/png;base64,AAA");
+});
+
+// ---- 配额预警条（§C）：接近上限出提示、超限出强提示 ----
+it("接近上限显示预警条；超限显示用尽提示", async () => {
+  const near = { ...QUOTA, daily_used: 90, daily_limit: 100, near_limit: true };
+  const full = fakeApi({
+    GET: (u) => (u.includes("/auth/me") ? ok(ME)
+      : u === P.conversations ? ok([]) : u === P.convMessages ? ok([])
+      : u === P.usageMe ? ok(near) : undefined),
+  });
+  const { unmount } = render(<AuthProvider client={full as never}><ChatApp api={full as never} /></AuthProvider>);
+  expect(await screen.findByRole("status")).toHaveTextContent("token 用量已接近上限");
+  unmount();
+  const out = { ...QUOTA, daily_used: 100, daily_limit: 100, exceeded: true };
+  const full2 = fakeApi({
+    GET: (u) => (u.includes("/auth/me") ? ok(ME)
+      : u === P.conversations ? ok([]) : u === P.convMessages ? ok([])
+      : u === P.usageMe ? ok(out) : undefined),
+  });
+  render(<AuthProvider client={full2 as never}><ChatApp api={full2 as never} /></AuthProvider>);
+  expect(await screen.findByRole("status")).toHaveTextContent("token 配额已用尽");
 });

@@ -20,7 +20,7 @@ _EXPECTED_BASE = {
     ("/api/v1/documents/{doc_id}/reprocess", "post"): {"401", "403", "404"},
     ("/api/v1/documents/{doc_id}/chunks", "get"): {"401", "404"},
     ("/api/v1/retrieve", "post"): {"401", "403"},
-    ("/api/v1/chat", "post"): {"400", "401", "403", "404"},
+    ("/api/v1/chat", "post"): {"400", "401", "403", "404", "429"},   # 429=用户级配额用尽
     ("/api/v1/conversations", "get"): {"401"},
     ("/api/v1/conversations/{conv_id}/messages", "get"): {"401", "404"},
     ("/api/v1/conversations/{conv_id}", "delete"): {"401", "404"},
@@ -46,6 +46,9 @@ _EXPECTED_BASE = {
     ("/api/v1/api-keys/{key_id}", "delete"): {"401", "403", "404"},
     # 开放 API 兼容端点：Bearer key 认证（不走会话），401=无效 key，429=配额尽，400=无 user 消息
     ("/api/v1/openai/chat/completions", "post"): {"400", "401", "429"},
+    # 用量视图：me=登录面（含未命中门闸豁免？否——首登未改密不得看用量），users=admin 面
+    ("/api/v1/usage/me", "get"): {"401"},
+    ("/api/v1/usage/users", "get"): {"401", "403"},
     # 配置中心：admin 面（GET 读生效值/默认值/覆盖清单；PUT 写，422 由动态模型声明）
     ("/api/v1/settings", "get"): {"401", "403"},
     ("/api/v1/settings", "put"): {"401", "403"},

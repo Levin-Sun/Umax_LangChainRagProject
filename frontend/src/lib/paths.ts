@@ -10,6 +10,8 @@ export const P = {
   models: "/api/v1/models",
   model: "/api/v1/models/{model_id}",
   usageSummary: "/api/v1/usage/summary",
+  usageMe: "/api/v1/usage/me",
+  usageUsers: "/api/v1/usage/users",
   authLogin: "/api/v1/auth/login",
   authLogout: "/api/v1/auth/logout",
   authMe: "/api/v1/auth/me",

@@ -81,6 +81,18 @@ ReqId = Annotated[int, BeforeValidator(_json_int32),           # body id：JSON 
             Field(json_schema_extra={"minimum": INT32_MIN, "maximum": INT32_MAX})]  # schema 侧标准键
 
 
+def _json_nonneg(v):
+    # 用户配额专用：JSON integer 且 ≥0（负数不是"超级配额"而是非法输入）——边界写进 schema
+    v = _json_int32(v)
+    if v < 0:
+        raise ValueError("不能为负数")
+    return v
+
+
+NonNegInt = Annotated[int, BeforeValidator(_json_nonneg),
+                      Field(json_schema_extra={"minimum": 0, "maximum": INT32_MAX})]
+
+
 def _query_int(v):
     # 查询参数专用整数口径（任务 5 /audit 分页）：HTTP query 到 FastAPI 手上永远是字符串，
     # 直接套 JsonInt 会把 limit=1 的 "1" 判成"不是 JSON integer"→422（分页端点不可用）；
@@ -201,6 +213,8 @@ class UserIn(BaseModel):
     name: Utf8Str = Field(default="", max_length=128)
     password: Utf8Str = Field(min_length=8, max_length=256)
     role: str = Field(default="member", json_schema_extra={"pattern": ROLE_PATTERN})
+    daily_token_limit: NonNegInt | None = None      # null=不限（§C 用户级成本闸门）
+    monthly_token_limit: NonNegInt | None = None
 
 
 class UserPatchIn(BaseModel):
@@ -209,6 +223,8 @@ class UserPatchIn(BaseModel):
     status: str | None = Field(None, json_schema_extra={"pattern": USER_STATUS_PATTERN})
     # 默认必须显式 None：Field 无默认=必填（同款写法见 ModelPatchIn），否则 patch 不带 password 即 422
     password: Utf8Str | None = Field(None, min_length=8, max_length=256)
+    daily_token_limit: NonNegInt | None = None
+    monthly_token_limit: NonNegInt | None = None
 
 
 class GrantsIn(BaseModel):
@@ -516,7 +532,9 @@ def create_app(
     def _user_json(u: User, grants: dict[int, list[int]]) -> dict:
         return {"id": u.id, "email": u.email, "name": u.name, "role": u.role,
                 "status": u.status, "created_at": u.created_at.isoformat(),
-                "kb_ids": None if u.role == "admin" else grants.get(u.id, [])}
+                "kb_ids": None if u.role == "admin" else grants.get(u.id, []),
+                "daily_token_limit": u.daily_token_limit,
+                "monthly_token_limit": u.monthly_token_limit}
 
     def _revoke_sessions(session: Session, user_id: int, *, except_hash: str | None = None) -> None:
         q = session.query(UserSession).filter_by(user_id=user_id)
@@ -539,7 +557,9 @@ def create_app(
             raise HTTPException(400, "该邮箱已存在")
         u = User(tenant_id="default", email=body.email, name=body.name or body.email.split("@")[0],
                  hashed_password=hash_password(body.password), role=body.role, status="active",
-                 must_change_password=True)   # 口令是 admin 代发的，首登必须本人改
+                 must_change_password=True,   # 口令是 admin 代发的，首登必须本人改
+                 daily_token_limit=body.daily_token_limit,
+                 monthly_token_limit=body.monthly_token_limit)
         session.add(u)
         session.flush()
         audit_record(session, "user_created", user_email=admin.email, target_type="user",
@@ -569,6 +589,11 @@ def create_app(
             v = getattr(body, f)
             if v is not None and v != getattr(u, f):
                 setattr(u, f, v)
+                changed.append(f)
+        # 配额：显式带上的字段才动（含 null=清空为不限）——缺席≠清空
+        for f in ("daily_token_limit", "monthly_token_limit"):
+            if f in body.model_fields_set and getattr(u, f) != getattr(body, f):
+                setattr(u, f, getattr(body, f))
                 changed.append(f)
         if body.password:
             u.hashed_password = hash_password(body.password)
@@ -849,6 +874,54 @@ def create_app(
                 session.commit()
         return cfg.snapshot()
 
+    # ---- 用户级配额（§C：AI 要花钱，得有闸门）----
+    def _period_used(session: Session, email: str, since: datetime) -> int:
+        total = session.query(
+            func.coalesce(func.sum(UsageRecord.prompt_tokens + UsageRecord.completion_tokens), 0)
+        ).filter(UsageRecord.user_email == email, UsageRecord.created_at >= since).scalar()
+        return int(total or 0)
+
+    def _quota_state(session: Session, user: User) -> dict:
+        """当日/当月已用 token 与限额。窗口按 UTC 自然日/自然月（与台账口径一致）。"""
+        now = _now()
+        day_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
+        month_start = day_start.replace(day=1)
+        daily, monthly = (_period_used(session, user.email, day_start),
+                          _period_used(session, user.email, month_start))
+        ratio = float(cfg.effective()["quota_warn_ratio"])
+        d_lim, m_lim = user.daily_token_limit, user.monthly_token_limit
+        exceeded = (d_lim is not None and daily >= d_lim) or (m_lim is not None and monthly >= m_lim)
+        near = (not exceeded) and (
+            (d_lim is not None and d_lim > 0 and daily >= d_lim * ratio)
+            or (m_lim is not None and m_lim > 0 and monthly >= m_lim * ratio))
+        return {"daily_used": daily, "daily_limit": d_lim,
+                "monthly_used": monthly, "monthly_limit": m_lim,
+                "near_limit": near, "exceeded": exceeded, "warn_ratio": ratio}
+
+    def _enforce_quota(session: Session, user: User) -> None:
+        """超限即拦（429），且拦在检索与调模型之前——闸门的意义是不白花钱。"""
+        st = _quota_state(session, user)
+        if st["exceeded"]:
+            if st["daily_limit"] is not None and st["daily_used"] >= st["daily_limit"]:
+                raise HTTPException(429, f"今日 token 配额已用尽（{st['daily_used']}/"
+                                         f"{st['daily_limit']}），请明日再试或联系管理员调整")
+            raise HTTPException(429, f"本月 token 配额已用尽（{st['monthly_used']}/"
+                                     f"{st['monthly_limit']}），请联系管理员调整")
+
+    @app.get("/api/v1/usage/me", responses={**_ERR_LOGIN_GATE})
+    def usage_me(user: User = Depends(get_user), session: Session = Depends(get_session)):
+        return _quota_state(session, user)
+
+    @app.get("/api/v1/usage/users", responses={**_ERR_GATE})
+    def usage_users(admin: User = Depends(require_admin_role),
+                    session: Session = Depends(get_session)):
+        """按人看用量与限额（"谁快超了"的一眼视图；被拦状态由 exceeded 字段承载，不写审计避免刷屏）。"""
+        rows = []
+        for u in session.query(User).order_by(User.id):
+            rows.append({"id": u.id, "email": u.email, "name": u.name,
+                         **_quota_state(session, u)})
+        return rows
+
     def _chunk_params(session: Session, kb: KnowledgeBase | None) -> dict:
         """切块参数：建库时锁定的值优先（§3.3「建库时锁定切分参数」），否则用当前配置。"""
         c = cfg.effective()
@@ -867,12 +940,14 @@ def create_app(
                         recall_k=c["recall_k"], top_k=body.top_k or c["rerank_top_n"],
                         min_sim=c["min_sim"])
 
-    @app.post("/api/v1/chat", responses={**_ERR(404, "会话不存在"), **_ERR_BODY, **_ERR_GATE})
+    @app.post("/api/v1/chat",
+              responses={**_ERR(404, "会话不存在"), **_ERR(429, "配额已用尽"), **_ERR_BODY, **_ERR_GATE})
     def chat(body: ChatIn, user: User = Depends(get_user),
              session: Session = Depends(get_session)):
         allowed = allowed_kb_ids(session, user)
         _guard_kb_ids(allowed, body.kb_ids)
         c = cfg.effective()   # 每请求现读配置：后台改检索参数/提示词即时生效
+        _enforce_quota(session, user)   # 配额闸门：超限在检索/调模型之前拦下
         # 传图提问（阶段 2）：先校验图片，再由 vision 模型转文字描述，拼进检索与生成的问题
         images = body.images or []
         if len(images) > IMAGE_COUNT_MAX:
@@ -1311,6 +1386,8 @@ def build_production_app(upload_dir: str = "uploads",
                             "status VARCHAR(16) NOT NULL DEFAULT 'active'"))
         con.execute(sa_text("ALTER TABLE users ADD COLUMN IF NOT EXISTS "
                             "must_change_password BOOLEAN NOT NULL DEFAULT FALSE"))
+        con.execute(sa_text("ALTER TABLE users ADD COLUMN IF NOT EXISTS daily_token_limit INTEGER"))
+        con.execute(sa_text("ALTER TABLE users ADD COLUMN IF NOT EXISTS monthly_token_limit INTEGER"))
     # 播种初始管理员（spec §2）：users 空表时按 ADMIN_EMAIL/ADMIN_PASSWORD 落一条 role=admin，
     # 口令 hash 后入库（明文永不落库）。测试装配 create_app 不播种，走 conftest.seed_user——
     # 故这里只在 build_production_app 里做，且放在 engine 判定之后（注入 engine 也要播种）。

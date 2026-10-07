@@ -661,6 +661,20 @@
             "description": "向量最低相似度",
             "title": "Min Sim"
           },
+          "quota_warn_ratio": {
+            "anyOf": [
+              {
+                "maximum": 1.0,
+                "minimum": 0.05,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "配额预警阈值",
+            "title": "Quota Warn Ratio"
+          },
           "recall_k": {
             "anyOf": [
               {
@@ -708,11 +722,37 @@
       },
       "UserIn": {
         "properties": {
+          "daily_token_limit": {
+            "anyOf": [
+              {
+                "maximum": 2147483647.0,
+                "minimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Daily Token Limit"
+          },
           "email": {
             "maxLength": 255,
             "pattern": "^[^@\\s]+@[^@\\s]+\\.[^@\\s]+$",
             "title": "Email",
             "type": "string"
+          },
+          "monthly_token_limit": {
+            "anyOf": [
+              {
+                "maximum": 2147483647.0,
+                "minimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Monthly Token Limit"
           },
           "name": {
             "default": "",
@@ -742,6 +782,32 @@
       },
       "UserPatchIn": {
         "properties": {
+          "daily_token_limit": {
+            "anyOf": [
+              {
+                "maximum": 2147483647.0,
+                "minimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Daily Token Limit"
+          },
+          "monthly_token_limit": {
+            "anyOf": [
+              {
+                "maximum": 2147483647.0,
+                "minimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Monthly Token Limit"
+          },
           "name": {
             "anyOf": [
               {
@@ -1576,6 +1642,16 @@
               }
             },
             "description": "首次登录必须修改初始口令"
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            },
+            "description": "配额已用尽"
           }
         },
         "summary": "Chat"
@@ -3014,6 +3090,42 @@
         "summary": "Put Settings Api"
       }
     },
+    "/api/v1/usage/me": {
+      "get": {
+        "operationId": "usage_me_api_v1_usage_me_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            },
+            "description": "需要登录"
+          },
+          "428": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            },
+            "description": "首次登录必须修改初始口令"
+          }
+        },
+        "summary": "Usage Me"
+      }
+    },
     "/api/v1/usage/summary": {
       "get": {
         "operationId": "usage_summary_api_v1_usage_summary_get",
@@ -3058,6 +3170,53 @@
           }
         },
         "summary": "Usage Summary"
+      }
+    },
+    "/api/v1/usage/users": {
+      "get": {
+        "description": "按人看用量与限额（\"谁快超了\"的一眼视图；被拦状态由 exceeded 字段承载，不写审计避免刷屏）。",
+        "operationId": "usage_users_api_v1_usage_users_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            },
+            "description": "需要登录"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            },
+            "description": "需要管理员权限"
+          },
+          "428": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            },
+            "description": "首次登录必须修改初始口令"
+          }
+        },
+        "summary": "Usage Users"
       }
     },
     "/api/v1/users": {

@@ -43,6 +43,9 @@ class Settings(BaseSettings):
     license_public_key: str = ""
     license_file: Path = Path(__file__).resolve().parents[3] / "license.json"
 
+    # 用户配额预警阈值：用量达限额该比例即在自助视图标 near_limit（配置中心可改）
+    quota_warn_ratio: float = 0.8
+
     # ---- 切块与检索参数 ----
     chunk_target: int = 300
     chunk_min: int = 60
