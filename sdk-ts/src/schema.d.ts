@@ -305,6 +305,28 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/kb/{kb_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * Delete Kb
+         * @description 删库：文档/切块/授权级联清，落盘原文件一并删。**用量台账保留**（kb_id 置 NULL）——
+         *     成本账是事实来源，不能随库消失；API key 作用域与历史会话里的孤儿 kb_id 天然无害
+         *     （召回走交集语义），不做事后清理。不可逆，前端要求输入库名二次确认。
+         */
+        delete: operations["delete_kb_api_v1_kb__kb_id__delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/kb/{kb_id}/documents": {
         parameters: {
             query?: never;
@@ -2149,6 +2171,71 @@ export interface operations {
             };
             /** @description 需要管理员权限 */
             403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+            /** @description 首次登录必须修改初始口令 */
+            428: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOut"];
+                };
+            };
+        };
+    };
+    delete_kb_api_v1_kb__kb_id__delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                kb_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description 需要登录 */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOut"];
+                };
+            };
+            /** @description 需要管理员权限 */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOut"];
+                };
+            };
+            /** @description 知识库不存在 */
+            404: {
                 headers: {
                     [name: string]: unknown;
                 };

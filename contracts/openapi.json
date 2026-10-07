@@ -2543,6 +2543,81 @@
         "summary": "Create Kb"
       }
     },
+    "/api/v1/kb/{kb_id}": {
+      "delete": {
+        "description": "删库：文档/切块/授权级联清，落盘原文件一并删。**用量台账保留**（kb_id 置 NULL）——\n成本账是事实来源，不能随库消失；API key 作用域与历史会话里的孤儿 kb_id 天然无害\n（召回走交集语义），不做事后清理。不可逆，前端要求输入库名二次确认。",
+        "operationId": "delete_kb_api_v1_kb__kb_id__delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "kb_id",
+            "required": true,
+            "schema": {
+              "maximum": 2147483647,
+              "minimum": -2147483648,
+              "title": "Kb Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            },
+            "description": "需要登录"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            },
+            "description": "需要管理员权限"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            },
+            "description": "知识库不存在"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          },
+          "428": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            },
+            "description": "首次登录必须修改初始口令"
+          }
+        },
+        "summary": "Delete Kb"
+      }
+    },
     "/api/v1/kb/{kb_id}/documents": {
       "get": {
         "operationId": "list_documents_api_v1_kb__kb_id__documents_get",

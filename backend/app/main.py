@@ -788,6 +788,36 @@ def create_app(
         return [{"id": k.id, "name": k.name, "description": k.description}
                 for k in q.order_by(KnowledgeBase.id)]
 
+    @app.delete("/api/v1/kb/{kb_id}", status_code=204,
+                responses={**_ERR(404, "知识库不存在"), **_ERR_GATE})
+    def delete_kb(kb_id: PathId, request: Request,
+                  admin: User = Depends(require_license),
+                  session: Session = Depends(get_session)):
+        """删库：文档/切块/授权级联清，落盘原文件一并删。**用量台账保留**（kb_id 置 NULL）——
+        成本账是事实来源，不能随库消失；API key 作用域与历史会话里的孤儿 kb_id 天然无害
+        （召回走交集语义），不做事后清理。不可逆，前端要求输入库名二次确认。
+        """
+        kb = session.get(KnowledgeBase, kb_id)
+        if not kb:
+            raise HTTPException(404, "知识库不存在")
+        name = kb.name
+        files = [d.storage_path for d in session.query(Document).filter_by(kb_id=kb_id)]
+        doc_count = len(files)
+        session.delete(kb)      # documents/chunks/user_kb_grants 走 FK CASCADE
+        audit_record(session, "kb_deleted", user_email=admin.email,
+                     target_type="kb", target_id=kb_id,
+                     detail={"name": name, "documents": doc_count}, ip=_client_ip(request))
+        session.commit()
+        for f in files:
+            if not f:
+                continue
+            try:
+                Path(f).unlink(missing_ok=True)
+            except OSError as exc:   # 文件删不掉不该让接口失败：DB 已一致，残留文件无害
+                import logging
+
+                logging.getLogger("umax").warning("原文件清理失败 %s：%s", f, exc)
+
     @app.get("/api/v1/kb/{kb_id}/documents",
              responses={**_ERR(404, "知识库不存在"), **_ERR_LOGIN_GATE})
     def list_documents(kb_id: PathId, user: User = Depends(get_user),

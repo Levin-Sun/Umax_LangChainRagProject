@@ -228,3 +228,41 @@ it("大小按 0.1MB 分档：大文件用 MB，小文件用 KB", async () => {
   expect(within(actions as HTMLElement).getByRole("button", { name: "看切块" })).toBeInTheDocument();
   expect(within(actions as HTMLElement).getByRole("button", { name: "删除" })).toBeInTheDocument();
 });
+
+// ---- 知识库删除（破坏性最强）：必须输入库名才放行，否则按钮禁用且不发请求 ----
+it("删库：输入库名后才可确认，确认走 DELETE /kb/{id}", async () => {
+  const DELETE = vi.fn(() => ok(undefined));
+  render(<KbAdmin api={fakeApi({
+    GET: (u) => (u === P.kb ? ok([{ id: 1, name: "待删库", description: null }]) : ok([])),
+    DELETE,
+  })} />);
+  const item = await screen.findByText("待删库");
+  await userEvent.click(within(item.closest("li") as HTMLElement)
+    .getByRole("button", { name: "删除知识库 待删库" }));
+  const dialog = await screen.findByRole("dialog", { name: /删除知识库 待删库/ });
+  const confirm = within(dialog).getByRole("button", { name: "确认删除" });
+  expect(confirm).toBeDisabled();                       // 未输入库名不得放行
+  await userEvent.type(within(dialog).getByLabelText("输入库名确认"), "待删库");
+  expect(confirm).toBeEnabled();
+  await userEvent.click(confirm);
+  await waitFor(() => expect(DELETE).toHaveBeenCalledWith(P.kbItem, expect.objectContaining({
+    params: { path: { kb_id: 1 } },
+  })));
+});
+
+it("删库：库名输错时确认按钮仍禁用，取消不发请求", async () => {
+  const DELETE = vi.fn();
+  render(<KbAdmin api={fakeApi({
+    GET: (u) => (u === P.kb ? ok([{ id: 1, name: "待删库", description: null }]) : ok([])),
+    DELETE,
+  })} />);
+  const item = await screen.findByText("待删库");
+  await userEvent.click(within(item.closest("li") as HTMLElement)
+    .getByRole("button", { name: "删除知识库 待删库" }));
+  const dialog = await screen.findByRole("dialog", { name: /删除知识库 待删库/ });
+  await userEvent.type(within(dialog).getByLabelText("输入库名确认"), "输错了");
+  expect(within(dialog).getByRole("button", { name: "确认删除" })).toBeDisabled();
+  await userEvent.click(within(dialog).getByRole("button", { name: "取消" }));
+  expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+  expect(DELETE).not.toHaveBeenCalled();
+});

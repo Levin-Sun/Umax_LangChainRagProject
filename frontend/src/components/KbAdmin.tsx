@@ -39,6 +39,8 @@ export default function KbAdmin({ api }: { api: Client }) {
   const [batchErrors, setBatchErrors] = useState<string[]>([]);
   const [deleteFor, setDeleteFor] = useState<DocOut | null>(null);
   const [dragging, setDragging] = useState(false);
+  const [kbDeleteFor, setKbDeleteFor] = useState<KbOut | null>(null);
+  const [kbDeleteTyped, setKbDeleteTyped] = useState("");
   const fileRef = useRef<HTMLInputElement>(null);
   const [actionErr, setActionErr] = useState<unknown>(null);
   const [chunks, setChunks] = useState<{ doc: DocOut; rows: ChunkOut[] } | null>(null);
@@ -80,6 +82,19 @@ export default function KbAdmin({ api }: { api: Client }) {
       setActionErr(e);
     } finally {
       setBusy(false);
+    }
+  }
+
+  async function delKb(k: KbOut) {
+    if (kbDeleteTyped !== k.name) return;   // 双保险：按钮本身也禁用，但函数再挡一次
+    setKbDeleteFor(null);
+    setKbDeleteTyped("");
+    try {
+      await callVoid(api.DELETE(P.kbItem, { params: { path: { kb_id: k.id } } }));
+      if (kbId === k.id) { setKbId(null); setChunks(null); }   // 删的是当前打开的库
+      kbs.reload();
+    } catch (e) {
+      setActionErr(e);
     }
   }
 
@@ -128,10 +143,17 @@ export default function KbAdmin({ api }: { api: Client }) {
         <AdminBanner error={kbs.error ?? actionErr} />
         <ul className="space-y-0.5">
           {(kbs.data ?? []).map((k) => (
-            <li key={k.id}>
-              <button className={`w-full truncate rounded-lg px-2.5 py-2 text-left text-body transition-colors hover:bg-accent/60 ${k.id === kbId ? "bg-card font-medium text-ink-1 shadow-sm" : "text-ink-3"}`}
+            <li key={k.id} className="group relative">
+              <button className={`w-full truncate rounded-lg py-2 pl-2.5 pr-7 text-left text-body transition-colors hover:bg-accent/60 ${k.id === kbId ? "bg-card font-medium text-ink-1 shadow-sm" : "text-ink-3"}`}
                       onClick={() => { setKbId(k.id); setChunks(null); docs.reload(); /* usePolling deps=[tick,enabled] 不感知 fn——切库必须 reload 换轮询目标（任务3评审裁决） */ }}>
                 {k.name}
+              </button>
+              {/* 选中或悬停时可见：hover-only 在触屏上不可达，选中态常显也更好发现 */}
+              <button aria-label={`删除知识库 ${k.name}`}
+                      className={`absolute right-1 top-1/2 -translate-y-1/2 rounded px-1 text-caption text-ink-3 hover:text-destructive ${
+                        k.id === kbId ? "block" : "hidden group-hover:block"}`}
+                      onClick={(e) => { e.stopPropagation(); setKbDeleteFor(k); setKbDeleteTyped(""); }}>
+                ✕
               </button>
             </li>
           ))}
@@ -212,6 +234,33 @@ export default function KbAdmin({ api }: { api: Client }) {
           </div>
         )}
       </section>
+      {kbDeleteFor && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 px-4"
+             onClick={() => { setKbDeleteFor(null); setKbDeleteTyped(""); }}>
+          <div role="dialog" aria-label={`删除知识库 ${kbDeleteFor.name}`}
+               onClick={(e) => e.stopPropagation()}
+               className="w-full max-w-md space-y-3 rounded-xl border border-border bg-card px-6 py-5 shadow-lg">
+            <h3 className="text-h2 font-semibold text-ink-1">删除知识库</h3>
+            <p className="text-body text-ink-2">
+              这会删除「{kbDeleteFor.name}」及其**全部文档与索引**，且不可恢复（重新使用需再次上传）。
+              历史用量台账会保留。
+            </p>
+            <label className="block space-y-1">
+              <span className="text-h3 font-medium text-ink-2">输入库名以确认</span>
+              <Input aria-label="输入库名确认" placeholder={kbDeleteFor.name} autoFocus
+                     className="h-9 rounded-lg border-border" value={kbDeleteTyped}
+                     onChange={(e) => setKbDeleteTyped(e.target.value)} />
+            </label>
+            <div className="flex gap-2">
+              <Button size="sm" className="h-8 rounded-lg bg-destructive text-card hover:bg-destructive/90"
+                      disabled={kbDeleteTyped !== kbDeleteFor.name}
+                      onClick={() => void delKb(kbDeleteFor)}>确认删除</Button>
+              <Button size="sm" variant="ghost" className="h-8 rounded-lg text-ink-3"
+                      onClick={() => { setKbDeleteFor(null); setKbDeleteTyped(""); }}>取消</Button>
+            </div>
+          </div>
+        </div>
+      )}
       {deleteFor && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 px-4"
              onClick={() => setDeleteFor(null)}>
