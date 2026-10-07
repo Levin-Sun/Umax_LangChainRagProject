@@ -1,4 +1,4 @@
-import { render, screen, waitFor, within } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { act } from "react";
 import { describe, expect, it, vi } from "vitest";
@@ -170,4 +170,38 @@ it("删除文档：先确认再发 DELETE，取消则不发", async () => {
   await waitFor(() => expect(DELETE).toHaveBeenCalledWith(P.doc, expect.objectContaining({
     params: { path: { doc_id: 1 } },
   })));
+});
+
+// ---- 上传入口优化（体验反馈：原生控件两段式"选择文件/未选择任何文件"既冗余又像两个入口）----
+it("上传区只有一个可见入口（按钮），原生控件不渲染多余文本", async () => {
+  render(<KbAdmin api={fakeApi({
+    GET: (u) => (u === P.kb ? ok([{ id: 1, name: "库A", description: null }]) : ok([])),
+  })} />);
+  await screen.findByText("库A");
+  await userEvent.click(screen.getByText("库A"));
+  const zone = await screen.findByRole("group", { name: "文档上传" });
+  expect(within(zone).getByRole("button", { name: "选择文件" })).toBeInTheDocument();
+  // 原生 file 控件仍在（无障碍/测试入口），但不渲染可见文本
+  const input = within(zone).getByLabelText("上传文档") as HTMLInputElement;
+  expect(input).toHaveAttribute("type", "file");
+  expect(zone.textContent).not.toContain("未选择任何文件");
+  expect(within(zone).getByText(/拖到这里/)).toBeInTheDocument();
+});
+
+it("拖拽文件到上传区即上传（多个走批量端点）", async () => {
+  const POST = vi.fn((u: string) => (u === P.kbDocsBatch
+    ? ok([{ name: "拖一.txt", document: { id: 1, kb_id: 1, name: "拖一.txt", status: "ready", error: null, size_bytes: 5, created_at: "2026-10-07T10:00:00+00:00" }, error: null }])
+    : ok({})));
+  render(<KbAdmin api={fakeApi({
+    GET: (u) => (u === P.kb ? ok([{ id: 1, name: "库A", description: null }]) : ok([])),
+    POST,
+  })} />);
+  await screen.findByText("库A");
+  await userEvent.click(screen.getByText("库A"));
+  const zone = await screen.findByRole("group", { name: "文档上传" });
+  const files = [new File(["a"], "拖一.txt", { type: "text/plain" }),
+                 new File(["b"], "拖二.txt", { type: "text/plain" })];
+  fireEvent.drop(zone, { dataTransfer: { files } });
+  await waitFor(() => expect(POST).toHaveBeenCalledWith(P.kbDocsBatch,
+    expect.objectContaining({ params: { path: { kb_id: 1 } } })));
 });

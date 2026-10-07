@@ -1,6 +1,6 @@
 "use client";
 // 知识库后台：kb 列表/新建（无删除端点，不做）→ 选中后文档表轮询 + 上传 + reprocess + chunks 抽屉
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
@@ -36,6 +36,8 @@ export default function KbAdmin({ api }: { api: Client }) {
   const [busy, setBusy] = useState(false);
   const [batchErrors, setBatchErrors] = useState<string[]>([]);
   const [deleteFor, setDeleteFor] = useState<DocOut | null>(null);
+  const [dragging, setDragging] = useState(false);
+  const fileRef = useRef<HTMLInputElement>(null);
   const [actionErr, setActionErr] = useState<unknown>(null);
   const [chunks, setChunks] = useState<{ doc: DocOut; rows: ChunkOut[] } | null>(null);
   const kbs = useAsync(() => call(api.GET(P.kb)) as Promise<KbOut[]>);
@@ -139,15 +141,26 @@ export default function KbAdmin({ api }: { api: Client }) {
         )}
         {kbId !== null && (
           <div className="space-y-3 rounded-xl border border-border bg-card px-6 py-5 shadow-sm">
-            <div className="flex flex-wrap items-center gap-3">
-              <label className="text-body text-ink-2">
-                <input type="file" accept=".txt,.md,.pdf,.docx,.xlsx,.pptx" disabled={busy} multiple
-                       aria-label="上传文档"
-                       className="text-body file:mr-3 file:cursor-pointer file:rounded-lg file:border-0 file:bg-secondary file:px-3 file:py-1.5 file:text-body hover:file:bg-accent"
-                       onChange={(e) => { void onFiles(e.target.files); e.target.value = ""; }} />
-              </label>
+            <div role="group" aria-label="文档上传"
+                 onDragOver={(e) => { e.preventDefault(); if (!busy) setDragging(true); }}
+                 onDragLeave={() => setDragging(false)}
+                 onDrop={(e) => {
+                   e.preventDefault();
+                   setDragging(false);
+                   if (!busy) void onFiles(e.dataTransfer?.files ?? null);
+                 }}
+                 className={`flex flex-wrap items-center gap-3 rounded-lg border border-dashed px-4 py-3 transition-colors ${
+                   dragging ? "border-ring bg-accent/40" : "border-border"}`}>
+              {/* 隐藏的原生控件仍是无障碍与测试的真实入口；可见入口只有一个按钮，避免两处入口的困惑 */}
+              <input ref={fileRef} type="file" accept=".txt,.md,.pdf,.docx,.xlsx,.pptx" multiple
+                     aria-label="上传文档" disabled={busy} className="sr-only"
+                     onChange={(e) => { void onFiles(e.target.files); e.target.value = ""; }} />
+              <Button type="button" variant="outline" className="h-9 rounded-lg" disabled={busy}
+                      onClick={() => fileRef.current?.click()}>选择文件</Button>
+              <span className="text-caption text-ink-3">
+                或把文件拖到这里 · 可多选，一次最多 20 个文件
+              </span>
               {busy && <Badge variant="secondary">上传中…</Badge>}
-              <span className="text-caption text-ink-3">可多选，一次最多 20 个文件</span>
             </div>
             {batchErrors.length > 0 && (
               <ul role="alert" className="space-y-0.5 rounded-lg border border-border bg-muted/60 px-3 py-2">
