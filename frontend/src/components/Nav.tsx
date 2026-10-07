@@ -19,6 +19,7 @@ const LINKS = [
   { href: "/admin/kb", label: "知识库" },
   { href: "/admin/models", label: "模型" },
   { href: "/admin/usage", label: "用量" },
+  { href: "/admin/eval", label: "评测" },
   { href: "/admin/users", label: "用户" },
   { href: "/admin/audit", label: "审计" },
   { href: "/admin/apikeys", label: "API" },

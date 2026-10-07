@@ -221,3 +221,72 @@ class ApiKey(Base):
     last_used_at = Column(DateTime(timezone=True))
     created_by = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"))
     created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+
+class EvalQuestion(Base):
+    """金标准问答集（§阶段2「评测体系正式化」）：评测的标尺本身，所以它自己也受审计。
+
+    字段与 archive/stage0/eval/golden_qa.json 同源（expect_all/expect_any/cites/category/note），
+    这样 stage0 的 20 题评测与产品内的评测是同一把尺子，历史报告能直接对照。
+    首次启动按该 JSON 幂等播种（见 services/evaluation.load_golden）——客户开箱就有题可跑，
+    不合适就在界面里删改（真题永远比预置题更懂客户的业务）。
+    """
+    __tablename__ = "eval_questions"
+
+    id = Column(Integer, primary_key=True)
+    tenant_id = T()
+    question = Column(Text, nullable=False)
+    expect_all = J(nullable=False, default=list)   # 必须全部出现的词
+    expect_any = J(nullable=False, default=list)   # 至少出现其一（版本冲突题靠它抓"指出冲突"）
+    cites = J(nullable=False, default=list)        # 期望命中的文档名——检索指标的金标准
+    category = Column(String(64), nullable=False, default="", server_default="")
+    note = Column(Text)                            # 校准记录：这题为什么这么判（防"为分数放水"）
+    enabled = Column(Boolean, nullable=False, default=True, server_default="true")
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+
+class EvalRun(Base):
+    """一次评测。metrics 落库快照而不现算：历史运行的分数是"当时的证据"，
+    不该随后来改配置/换模型而变——否则"上次 18/20、这次 20/20"根本无从比较。"""
+    __tablename__ = "eval_runs"
+
+    id = Column(Integer, primary_key=True)
+    tenant_id = T()
+    status = Column(String(16), nullable=False, default="running",
+                    server_default="running", index=True)   # running/done/failed
+    total = Column(Integer, nullable=False, default=0)      # 逐题推进：前端据此显示进度
+    passed = Column(Integer, nullable=False, default=0)
+    metrics = J(nullable=False, default=dict)
+    kb_ids = J()                       # NULL=全部知识库；数组=限定库
+    chat_model = Column(String(128))
+    embedding_model = Column(String(128))
+    error = Column(Text)
+    created_by = Column(String(255))
+    started_at = Column(DateTime(timezone=True), server_default=func.now())
+    finished_at = Column(DateTime(timezone=True))
+
+
+class EvalItemResult(Base):
+    """单题结果。题目内容/判据全部**快照存档**：金标准题后来被改被删，
+    历史运行的明细仍要能原样回看（含当时的期望词与备注）——否则回看历史等于拿新尺子量旧答案。"""
+    __tablename__ = "eval_item_results"
+
+    id = Column(Integer, primary_key=True)
+    run_id = Column(Integer, ForeignKey("eval_runs.id", ondelete="CASCADE"),
+                    nullable=False, index=True)
+    question_id = Column(Integer, ForeignKey("eval_questions.id", ondelete="SET NULL"))
+    question = Column(Text, nullable=False)
+    category = Column(String(64), nullable=False, default="", server_default="")
+    note = Column(Text)
+    expect_all = J(nullable=False, default=list)
+    expect_any = J(nullable=False, default=list)
+    cites = J(nullable=False, default=list)
+    answer = Column(Text)
+    cited_docs = J(nullable=False, default=list)
+    top_docs = J(nullable=False, default=list)
+    checks = J(nullable=False, default=dict)
+    passed = Column(Boolean, nullable=False, default=False)
+    rank = Column(Integer, nullable=False, default=0)
+    latency_ms = Column(Integer)
+    error = Column(Text)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())

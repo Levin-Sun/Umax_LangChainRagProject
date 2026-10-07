@@ -141,6 +141,11 @@ def test_allow_header_is_full_method_union(client):
     # 文档路径方法集随"文档删除"端点新增 DELETE（同路径由多个单方法路由拼成，中间件须给全集）
     assert set(client.options("/api/v1/documents/1").headers["allow"].split(", ")) \
         == {"GET", "PATCH", "DELETE"}
+    # 评测：/eval/questions 与 /eval/runs 同样是 GET+POST 两条单方法路由拼成（同 /kb 的坑）
+    assert set(client.options("/api/v1/eval/questions").headers["allow"].split(", ")) \
+        == {"GET", "POST"}
+    assert set(client.options("/api/v1/eval/runs").headers["allow"].split(", ")) \
+        == {"GET", "POST"}
 
 
 # ---- 修复⑧收口：multipart filename 是唯一不经 pydantic 验证链的入口字符串 ----

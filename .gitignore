@@ -8,6 +8,8 @@ venv/
 node_modules/
 sdk-ts/node_modules/
 .next/
+.next-*/
+#  ^ next-* 是验证用的独立构建目录（NEXT_DIST_DIR），与 .next 一样是产物
 dist/
 
 # 环境与密钥

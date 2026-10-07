@@ -61,6 +61,17 @@ _EXPECTED_BASE = {
     # 白标：GET 匿名可读（登录页要显品牌，零错误声明）；PUT admin 面
     ("/api/v1/branding", "get"): set(),
     ("/api/v1/branding", "put"): {"400", "401", "403"},
+    # 评测（§阶段2「评测体系正式化」）：金标准集与评测运行都在 admin 面——改标尺=改结论，
+    # member 不能碰；400=库 id 不存在或没有启用中的题，404=题/运行不存在
+    ("/api/v1/eval/questions", "get"): {"401", "403"},
+    ("/api/v1/eval/questions", "post"): {"400", "401", "403"},
+    ("/api/v1/eval/questions/{qid}", "patch"): {"400", "401", "403", "404"},
+    ("/api/v1/eval/questions/{qid}", "delete"): {"401", "403", "404"},
+    ("/api/v1/eval/runs", "get"): {"401", "403"},
+    ("/api/v1/eval/runs", "post"): {"400", "401", "403"},
+    ("/api/v1/eval/runs/{run_id}", "get"): {"401", "403", "404"},
+    ("/api/v1/eval/runs/{run_id}", "delete"): {"401", "403", "404"},
+    ("/api/v1/eval/runs/{run_id}/report", "get"): {"401", "403", "404"},
 }
 # 首登门闸豁免集：me（前端靠它知道该弹改密框）/logout（随时可走人）/change-password（解除门闸
 # 唯一通道）；login 不走 get_user，天然不在此门闸的声明面内

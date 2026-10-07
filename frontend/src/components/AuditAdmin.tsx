@@ -17,7 +17,9 @@ export const AUDIT_ACTIONS = [
   "kb_created", "kb_deleted", "document_uploaded", "document_deleted",
   "document_reprocessed", "model_created", "model_updated", "model_deleted",
   "api_key_created", "api_key_updated", "api_key_deleted",
-  "branding_updated", "settings_updated",] as const;
+  "branding_updated", "settings_updated",
+  "eval_question_created", "eval_question_updated", "eval_question_deleted",
+  "eval_run_started", "eval_run_deleted",] as const;
 
 const PAGE = 50; // 与后端默认 limit 对齐；上一页/下一页按此步进
 

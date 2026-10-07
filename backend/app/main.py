@@ -10,7 +10,10 @@ from pathlib import Path
 from typing import Annotated, Literal
 from uuid import uuid4
 
+import logging
 import re
+import threading
+import time
 
 from fastapi import Depends, FastAPI, File, HTTPException, Query, Request, Response, UploadFile
 from pydantic import (BaseModel, BeforeValidator, ConfigDict, Field, StrictBool,
@@ -24,13 +27,14 @@ from starlette.types import ASGIApp, Receive, Scope, Send
 
 from app.core.config import get_settings
 from app.models import (ApiKey, AppSetting, AuditLog, Chunk, Conversation, Document,
-                        KnowledgeBase, Message, ModelConfig, User, UserKbGrant, UserSession,
-                        UsageRecord)
+                        EvalItemResult, EvalQuestion, EvalRun, KnowledgeBase, Message,
+                        ModelConfig, User, UserKbGrant, UserSession, UsageRecord)
 from app.services.audit import record as audit_record
 from app.services.auth import (LoginThrottle, hash_password, new_api_key, new_session_token,
                                token_digest, verify_password)
 from app.services.citations import parse_citations
 from app.services.crypto import decrypt_secret, encrypt_secret
+from app.services.evaluation import aggregate, check_item, load_golden, render_report
 from app.services.ingest import ingest_document, read_stored, supported_ext
 from app.services.license import load_license_status, machine_fingerprint
 from app.services.retrieval import retrieve
@@ -45,6 +49,8 @@ SCENARIO_PATTERN = "^(" + "|".join(sorted(SCENARIOS)) + ")$"
 # 文档解析状态机（模型注释同源：pending → parsing → ready / failed）——单一事实源派生 Literal，
 # 进 spec 成 enum：后端拒绝未知状态、前端拿到字面量联合类型（此前 spec 里是裸 string，两端靠约定）
 DOC_STATUSES = ("pending", "parsing", "ready", "failed")
+# 评测运行状态机（同款派生）：running 是"后台正在跑"，前端据此轮询进度
+EVAL_RUN_STATUSES = ("running", "done", "failed")
 
 # role/status 枚举同款派生（任务 4）：约束写进 schema，运行时校验集合是同一事实源，防漂移
 ROLES = {"admin", "member"}
@@ -110,6 +116,18 @@ def _build_commit() -> str:
 BUILD_COMMIT = _build_commit()
 
 
+def ensure_vector_extension(engine: Engine) -> None:
+    """建表前必须先有的东西：pgvector 扩展。
+
+    真机踩过（2026-10-08，本地 Postgres.app 起全新库）：`chunks.embedding` 是 VECTOR(1024) 列，
+    扩展不在就直接 `type "vector" does not exist` —— 一键部署会死在 create_all 这一步。
+    pgvector/pgvector 镜像只是**扩展可用**，不是**已安装**，全新数据卷同样会踩。
+    IF NOT EXISTS 幂等：客户 DBA 预装过就空转（PG 先判存在即跳过，不会因权限被拦）。
+    """
+    with engine.begin() as con:
+        con.execute(sa_text("CREATE EXTENSION IF NOT EXISTS vector"))
+
+
 def _json_nonneg(v):
     # 用户配额专用：JSON integer 且 ≥0（负数不是"超级配额"而是非法输入）——边界写进 schema
     v = _json_int32(v)
@@ -168,6 +186,7 @@ JsonSafe = Annotated[dict, BeforeValidator(_utf8_str)]         # JSONB 列（cap
 
 
 DocStatus = Literal[*DOC_STATUSES]   # 3.11+ 解包写法：与 DOC_STATUSES 不会漂移
+EvalRunStatus = Literal[*EVAL_RUN_STATUSES]
 
 
 class DocOut(BaseModel):
@@ -328,6 +347,117 @@ class BrandingPut(BaseModel):
     logo: Utf8Str | None = None
 
 
+# ---- 评测（§阶段2「评测体系正式化」）----
+class EvalQuestionIn(BaseModel):
+    question: Utf8Str                                # Text 列，无界
+    expect_all: list[Utf8Str] = []
+    expect_any: list[Utf8Str] = []
+    cites: list[Utf8Str] = []                        # 期望命中的文档名（对照 DirtyDocs 现有文件名）
+    category: Utf8Str = Field(default="", max_length=64)   # PG String(64) 列宽入约（同修复⑨）
+    note: Utf8Str | None = None
+    enabled: StrictBool = True
+
+
+class EvalQuestionPatchIn(BaseModel):
+    # 缺席=不动（与用户/模型 PATCH 同一套语义）；显式 null 也按"不动"处理——清空期望词请传空数组
+    question: Utf8Str | None = None
+    expect_all: list[Utf8Str] | None = None
+    expect_any: list[Utf8Str] | None = None
+    cites: list[Utf8Str] | None = None
+    category: Utf8Str | None = Field(None, max_length=64)
+    note: Utf8Str | None = None
+    enabled: StrictBool | None = None
+
+
+class EvalRunIn(BaseModel):
+    kb_ids: list[ReqId] | None = None     # null=全部知识库（评测单个库是最常见用法）
+
+
+class EvalQuestionOut(BaseModel):
+    id: int
+    question: str
+    expect_all: list[str]
+    expect_any: list[str]
+    cites: list[str]
+    category: str
+    note: str | None
+    enabled: bool
+    created_at: datetime
+
+
+class EvalCategoryOut(BaseModel):
+    category: str = ""
+    total: int = 0
+    passed: int = 0
+
+
+class EvalMetricsOut(BaseModel):
+    """汇总指标（JSONB 里存的就是这个形状）。**全字段给默认值**：运行中的 run 其 metrics 还是空 {},
+    响应模型必须把它补成全 0 而不是 500——"还没跑完"是正常状态，不是错误。
+    形状写进 schema 而不是留 dict：前端才拿得到真类型，"指针随便点"的错误在编译期就没了。"""
+    total: int = 0
+    passed: int = 0
+    pass_rate: float = 0.0
+    with_cites: int = 0
+    hit: int = 0
+    hit_rate: float = 0.0
+    mrr: float = 0.0
+    avg_latency_ms: int = 0
+    categories: list[EvalCategoryOut] = []
+
+
+class EvalChecksOut(BaseModel):
+    """单题判据（同 JSONB）：retrieval=None 表示该题没设金标准文档（不适用，不是失败）。"""
+    kw_all: bool = False
+    kw_any: bool = False
+    citation: bool = False
+    retrieval: bool | None = None
+    passed: bool = False
+    rank: int = 0
+
+
+class EvalRunOut(BaseModel):
+    id: int
+    status: EvalRunStatus
+    total: int
+    passed: int
+    metrics: EvalMetricsOut
+    kb_ids: list[int] | None
+    chat_model: str | None
+    embedding_model: str | None
+    error: str | None
+    created_by: str | None
+    started_at: datetime
+    finished_at: datetime | None
+
+
+class EvalItemOut(BaseModel):
+    id: int
+    question_id: int | None      # 题目被删后置空：明细仍完整（快照存档）
+    question: str
+    category: str
+    note: str | None
+    expect_all: list[str]
+    expect_any: list[str]
+    cites: list[str]
+    answer: str | None
+    cited_docs: list[str]
+    top_docs: list[str]
+    checks: EvalChecksOut
+    passed: bool
+    rank: int
+    latency_ms: int | None
+    error: str | None
+
+
+class EvalRunDetailOut(EvalRunOut):
+    items: list[EvalItemOut]
+
+
+class EvalReportOut(BaseModel):
+    markdown: str
+
+
 # 契约 fuzz 前提：真实错误码必须写进 spec，否则 schemathesis 判合法响应为违约
 class ErrorOut(BaseModel):
     detail: str
@@ -438,6 +568,9 @@ def create_app(
     license_file: str | None = None,         # 授权文件路径
     machine_fingerprint: str | None = None,  # 本机指纹（测试注入；None=现算）
     settings_store=None,     # 运行时配置中心；None=按 engine+.env 现建
+    spawn: Callable[[Callable[[], None]], None] | None = None,
+    # 后台任务启动器（评测用）。None=真线程；测试注入同步实现（lambda fn: fn()），
+    # 让"后台跑完再看结果"在单测里是确定性的——不靠 sleep 赌时序
 ) -> FastAPI:
     app = FastAPI(title="Umax RAG", version="0.1.0")
     s = get_settings()
@@ -449,6 +582,11 @@ def create_app(
 
     # 运行时配置中心（§D）：提示词/检索/切块参数后台可改，每请求现读＝改完即生效
     cfg = settings_store if settings_store is not None else SettingsStore(engine, s)
+
+    def _spawn_default(fn: Callable[[], None]) -> None:
+        threading.Thread(target=fn, daemon=True).start()
+
+    spawn_fn = spawn or _spawn_default
 
     # ==================== RBAC（spec 2026-09-23）：账号+DB 会话+库级授权 ====================
     SESSION_COOKIE, SESSION_TTL_DAYS = "umax_session", 7
@@ -1539,6 +1677,259 @@ def create_app(
             session.commit()
         return _branding_json(session)
 
+    # ==================== 评测（§阶段2「评测体系正式化」）====================
+    # 为什么值得进产品而不是留个脚本：客户问"你凭什么叫企业级、凭什么说更准"时，
+    # 需要一份能反复跑、能看历史、数字可比的东西。脚本做不到"改完参数立刻看有没有退化"。
+    def _question_json(q: EvalQuestion) -> dict:
+        return {"id": q.id, "question": q.question, "expect_all": q.expect_all or [],
+                "expect_any": q.expect_any or [], "cites": q.cites or [],
+                "category": q.category or "", "note": q.note, "enabled": bool(q.enabled),
+                "created_at": q.created_at}
+
+    def _run_json(r: EvalRun) -> dict:
+        return {"id": r.id, "status": r.status, "total": r.total, "passed": r.passed,
+                "metrics": r.metrics or {}, "kb_ids": r.kb_ids,
+                "chat_model": r.chat_model, "embedding_model": r.embedding_model,
+                "error": r.error, "created_by": r.created_by,
+                "started_at": r.started_at, "finished_at": r.finished_at}
+
+    def _item_json(i: EvalItemResult) -> dict:
+        return {"id": i.id, "question_id": i.question_id, "question": i.question,
+                "category": i.category or "", "note": i.note,
+                "expect_all": i.expect_all or [], "expect_any": i.expect_any or [],
+                "cites": i.cites or [], "answer": i.answer,
+                "cited_docs": i.cited_docs or [], "top_docs": i.top_docs or [],
+                "checks": i.checks or {}, "passed": bool(i.passed), "rank": i.rank,
+                "latency_ms": i.latency_ms, "error": i.error}
+
+    def _kb_scope_text(session: Session, kb_ids: list[int] | None) -> str:
+        if kb_ids is None:
+            return "全部知识库"
+        rows = (session.query(KnowledgeBase).filter(KnowledgeBase.id.in_(kb_ids))
+                .order_by(KnowledgeBase.id).all()) if kb_ids else []
+        # 库删了留孤儿 id（EvalRun.kb_ids 是 JSONB 无 FK）：报告要如实说"当时评的那个库没了"
+        return "、".join(k.name for k in rows) or "已删除的知识库"
+
+    def _execute_eval(run_id: int) -> None:
+        """后台执行一轮评测。
+
+        逐题走**与问答端点同一条链路**（同一 retrieve、同一 chat_fn、同一份配置快照）——
+        否则评测证明的不是线上效果。每题单独落库 + 单独记账（评测是真花钱的调用），
+        所以前端轮询能看到进度、进程被杀也只丢当前这一题。
+        单题异常只记在该题身上（stage0 教训：一轮 17/20 里三题败在生成调用而非检索，
+        报告必须能区分这两类）；只有整轮性异常才把 run 标 failed——绝不让前端永远转圈。
+        """
+        try:
+            with Session(engine) as session:
+                run = session.get(EvalRun, run_id)
+                if run is None:
+                    return
+                c = cfg.effective()
+                # 记账归属：单库评测记在该库上（用量视图按库看成本），多库/全库记 NULL
+                usage_kb_id = run.kb_ids[0] if run.kb_ids and len(run.kb_ids) == 1 else None
+                results: list[dict] = []
+                used_models: set[str] = set()
+                questions = (session.query(EvalQuestion).filter_by(enabled=True)
+                             .order_by(EvalQuestion.id).all())
+                for q in questions:
+                    t0 = time.monotonic()
+                    answer: str | None = None
+                    cited_docs: list[str] = []
+                    top_docs: list[str] = []
+                    err: str | None = None
+                    try:
+                        hits = retrieve(session, q.question, embedder=embedder,
+                                        kb_ids=run.kb_ids, allowed_kb_ids=None,
+                                        recall_k=c["recall_k"], top_k=c["rerank_top_n"],
+                                        min_sim=c["min_sim"])
+                        top_docs = [h["doc_name"] for h in hits]
+                        if hits and chat_fn is not None:
+                            out = chat_fn(q.question, hits)
+                            answer = out["answer"]
+                            cited_docs = parse_citations(answer, hits)
+                            if out.get("model"):
+                                used_models.add(out["model"])
+                            session.add(UsageRecord(
+                                tenant_id="default", user_email=run.created_by or "eval@local",
+                                kb_id=usage_kb_id, scenario="chat",
+                                model=out.get("model") or s.chat_model,
+                                prompt_tokens=out.get("prompt_tokens") or 0,
+                                completion_tokens=out.get("completion_tokens") or 0,
+                                latency_ms=out.get("latency_ms")))
+                        else:
+                            # 没配模型或没命中：走未命中兜底并如实记为"没过"——不假装跑过模型
+                            answer = c["chat_miss_answer"]
+                    except Exception as exc:
+                        err = f"{exc.__class__.__name__}: {exc}"
+                    checks = check_item({"expect_all": q.expect_all, "expect_any": q.expect_any,
+                                         "cites": q.cites},
+                                        answer=answer, cited_docs=cited_docs, top_docs=top_docs)
+                    latency_ms = int((time.monotonic() - t0) * 1000)
+                    session.add(EvalItemResult(
+                        run_id=run.id, question_id=q.id, question=q.question,
+                        category=q.category, note=q.note, expect_all=q.expect_all,
+                        expect_any=q.expect_any, cites=q.cites, answer=answer,
+                        cited_docs=cited_docs, top_docs=top_docs, checks=checks,
+                        passed=checks["passed"], rank=checks["rank"],
+                        latency_ms=latency_ms, error=err))
+                    results.append({**checks, "category": q.category, "cites": q.cites,
+                                    "latency_ms": latency_ms})
+                    run.total = len(results)
+                    run.passed = sum(1 for r in results if r["passed"])
+                    session.commit()
+                metrics = aggregate(results)
+                run.metrics, run.total, run.passed = metrics, metrics["total"], metrics["passed"]
+                run.chat_model = sorted(used_models)[0] if used_models else None
+                run.embedding_model = s.embedding_model if embedder is not None else None
+                run.status, run.finished_at = "done", _now()
+                session.commit()
+        except Exception as exc:   # 整轮性故障：连不上库、配置读炸等——留证据，别静默
+            logging.getLogger("umax").exception("评测执行失败 run=%s", run_id)
+            try:
+                with Session(engine) as session:
+                    run = session.get(EvalRun, run_id)
+                    if run is not None:
+                        run.status, run.error = "failed", f"{exc.__class__.__name__}: {exc}"
+                        run.finished_at = _now()
+                        session.commit()
+            except Exception:      # 兜底失败就只能靠日志了，绝不把异常再抛进后台线程
+                logging.getLogger("umax").exception("评测失败态回写也失败 run=%s", run_id)
+
+    @app.get("/api/v1/eval/questions", response_model=list[EvalQuestionOut],
+             responses={**_ERR_GATE})
+    def list_eval_questions(admin: User = Depends(require_admin_role),
+                            session: Session = Depends(get_session)):
+        return [_question_json(q) for q in
+                session.query(EvalQuestion).order_by(EvalQuestion.id)]
+
+    @app.post("/api/v1/eval/questions", status_code=201, response_model=EvalQuestionOut,
+              responses={**_ERR_BODY, **_ERR_GATE})
+    def create_eval_question(body: EvalQuestionIn, request: Request,
+                             admin: User = Depends(require_license),
+                             session: Session = Depends(get_session)):
+        q = EvalQuestion(tenant_id="default", question=body.question,
+                         expect_all=body.expect_all, expect_any=body.expect_any,
+                         cites=body.cites, category=body.category, note=body.note,
+                         enabled=body.enabled)
+        session.add(q)
+        session.flush()
+        audit_record(session, "eval_question_created", user_email=admin.email,
+                     target_type="eval_question", target_id=q.id,
+                     detail={"category": q.category}, ip=_client_ip(request))
+        session.commit()
+        return _question_json(q)
+
+    @app.patch("/api/v1/eval/questions/{qid}", response_model=EvalQuestionOut,
+               responses={**_ERR(404, "金标准题不存在"), **_ERR_BODY, **_ERR_GATE})
+    def patch_eval_question(qid: PathId, body: EvalQuestionPatchIn, request: Request,
+                            admin: User = Depends(require_license),
+                            session: Session = Depends(get_session)):
+        q = session.get(EvalQuestion, qid)
+        if not q:
+            raise HTTPException(404, "金标准题不存在")
+        # 只处理真正带上的字段且非 null（缺席/显式 null 都=不动）：改标尺必须留痕
+        fields = [k for k in body.model_fields_set if getattr(body, k) is not None]
+        for k in fields:
+            setattr(q, k, getattr(body, k))
+        if fields:
+            audit_record(session, "eval_question_updated", user_email=admin.email,
+                         target_type="eval_question", target_id=q.id,
+                         detail={"fields": sorted(fields)}, ip=_client_ip(request))
+            session.commit()
+        return _question_json(q)
+
+    @app.delete("/api/v1/eval/questions/{qid}", status_code=204,
+                responses={**_ERR(404, "金标准题不存在"), **_ERR_GATE})
+    def delete_eval_question(qid: PathId, request: Request,
+                             admin: User = Depends(require_license),
+                             session: Session = Depends(get_session)):
+        """删题：历史运行的单题明细**不删**（question_id 置 NULL，快照还在）——
+        评测记录是"当时的证据"，拿今天的尺子重判昨天的答案就失去可比性了。"""
+        q = session.get(EvalQuestion, qid)
+        if not q:
+            raise HTTPException(404, "金标准题不存在")
+        session.delete(q)
+        audit_record(session, "eval_question_deleted", user_email=admin.email,
+                     target_type="eval_question", target_id=qid,
+                     detail={"category": q.category}, ip=_client_ip(request))
+        session.commit()
+
+    @app.post("/api/v1/eval/runs", status_code=202, response_model=EvalRunOut,
+              responses={**_ERR(400, "知识库 id 不存在，或没有启用中的金标准题"),
+                         **_ERR_BODY, **_ERR_GATE})
+    def start_eval_run(body: EvalRunIn, request: Request,
+                       admin: User = Depends(require_license),
+                       session: Session = Depends(get_session)):
+        """起一轮评测并**立即返回**：20 题真模型要一两分钟，占着请求等会让浏览器/反代超时。
+        返回 202 + run（status=running），前端轮询 /eval/runs/{id} 看进度。"""
+        kb_ids = _valid_kb_ids(session, body.kb_ids)   # 与开放 API 同一套库存在性校验
+        if not session.query(EvalQuestion).filter_by(enabled=True).count():
+            raise HTTPException(400, "没有启用中的金标准题：先到金标准集里添加或启用")
+        run = EvalRun(tenant_id="default", status="running", kb_ids=kb_ids,
+                      created_by=admin.email)
+        session.add(run)
+        session.flush()
+        run_id = run.id
+        audit_record(session, "eval_run_started", user_email=admin.email,
+                     target_type="eval_run", target_id=run_id,
+                     detail={"kb_ids": kb_ids}, ip=_client_ip(request))
+        session.commit()
+        spawn_fn(lambda: _execute_eval(run_id))
+        session.refresh(run)     # 同步 spawn（测试）时已经跑完：回读真实状态再回给调用方
+        return _run_json(run)
+
+    @app.get("/api/v1/eval/runs", response_model=list[EvalRunOut], responses={**_ERR_GATE})
+    def list_eval_runs(limit: QueryInt = 20, admin: User = Depends(require_admin_role),
+                       session: Session = Depends(get_session)):
+        # 上下界在端点内钳位（同 /audit：越界不是违法请求，不出 422 面）
+        limit = max(1, min(limit, 100))
+        return [_run_json(r) for r in session.query(EvalRun)
+                .order_by(EvalRun.id.desc()).limit(limit)]
+
+    @app.get("/api/v1/eval/runs/{run_id}", response_model=EvalRunDetailOut,
+             responses={**_ERR(404, "评测记录不存在"), **_ERR_GATE})
+    def get_eval_run(run_id: PathId, admin: User = Depends(require_admin_role),
+                     session: Session = Depends(get_session)):
+        run = session.get(EvalRun, run_id)
+        if not run:
+            raise HTTPException(404, "评测记录不存在")
+        items = (session.query(EvalItemResult).filter_by(run_id=run_id)
+                 .order_by(EvalItemResult.id).all())
+        return {**_run_json(run), "items": [_item_json(i) for i in items]}
+
+    @app.get("/api/v1/eval/runs/{run_id}/report", response_model=EvalReportOut,
+             responses={**_ERR(404, "评测记录不存在"), **_ERR_GATE})
+    def eval_report(run_id: PathId, admin: User = Depends(require_admin_role),
+                    session: Session = Depends(get_session)):
+        """Markdown 报告（JSON 里带 markdown 字符串）：交付文档要能贴，两次跑要能逐行 diff。
+        有意不做成下载端点——media-type 面越小，契约越好守（同 /license 的取值思路）。"""
+        run = session.get(EvalRun, run_id)
+        if not run:
+            raise HTTPException(404, "评测记录不存在")
+        items = (session.query(EvalItemResult).filter_by(run_id=run_id)
+                 .order_by(EvalItemResult.id).all())
+        markdown = render_report(
+            meta={"time": (run.finished_at or run.started_at or _now()).strftime("%Y-%m-%d %H:%M"),
+                  "kb_scope": _kb_scope_text(session, run.kb_ids),
+                  "chat_model": run.chat_model, "embedding_model": run.embedding_model},
+            metrics=run.metrics or {}, items=[_item_json(i) for i in items])
+        return {"markdown": markdown}
+
+    @app.delete("/api/v1/eval/runs/{run_id}", status_code=204,
+                responses={**_ERR(404, "评测记录不存在"), **_ERR_GATE})
+    def delete_eval_run(run_id: PathId, request: Request,
+                        admin: User = Depends(require_license),
+                        session: Session = Depends(get_session)):
+        # 删历史要审计：删掉的正是"更准"的证据，动作本身得留痕
+        run = session.get(EvalRun, run_id)
+        if not run:
+            raise HTTPException(404, "评测记录不存在")
+        session.delete(run)      # 单题明细走 FK CASCADE
+        audit_record(session, "eval_run_deleted", user_email=admin.email,
+                     target_type="eval_run", target_id=run_id,
+                     detail={"passed": run.passed, "total": run.total}, ip=_client_ip(request))
+        session.commit()
+
     app.add_middleware(_AllowHeaderMiddleware, routes=app.router.routes)
     return app
 
@@ -1558,6 +1949,7 @@ def build_production_app(upload_dir: str = "uploads",
     if engine is None:
         engine = create_engine(s.sqlalchemy_url(), pool_pre_ping=True)
         import app.models  # noqa: F401  一键部署：启动即建表（正式迁移方案后续以 Alembic 接管）
+        ensure_vector_extension(engine)   # 必须先于建表：VECTOR 列需要扩展存在（真机踩过）
         Base.metadata.create_all(engine)
     # 老库一键升级的过渡 pragmatics（无 Alembic）：create_all 不给已存在的表加列，
     # users.name/status 是任务 2 新增列——幂等 ADD COLUMN IF NOT EXISTS 补齐（fresh 库同样通过）
@@ -1582,6 +1974,17 @@ def build_production_app(upload_dir: str = "uploads",
             import logging
             logging.getLogger("umax").warning(
                 "已播种初始管理员 %s（ADMIN_EMAIL/ADMIN_PASSWORD）——首次登录强制修改口令", s.admin_email)
+        # 金标准集播种（§阶段2）：空表时灌入随应用打包的预置集（与 stage0 同源 20 题）。
+        # "评测集第一天就建"这条风险对策要开箱即生效——让客户自己攒题，这件事一定被拖到永远。
+        # 只判空表：客户删改过的题集不会被下次启动覆盖回去（预置集是起手牌，不是主人）。
+        if ses.query(EvalQuestion).first() is None:
+            gold = load_golden()
+            if gold:
+                ses.add_all([EvalQuestion(tenant_id="default", **row) for row in gold])
+                ses.commit()
+                import logging
+                logging.getLogger("umax").info(
+                    "已播种 %d 条预置金标准题（可在评测页删改）", len(gold))
     chat_fn = embedder = vision_fn = None
     bailian_chat = bailian_embedder = None
     cfg_store = SettingsStore(engine, s)          # 配置中心：端点与生成层共用同一实例

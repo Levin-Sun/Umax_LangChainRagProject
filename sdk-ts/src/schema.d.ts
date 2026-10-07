@@ -270,6 +270,107 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/eval/questions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Eval Questions */
+        get: operations["list_eval_questions_api_v1_eval_questions_get"];
+        put?: never;
+        /** Create Eval Question */
+        post: operations["create_eval_question_api_v1_eval_questions_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/eval/questions/{qid}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * Delete Eval Question
+         * @description 删题：历史运行的单题明细**不删**（question_id 置 NULL，快照还在）——
+         *     评测记录是"当时的证据"，拿今天的尺子重判昨天的答案就失去可比性了。
+         */
+        delete: operations["delete_eval_question_api_v1_eval_questions__qid__delete"];
+        options?: never;
+        head?: never;
+        /** Patch Eval Question */
+        patch: operations["patch_eval_question_api_v1_eval_questions__qid__patch"];
+        trace?: never;
+    };
+    "/api/v1/eval/runs": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Eval Runs */
+        get: operations["list_eval_runs_api_v1_eval_runs_get"];
+        put?: never;
+        /**
+         * Start Eval Run
+         * @description 起一轮评测并**立即返回**：20 题真模型要一两分钟，占着请求等会让浏览器/反代超时。
+         *     返回 202 + run（status=running），前端轮询 /eval/runs/{id} 看进度。
+         */
+        post: operations["start_eval_run_api_v1_eval_runs_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/eval/runs/{run_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Eval Run */
+        get: operations["get_eval_run_api_v1_eval_runs__run_id__get"];
+        put?: never;
+        post?: never;
+        /** Delete Eval Run */
+        delete: operations["delete_eval_run_api_v1_eval_runs__run_id__delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/eval/runs/{run_id}/report": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Eval Report
+         * @description Markdown 报告（JSON 里带 markdown 字符串）：交付文档要能贴，两次跑要能逐行 diff。
+         *     有意不做成下载端点——media-type 面越小，契约越好守（同 /license 的取值思路）。
+         */
+        get: operations["eval_report_api_v1_eval_runs__run_id__report_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/health": {
         parameters: {
             query?: never;
@@ -699,6 +800,293 @@ export interface components {
         ErrorOut: {
             /** Detail */
             detail: string;
+        };
+        /** EvalCategoryOut */
+        EvalCategoryOut: {
+            /**
+             * Category
+             * @default
+             */
+            category: string;
+            /**
+             * Passed
+             * @default 0
+             */
+            passed: number;
+            /**
+             * Total
+             * @default 0
+             */
+            total: number;
+        };
+        /**
+         * EvalChecksOut
+         * @description 单题判据（同 JSONB）：retrieval=None 表示该题没设金标准文档（不适用，不是失败）。
+         */
+        EvalChecksOut: {
+            /**
+             * Citation
+             * @default false
+             */
+            citation: boolean;
+            /**
+             * Kw All
+             * @default false
+             */
+            kw_all: boolean;
+            /**
+             * Kw Any
+             * @default false
+             */
+            kw_any: boolean;
+            /**
+             * Passed
+             * @default false
+             */
+            passed: boolean;
+            /**
+             * Rank
+             * @default 0
+             */
+            rank: number;
+            /** Retrieval */
+            retrieval?: boolean | null;
+        };
+        /** EvalItemOut */
+        EvalItemOut: {
+            /** Answer */
+            answer: string | null;
+            /** Category */
+            category: string;
+            checks: components["schemas"]["EvalChecksOut"];
+            /** Cited Docs */
+            cited_docs: string[];
+            /** Cites */
+            cites: string[];
+            /** Error */
+            error: string | null;
+            /** Expect All */
+            expect_all: string[];
+            /** Expect Any */
+            expect_any: string[];
+            /** Id */
+            id: number;
+            /** Latency Ms */
+            latency_ms: number | null;
+            /** Note */
+            note: string | null;
+            /** Passed */
+            passed: boolean;
+            /** Question */
+            question: string;
+            /** Question Id */
+            question_id: number | null;
+            /** Rank */
+            rank: number;
+            /** Top Docs */
+            top_docs: string[];
+        };
+        /**
+         * EvalMetricsOut
+         * @description 汇总指标（JSONB 里存的就是这个形状）。**全字段给默认值**：运行中的 run 其 metrics 还是空 {},
+         *     响应模型必须把它补成全 0 而不是 500——"还没跑完"是正常状态，不是错误。
+         *     形状写进 schema 而不是留 dict：前端才拿得到真类型，"指针随便点"的错误在编译期就没了。
+         */
+        EvalMetricsOut: {
+            /**
+             * Avg Latency Ms
+             * @default 0
+             */
+            avg_latency_ms: number;
+            /**
+             * Categories
+             * @default []
+             */
+            categories: components["schemas"]["EvalCategoryOut"][];
+            /**
+             * Hit
+             * @default 0
+             */
+            hit: number;
+            /**
+             * Hit Rate
+             * @default 0
+             */
+            hit_rate: number;
+            /**
+             * Mrr
+             * @default 0
+             */
+            mrr: number;
+            /**
+             * Pass Rate
+             * @default 0
+             */
+            pass_rate: number;
+            /**
+             * Passed
+             * @default 0
+             */
+            passed: number;
+            /**
+             * Total
+             * @default 0
+             */
+            total: number;
+            /**
+             * With Cites
+             * @default 0
+             */
+            with_cites: number;
+        };
+        /** EvalQuestionIn */
+        EvalQuestionIn: {
+            /**
+             * Category
+             * @default
+             */
+            category: string;
+            /**
+             * Cites
+             * @default []
+             */
+            cites: string[];
+            /**
+             * Enabled
+             * @default true
+             */
+            enabled: boolean;
+            /**
+             * Expect All
+             * @default []
+             */
+            expect_all: string[];
+            /**
+             * Expect Any
+             * @default []
+             */
+            expect_any: string[];
+            /** Note */
+            note?: string | null;
+            /** Question */
+            question: string;
+        };
+        /** EvalQuestionOut */
+        EvalQuestionOut: {
+            /** Category */
+            category: string;
+            /** Cites */
+            cites: string[];
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** Enabled */
+            enabled: boolean;
+            /** Expect All */
+            expect_all: string[];
+            /** Expect Any */
+            expect_any: string[];
+            /** Id */
+            id: number;
+            /** Note */
+            note: string | null;
+            /** Question */
+            question: string;
+        };
+        /** EvalQuestionPatchIn */
+        EvalQuestionPatchIn: {
+            /** Category */
+            category?: string | null;
+            /** Cites */
+            cites?: string[] | null;
+            /** Enabled */
+            enabled?: boolean | null;
+            /** Expect All */
+            expect_all?: string[] | null;
+            /** Expect Any */
+            expect_any?: string[] | null;
+            /** Note */
+            note?: string | null;
+            /** Question */
+            question?: string | null;
+        };
+        /** EvalReportOut */
+        EvalReportOut: {
+            /** Markdown */
+            markdown: string;
+        };
+        /** EvalRunDetailOut */
+        EvalRunDetailOut: {
+            /** Chat Model */
+            chat_model: string | null;
+            /** Created By */
+            created_by: string | null;
+            /** Embedding Model */
+            embedding_model: string | null;
+            /** Error */
+            error: string | null;
+            /** Finished At */
+            finished_at: string | null;
+            /** Id */
+            id: number;
+            /** Items */
+            items: components["schemas"]["EvalItemOut"][];
+            /** Kb Ids */
+            kb_ids: number[] | null;
+            metrics: components["schemas"]["EvalMetricsOut"];
+            /** Passed */
+            passed: number;
+            /**
+             * Started At
+             * Format: date-time
+             */
+            started_at: string;
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "running" | "done" | "failed";
+            /** Total */
+            total: number;
+        };
+        /** EvalRunIn */
+        EvalRunIn: {
+            /** Kb Ids */
+            kb_ids?: number[] | null;
+        };
+        /** EvalRunOut */
+        EvalRunOut: {
+            /** Chat Model */
+            chat_model: string | null;
+            /** Created By */
+            created_by: string | null;
+            /** Embedding Model */
+            embedding_model: string | null;
+            /** Error */
+            error: string | null;
+            /** Finished At */
+            finished_at: string | null;
+            /** Id */
+            id: number;
+            /** Kb Ids */
+            kb_ids: number[] | null;
+            metrics: components["schemas"]["EvalMetricsOut"];
+            /** Passed */
+            passed: number;
+            /**
+             * Started At
+             * Format: date-time
+             */
+            started_at: string;
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "running" | "done" | "failed";
+            /** Total */
+            total: number;
         };
         /** GrantsIn */
         GrantsIn: {
@@ -2043,6 +2431,593 @@ export interface operations {
                 };
             };
             /** @description 文档不存在 */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+            /** @description 首次登录必须修改初始口令 */
+            428: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOut"];
+                };
+            };
+        };
+    };
+    list_eval_questions_api_v1_eval_questions_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EvalQuestionOut"][];
+                };
+            };
+            /** @description 需要登录 */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOut"];
+                };
+            };
+            /** @description 需要管理员权限 */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOut"];
+                };
+            };
+            /** @description 首次登录必须修改初始口令 */
+            428: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOut"];
+                };
+            };
+        };
+    };
+    create_eval_question_api_v1_eval_questions_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["EvalQuestionIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EvalQuestionOut"];
+                };
+            };
+            /** @description 请求体解析失败 */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOut"];
+                };
+            };
+            /** @description 需要登录 */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOut"];
+                };
+            };
+            /** @description 需要管理员权限 */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+            /** @description 首次登录必须修改初始口令 */
+            428: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOut"];
+                };
+            };
+        };
+    };
+    delete_eval_question_api_v1_eval_questions__qid__delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                qid: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description 需要登录 */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOut"];
+                };
+            };
+            /** @description 需要管理员权限 */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOut"];
+                };
+            };
+            /** @description 金标准题不存在 */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+            /** @description 首次登录必须修改初始口令 */
+            428: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOut"];
+                };
+            };
+        };
+    };
+    patch_eval_question_api_v1_eval_questions__qid__patch: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                qid: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["EvalQuestionPatchIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EvalQuestionOut"];
+                };
+            };
+            /** @description 请求体解析失败 */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOut"];
+                };
+            };
+            /** @description 需要登录 */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOut"];
+                };
+            };
+            /** @description 需要管理员权限 */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOut"];
+                };
+            };
+            /** @description 金标准题不存在 */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+            /** @description 首次登录必须修改初始口令 */
+            428: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOut"];
+                };
+            };
+        };
+    };
+    list_eval_runs_api_v1_eval_runs_get: {
+        parameters: {
+            query?: {
+                limit?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EvalRunOut"][];
+                };
+            };
+            /** @description 需要登录 */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOut"];
+                };
+            };
+            /** @description 需要管理员权限 */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+            /** @description 首次登录必须修改初始口令 */
+            428: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOut"];
+                };
+            };
+        };
+    };
+    start_eval_run_api_v1_eval_runs_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["EvalRunIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EvalRunOut"];
+                };
+            };
+            /** @description 请求体解析失败 */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOut"];
+                };
+            };
+            /** @description 需要登录 */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOut"];
+                };
+            };
+            /** @description 需要管理员权限 */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+            /** @description 首次登录必须修改初始口令 */
+            428: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOut"];
+                };
+            };
+        };
+    };
+    get_eval_run_api_v1_eval_runs__run_id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                run_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EvalRunDetailOut"];
+                };
+            };
+            /** @description 需要登录 */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOut"];
+                };
+            };
+            /** @description 需要管理员权限 */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOut"];
+                };
+            };
+            /** @description 评测记录不存在 */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+            /** @description 首次登录必须修改初始口令 */
+            428: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOut"];
+                };
+            };
+        };
+    };
+    delete_eval_run_api_v1_eval_runs__run_id__delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                run_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description 需要登录 */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOut"];
+                };
+            };
+            /** @description 需要管理员权限 */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOut"];
+                };
+            };
+            /** @description 评测记录不存在 */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+            /** @description 首次登录必须修改初始口令 */
+            428: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOut"];
+                };
+            };
+        };
+    };
+    eval_report_api_v1_eval_runs__run_id__report_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                run_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EvalReportOut"];
+                };
+            };
+            /** @description 需要登录 */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOut"];
+                };
+            };
+            /** @description 需要管理员权限 */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOut"];
+                };
+            };
+            /** @description 评测记录不存在 */
             404: {
                 headers: {
                     [name: string]: unknown;

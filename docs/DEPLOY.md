@@ -44,6 +44,15 @@ docker compose up -d --build
 5. `/admin/apikeys` 签发 API key（可选）：给客户的钉钉/企微/内部系统用——OpenAI SDK 把 `base_url` 设为
    `http://<服务器IP>:8000/api/v1/openai`、key 填签发明文即可调 `/chat/completions`（回答自带 citations）
 6. 聊天页提问验证「带引用回答」；`/admin/usage` 看用量；`/admin/users` 建成员账号并授权知识库（成员首登同样强制改密）
+7. **`/admin/eval` 跑第一轮评测**（建议每次调完检索参数都跑一遍）：系统已预置 20 条金标准题（电商脏文档场景，
+   可改可删可停用），点「开始评测」即对全库跑一遍完整问答链路，产出**通过率 / 检索命中率 / MRR** 与逐题明细，
+   并可导出 Markdown 报告贴进交付文档。客户问「凭什么说更准」时这一页就是答案；它同时是配置变更的防退化记录——
+   同一份配置连跑两次分数必须一致，不一致说明链路里有不确定性，先去查那个，别急着调参数。
+
+> 没有模型 key 时也能自证链路：`python backend/scripts/stub_model_server.py --port 8099` 起一个 OpenAI 兼容
+> 桩服务（答案=抄资料，只验检索与链路，不验语言能力），在 `/admin/models` 登记
+> `base_url=http://127.0.0.1:8099/v1` 后，「网关路由 → 密钥解密 → HTTP 调用 → 用量台账 → 评测」整条链路即可跑通。
+> 拿到真 key 后同一条链路直接换成真模型，无需改配置以外的东西。
 
 ## 第 4 步：License 授权（商业闭环；开发/试用可跳过）
 
@@ -92,3 +101,6 @@ docker compose up -d --build
 - HTTPS 由客户侧反代终结（nginx/caddy 对 3000 端口），编排内不自带证书
 - MinerU 扫描件解析为可选外挂服务（`MINERU_BASE_URL`），未启用时上传扫描件会明确报错提示
 - 白标设置在「管理后台 → 品牌」；License 见上第 4 步
+- pgvector 扩展由后端启动时自动 `CREATE EXTENSION IF NOT EXISTS vector` 建好（建表需要它，
+  真机踩过：全新数据库没这一步会直接死在 `chunks.embedding VECTOR(1024)` 上）。
+  客户若用托管 PG 且 DBA 已预装扩展，这一步是空转，不影响

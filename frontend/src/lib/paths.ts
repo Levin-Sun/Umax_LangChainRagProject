@@ -28,4 +28,9 @@ export const P = {
   settings: "/api/v1/settings",
   apiKeys: "/api/v1/api-keys",
   apiKey: "/api/v1/api-keys/{key_id}",
+  evalQuestions: "/api/v1/eval/questions",
+  evalQuestion: "/api/v1/eval/questions/{qid}",
+  evalRuns: "/api/v1/eval/runs",
+  evalRun: "/api/v1/eval/runs/{run_id}",
+  evalRunReport: "/api/v1/eval/runs/{run_id}/report",
 } as const;

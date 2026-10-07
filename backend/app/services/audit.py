@@ -11,6 +11,9 @@ ACTIONS = {
     "document_reprocessed", "model_created", "model_updated", "model_deleted",
     "api_key_created", "api_key_updated", "api_key_deleted",
     "branding_updated", "settings_updated",
+    # 评测集与评测运行（§阶段2）：金标准是"标尺"，改标尺=改结论；删历史=删证据——两者都必须留痕
+    "eval_question_created", "eval_question_updated", "eval_question_deleted",
+    "eval_run_started", "eval_run_deleted",
 }
 
 

@@ -28,3 +28,16 @@ export interface LicenseOut { enforced: boolean; valid: boolean; reason: string 
 // 配置中心（/settings）：values=生效值、defaults=默认值、overridden=被后台改过的键
 export interface SettingsSnapshot { values: Record<string, string | number | boolean>; defaults: Record<string, string | number | boolean>; overridden: string[]; warnings: string[]; labels: Record<string, string>; help: Record<string, string> }
 export interface AuditOut { id: number; user_email: string; action: string; target_type: string | null; target_id: number | null; detail: Record<string, unknown>; ip: string | null; created_at: string }
+// 评测（/admin/eval）：金标准题 + 一次运行的分数/明细/报告。
+// metrics/checks 在后端是 JSONB，但形状已写进 schema（EvalMetricsOut/EvalChecksOut），
+// 所以这里按真类型声明而不是 Record<string, unknown>——"指针随便点"的错在编译期就没了。
+// 字段全部非可选：契约里它们都带默认值（运行中的 run 由响应模型补成全 0）。
+export type EvalRunStatus = "running" | "done" | "failed";
+export interface EvalQuestionOut { id: number; question: string; expect_all: string[]; expect_any: string[]; cites: string[]; category: string; note: string | null; enabled: boolean; created_at: string }
+export interface EvalCategoryScore { category: string; total: number; passed: number }
+export interface EvalMetrics { total: number; passed: number; pass_rate: number; with_cites: number; hit: number; hit_rate: number; mrr: number; avg_latency_ms: number; categories: EvalCategoryScore[] }
+// retrieval=null：该题没设金标准文档（不适用，不是失败）
+export interface EvalChecks { kw_all: boolean; kw_any: boolean; citation: boolean; retrieval: boolean | null; passed: boolean; rank: number }
+export interface EvalItemOut { id: number; question_id: number | null; question: string; category: string; note: string | null; expect_all: string[]; expect_any: string[]; cites: string[]; answer: string | null; cited_docs: string[]; top_docs: string[]; checks: EvalChecks; passed: boolean; rank: number; latency_ms: number | null; error: string | null }
+export interface EvalRunOut { id: number; status: EvalRunStatus; total: number; passed: number; metrics: EvalMetrics; kb_ids: number[] | null; chat_model: string | null; embedding_model: string | null; error: string | null; created_by: string | null; started_at: string; finished_at: string | null }
+export interface EvalRunDetailOut extends EvalRunOut { items: EvalItemOut[] }
