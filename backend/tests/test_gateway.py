@@ -159,3 +159,57 @@ def test_embed_falls_back_and_makes_embedder_adapter(engine, db):
     embedder = gw.make_embedder()  # 暴露 .embed(texts)，直接兼容 ingest/retrieval 注入点
     assert embedder.embed(["x"])[0][0] == 1.0  # 失败的 429 不消耗序号，成功首个仍是 1.0
     assert _usage_rows(engine, "embedding")[0].model == "emb-rescue"
+
+
+# ---- 运行时换模型即生效（§C「改完即生效，不用改代码重启」）：装配组合函数 ----
+# 网关每次调用现读表，但旧装配在启动时判定表空就不再接线——后台登记第一个模型要重启。
+# 组合语义：NoProviderError（表里没有启用模型）→ 回退 .env 百炼直连；
+# 其他 GatewayError（配了但全挂）→ 原样上抛，由问答端点转未命中兜底。
+def test_chat_fallback_composition_prefers_gateway(engine, db):
+    from app.main import with_gateway_fallback
+    from app.services.gateway import GatewayError
+
+    gw = vi_gw = lambda q, hits: {"answer": "来自网关", "prompt_tokens": 1, "completion_tokens": 1}
+    direct = lambda q, hits: {"answer": "来自直连", "prompt_tokens": 1, "completion_tokens": 1}
+    assert with_gateway_fallback(gw, direct)("q", [])["answer"] == "来自网关"
+
+
+def test_chat_fallback_composition_falls_back_when_no_provider(engine, db):
+    from app.main import with_gateway_fallback
+    from app.services.gateway import NoProviderError
+
+    def gw(q, hits):
+        raise NoProviderError("没有已启用的 chat 模型配置（model_configs 表为空？）")
+    direct = lambda q, hits: {"answer": "来自直连", "prompt_tokens": 1, "completion_tokens": 1}
+    assert with_gateway_fallback(gw, direct)("q", [])["answer"] == "来自直连"
+    assert with_gateway_fallback(gw, None)("q", []) is None  # 无直连可退 → None（端点按未命中处理）
+
+
+def test_chat_fallback_composition_reraises_provider_failure(engine, db):
+    import pytest as _pytest
+    from app.main import with_gateway_fallback
+    from app.services.gateway import GatewayError
+
+    def gw(q, hits):
+        raise GatewayError("全部 chat 模型均调用失败")
+    direct = lambda q, hits: {"answer": "来自直连", "prompt_tokens": 1, "completion_tokens": 1}
+    with _pytest.raises(GatewayError):
+        with_gateway_fallback(gw, direct)("q", [])
+
+
+def test_embedder_fallback_composition(engine, db):
+    from app.main import FallbackEmbedder
+    from app.services.gateway import NoProviderError
+
+    class Gw:
+        def embed(self, texts):
+            raise NoProviderError("没有已启用的 embedding 模型配置（model_configs 表为空？）")
+
+    class Direct:
+        def embed(self, texts):
+            return [[0.0] * 4 for _ in texts]
+
+    # 空表且无直连 → [None]*n（ingest 语义：BM25-only 入库不失败）
+    assert FallbackEmbedder(Gw(), None).embed(["a", "b"]) == [None, None]
+    # 空表有直连 → 走直连
+    assert FallbackEmbedder(Gw(), Direct()).embed(["a"]) == [[0.0] * 4]

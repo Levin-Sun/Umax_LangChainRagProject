@@ -56,3 +56,28 @@ def test_user_prompt_numbers_materials_for_citation():
     p = build_user_prompt("能退吗？", hits)
     assert "[1] （来源：a.pdf）" in p and "[2] （来源：b.pdf）" in p
     assert p.rstrip().endswith("【问题】能退吗？")
+
+
+# ---- 网关在调用期抛错（模型全挂/被删光）不得 500：问答端点转未命中兜底 ----
+def test_chat_endpoint_converts_gateway_failure_to_miss(engine, db, tmp_path):
+    from fastapi.testclient import TestClient
+
+    from app.main import create_app
+    from app.services.gateway import GatewayError
+    from tests.conftest import login, seed_user
+
+    def broken_chat(query, hits):
+        raise GatewayError("全部 chat 模型均调用失败")
+
+    app = create_app(engine=engine, secret="s", embedder=None, chat_fn=broken_chat,
+                     upload_dir=str(tmp_path))
+    seed_user(engine, "admin@x.com", "Adm1n-Pass-123", role="admin")
+    c = TestClient(app)
+    login(c, "admin@x.com", "Adm1n-Pass-123")
+    kb = c.post("/api/v1/kb", json={"name": "k"}).json()
+    raw = "售后规则：生鲜商品不支持七天无理由退货。" * 5
+    assert c.post(f"/api/v1/kb/{kb['id']}/documents",
+                  files={"file": ("a.txt", raw.encode(), "text/plain")}).status_code == 201
+    r = c.post("/api/v1/chat", json={"question": "生鲜能退吗", "kb_ids": [kb["id"]]})
+    assert r.status_code == 200, r.text
+    assert r.json()["answer"] == "资料里没有相关内容，无法回答。"

@@ -250,6 +250,53 @@ _ERR_BODY = _ERR(400, "请求体解析失败")
 MISS_ANSWER = "资料里没有相关内容，无法回答。"
 
 
+def with_gateway_fallback(gw_fn: Callable | None,
+                          direct_fn: Callable | None) -> Callable | None:
+    """运行时换模型即生效（§C）的组合装配：网关 fn 每次调用现读 model_configs，
+    表里还没有启用模型（NoProviderError）时回退 .env 直连；两侧都没有 → None
+    （问答端点按未命中兜底）。配了但全挂的 GatewayError 原样上抛，由端点转兜底。"""
+    from app.services.gateway import GatewayError, NoProviderError
+
+    if gw_fn is None:
+        return direct_fn
+    if direct_fn is None:
+        def gw_only(query, hits):
+            try:
+                return gw_fn(query, hits)
+            except NoProviderError:
+                return None   # 无直连可退：None 由问答端点按未命中兜底处理
+        return gw_only
+    if direct_fn is None:
+        return gw_fn
+
+    def composed(query, hits):
+        try:
+            return gw_fn(query, hits)
+        except NoProviderError:
+            return direct_fn(query, hits)
+
+    return composed
+
+
+class FallbackEmbedder:
+    """组合 embedder（网关优先、.env 百炼兜底）：网关表空（NoProviderError）退直连；
+    两侧都无 → 返回 [None]*n——ingest 语义即"不向量化 BM25-only 入库"，
+    后台登记 embedding 模型后点重处理即可补向量，无需重启。"""
+
+    def __init__(self, gw_embedder, direct_embedder) -> None:
+        self._gw, self._direct = gw_embedder, direct_embedder
+
+    def embed(self, texts):
+        from app.services.gateway import NoProviderError
+
+        try:
+            return self._gw.embed(texts)
+        except NoProviderError:
+            if self._direct is None:
+                return [None] * len(texts)
+            return self._direct.embed(texts)
+
+
 class _AllowHeaderMiddleware:
     """fuzz 修复⑤：同一路径由多个单方法路由拼成，Starlette 的 405/OPTIONS 只报首个路由的方法
     （AllowHeaderMismatch 抓到 Allow: POST 少了 GET，违反 RFC 9110）——合并为路径真实方法全集。"""
@@ -731,19 +778,28 @@ def create_app(
         if not hits or chat_fn is None:
             answer, usage, citations = MISS_ANSWER, {"prompt_tokens": 0, "completion_tokens": 0}, []
         else:
-            out = chat_fn(body.question, hits)
-            answer = out["answer"]
-            usage = {"prompt_tokens": out.get("prompt_tokens") or 0,
-                     "completion_tokens": out.get("completion_tokens") or 0}
-            citations = [{"n": i, "doc_name": h["doc_name"], "chunk_id": h["id"],
-                          "excerpt": h["content"][:80]} for i, h in enumerate(hits, 1)]
-            # 记账单点在端点：网关 make_chat_fn 已交回记账职责（logged 约定退役），
-            # 这里必记且只记一次，台账归真实登录者而非占位邮箱
-            session.add(UsageRecord(tenant_id="default", user_email=user.email,
-                                    scenario="chat", model=out.get("model") or s.chat_model,
-                                    prompt_tokens=usage["prompt_tokens"],
-                                    completion_tokens=usage["completion_tokens"],
-                                    latency_ms=out.get("latency_ms")))
+            try:
+                out = chat_fn(body.question, hits)
+            # 模型在两次问答之间被停用/删光/全挂：不把 500 甩用户脸上，转未命中兜底
+            except Exception as exc:
+                import logging
+                logging.getLogger("umax").warning("chat 生成失败，转未命中兜底：%s", exc)
+                out = None
+            if out is None:
+                answer, usage, citations = MISS_ANSWER, {"prompt_tokens": 0, "completion_tokens": 0}, []
+            else:
+                answer = out["answer"]
+                usage = {"prompt_tokens": out.get("prompt_tokens") or 0,
+                         "completion_tokens": out.get("completion_tokens") or 0}
+                citations = [{"n": i, "doc_name": h["doc_name"], "chunk_id": h["id"],
+                              "excerpt": h["content"][:80]} for i, h in enumerate(hits, 1)]
+                # 记账单点在端点：网关 make_chat_fn 已交回记账职责（logged 约定退役），
+                # 这里必记且只记一次，台账归真实登录者而非占位邮箱
+                session.add(UsageRecord(tenant_id="default", user_email=user.email,
+                                        scenario="chat", model=out.get("model") or s.chat_model,
+                                        prompt_tokens=usage["prompt_tokens"],
+                                        completion_tokens=usage["completion_tokens"],
+                                        latency_ms=out.get("latency_ms")))
         session.add(Message(tenant_id="default", conversation_id=conv.id, role="assistant",
                             content=[{"type": "text", "text": answer}], citations=citations))
         session.commit()
@@ -1104,22 +1160,26 @@ def build_production_app(upload_dir: str = "uploads",
             logging.getLogger("umax").warning(
                 "已播种初始管理员 %s（ADMIN_EMAIL/ADMIN_PASSWORD）——首次登录强制修改口令", s.admin_email)
     chat_fn = embedder = None
+    bailian_chat = bailian_embedder = None
+    if s.dashscope_api_key:
+        # .env 百炼直连（阶段 0 链路）：作为网关表未配置时的开发/冒烟兜底
+        bailian_chat = make_chat_fn(ChatClient(api_key=s.dashscope_api_key,
+                                               base_url=s.dashscope_compat_base,
+                                               model=s.chat_model))
+        bailian_embedder = BailianEmbedder(api_key=s.dashscope_api_key,
+                                           base_url=s.dashscope_compat_base,
+                                           model=s.embedding_model,
+                                           dimensions=s.embedding_dim)
     if s.gateway_secret:
         from app.services.gateway import ModelGateway
 
         gw = ModelGateway(engine, secret=s.gateway_secret)
-        if gw.providers("chat"):
-            chat_fn = gw.make_chat_fn()
-        if gw.providers("embedding"):
-            embedder = gw.make_embedder()
-    if (chat_fn is None or embedder is None) and s.dashscope_api_key:
-        chat_fn = chat_fn or make_chat_fn(ChatClient(api_key=s.dashscope_api_key,
-                                                     base_url=s.dashscope_compat_base,
-                                                     model=s.chat_model))
-        embedder = embedder or BailianEmbedder(api_key=s.dashscope_api_key,
-                                               base_url=s.dashscope_compat_base,
-                                               model=s.embedding_model,
-                                               dimensions=s.embedding_dim)
+        # 运行时换模型即生效（§C）：网关 fn 每次调用现读表，启动时表空不再"判死"——
+        # 后台登记第一个模型立即接线；表空且无百炼 → chat MISS / 入库 BM25-only 降级
+        chat_fn = with_gateway_fallback(gw.make_chat_fn(), bailian_chat)
+        embedder = FallbackEmbedder(gw.make_embedder(), bailian_embedder)
+    else:
+        chat_fn, embedder = bailian_chat, bailian_embedder
     mineru = MinerUClient(s.mineru_base_url) if s.mineru_base_url else None
     queue = None
     if s.queue_backend == "arq":

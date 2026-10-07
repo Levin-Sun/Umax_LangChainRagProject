@@ -18,6 +18,12 @@ class GatewayError(RuntimeError):
     pass
 
 
+class NoProviderError(GatewayError):
+    """表里没有已启用的该场景模型——装配组合函数借此判断"网关未配置"，回退 .env 直连；
+    与"配了但全挂"（裸 GatewayError）区分：后者上抛，由问答端点转未命中兜底。"""
+    pass
+
+
 @dataclass
 class Provider:
     id: int
@@ -62,7 +68,7 @@ class ModelGateway:
         问答端点自己按"真实登录者邮箱"记账，避免同一请求双记（logged 约定已退役）。"""
         providers = self.providers("chat")
         if not providers:
-            raise GatewayError("没有已启用的 chat 模型配置（model_configs 表为空？）")
+            raise NoProviderError("没有已启用的 chat 模型配置（model_configs 表为空？）")
         for p in providers:  # fallback 链：本家失败（含 ChatClient 内部重试）切下一家
             client = ChatClient(api_key=p.api_key, base_url=p.base_url, model=p.model_name,
                                 transport=self._transport, sleep=self._sleep, timeout=self._timeout)
@@ -95,7 +101,7 @@ class ModelGateway:
               kb_id: int | None = None) -> list[list[float]]:
         providers = self.providers("embedding")
         if not providers:
-            raise GatewayError("没有已启用的 embedding 模型配置（model_configs 表为空？）")
+            raise NoProviderError("没有已启用的 embedding 模型配置（model_configs 表为空？）")
         for p in providers:  # provider 级 fallback：整批失败切下一家
             try:
                 vectors, prompt_tokens = self._embed_all(p, texts)
