@@ -20,10 +20,10 @@ from starlette.routing import Match
 from starlette.types import ASGIApp, Receive, Scope, Send
 
 from app.core.config import get_settings
-from app.models import (AuditLog, Chunk, Conversation, Document, KnowledgeBase, Message,
+from app.models import (ApiKey, AuditLog, Chunk, Conversation, Document, KnowledgeBase, Message,
                         ModelConfig, User, UserKbGrant, UserSession, UsageRecord)
 from app.services.audit import record as audit_record
-from app.services.auth import (LoginThrottle, hash_password, new_session_token,
+from app.services.auth import (LoginThrottle, hash_password, new_api_key, new_session_token,
                                token_digest, verify_password)
 from app.services.citations import parse_citations
 from app.services.crypto import decrypt_secret, encrypt_secret
@@ -195,6 +195,29 @@ class UserPatchIn(BaseModel):
 
 class GrantsIn(BaseModel):
     kb_ids: list[ReqId] = []
+
+
+class ApiKeyIn(BaseModel):
+    name: Utf8Str = Field(max_length=128)
+    kb_ids: list[ReqId] | None = None            # null=全库；数组=限定库
+    monthly_token_quota: JsonInt | None = None   # null=不限
+
+
+class ApiKeyPatchIn(BaseModel):
+    name: Utf8Str | None = Field(None, max_length=128)
+    kb_ids: list[ReqId] | None = None
+    monthly_token_quota: JsonInt | None = None
+    enabled: StrictBool | None = None
+
+
+class OpenAiMessageIn(BaseModel):
+    role: Utf8Str
+    content: Utf8Str
+
+
+class OpenAiChatIn(BaseModel):
+    model: Utf8Str | None = None
+    messages: list[OpenAiMessageIn]
 
 
 # 契约 fuzz 前提：真实错误码必须写进 spec，否则 schemathesis 判合法响应为违约
@@ -821,6 +844,154 @@ def create_app(
                 .group_by(UsageRecord.scenario, UsageRecord.model).all())
         return [{"scenario": r[0], "model": r[1], "calls": r[2],
                  "prompt_tokens": int(r[3]), "completion_tokens": int(r[4])} for r in rows]
+
+    # ---- 开放 API（§2.2）：API key 管理（admin 面）+ OpenAI 兼容端点（Bearer key）----
+    # 兼容端点不走会话（客户系统没有浏览器 cookie），401/429/400 声明在该端点自己名下；
+    # 契约守卫为它开 Bearer 例外面（见 test_contract_declared）。
+    def _bearer_key(request: Request, session: Session) -> ApiKey:
+        auth = request.headers.get("authorization") or ""
+        raw = auth[7:] if auth.startswith("Bearer ") else ""
+        row = (session.query(ApiKey).filter_by(key_hash=token_digest(raw)).first()
+               if raw else None)
+        if not row or not row.enabled:
+            raise HTTPException(401, "无效的 API key")
+        return row
+
+    def _api_key_json(k: ApiKey) -> dict:
+        return {"id": k.id, "name": k.name, "key_prefix": k.key_prefix, "kb_ids": k.kb_ids,
+                "monthly_token_quota": k.monthly_token_quota, "enabled": k.enabled,
+                "last_used_at": k.last_used_at.isoformat() if k.last_used_at else None,
+                "created_at": k.created_at.isoformat()}
+
+    def _valid_kb_ids(session: Session, kb_ids: list[int] | None) -> list[int] | None:
+        if kb_ids is None:
+            return None
+        ids = sorted(set(kb_ids))
+        if ids and len(session.query(KnowledgeBase.id)
+                      .filter(KnowledgeBase.id.in_(ids)).all()) != len(ids):
+            raise HTTPException(400, "存在不存在的知识库 id")
+        return ids
+
+    def _month_used_tokens(session: Session, key_id: int) -> int:
+        month_start = _now().replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+        total = session.query(
+            func.sum(UsageRecord.prompt_tokens + UsageRecord.completion_tokens)).filter(
+            UsageRecord.user_email == f"apikey:{key_id}",
+            UsageRecord.created_at >= month_start).scalar()
+        return int(total or 0)
+
+    @app.post("/api/v1/api-keys", status_code=201,
+              responses={**_ERR(400, "存在不存在的知识库 id"), **_ERR_GATE, **_ERR_BODY})
+    def create_api_key(body: ApiKeyIn, request: Request,
+                       admin: User = Depends(require_admin_role),
+                       session: Session = Depends(get_session)):
+        ids = _valid_kb_ids(session, body.kb_ids)
+        plain, digest = new_api_key()
+        k = ApiKey(tenant_id="default", name=body.name, key_hash=digest, key_prefix=plain[:13],
+                   kb_ids=ids, monthly_token_quota=body.monthly_token_quota, created_by=admin.id)
+        session.add(k)
+        session.flush()
+        # key 明文/摘要一律不入审计
+        audit_record(session, "api_key_created", user_email=admin.email,
+                     target_type="api_key", target_id=k.id,
+                     detail={"name": body.name, "kb_ids": ids,
+                             "monthly_token_quota": body.monthly_token_quota},
+                     ip=_client_ip(request))
+        session.commit()
+        out = _api_key_json(k)
+        out["key"] = plain   # 明文只在这一次响应里出现
+        return out
+
+    @app.get("/api/v1/api-keys", responses={**_ERR_GATE})
+    def list_api_keys(admin: User = Depends(require_admin_role),
+                      session: Session = Depends(get_session)):
+        return [_api_key_json(k) for k in session.query(ApiKey).order_by(ApiKey.id)]
+
+    @app.patch("/api/v1/api-keys/{key_id}",
+               responses={**_ERR(400, "存在不存在的知识库 id"), **_ERR(404, "API key 不存在"),
+                          **_ERR_GATE, **_ERR_BODY})
+    def patch_api_key(key_id: PathId, body: ApiKeyPatchIn, request: Request,
+                      admin: User = Depends(require_admin_role),
+                      session: Session = Depends(get_session)):
+        k = session.get(ApiKey, key_id)
+        if not k:
+            raise HTTPException(404, "API key 不存在")
+        fields: list[str] = []
+        if body.name is not None and body.name != k.name:
+            k.name = body.name
+            fields.append("name")
+        if body.kb_ids is not None:
+            k.kb_ids = _valid_kb_ids(session, body.kb_ids)
+            fields.append("kb_ids")
+        if body.monthly_token_quota is not None:
+            k.monthly_token_quota = body.monthly_token_quota
+            fields.append("monthly_token_quota")
+        if body.enabled is not None and body.enabled != k.enabled:
+            k.enabled = body.enabled
+            fields.append("enabled")
+        if fields:
+            audit_record(session, "api_key_updated", user_email=admin.email,
+                         target_type="api_key", target_id=k.id,
+                         detail={"fields": fields}, ip=_client_ip(request))
+            session.commit()
+        return _api_key_json(k)
+
+    @app.delete("/api/v1/api-keys/{key_id}", status_code=204,
+                responses={**_ERR(404, "API key 不存在"), **_ERR_GATE})
+    def delete_api_key(key_id: PathId, request: Request,
+                       admin: User = Depends(require_admin_role),
+                       session: Session = Depends(get_session)):
+        k = session.get(ApiKey, key_id)
+        if not k:
+            raise HTTPException(404, "API key 不存在")
+        name = k.name   # 删前取：行没了就查不到被删的是哪枚
+        session.delete(k)
+        audit_record(session, "api_key_deleted", user_email=admin.email,
+                     target_type="api_key", target_id=key_id,
+                     detail={"name": name}, ip=_client_ip(request))
+        session.commit()
+
+    @app.post("/api/v1/openai/chat/completions",
+              responses={**_ERR(400, "messages 里没有 user 消息"), **_ERR(401, "无效的 API key"),
+                         **_ERR(429, "本月配额已用尽")})
+    def openai_chat_completions(body: OpenAiChatIn, request: Request,
+                                session: Session = Depends(get_session)):
+        k = _bearer_key(request, session)
+        if k.monthly_token_quota is not None and _month_used_tokens(session, k.id) >= k.monthly_token_quota:
+            raise HTTPException(429, "本月配额已用尽")
+        question = next((m.content for m in reversed(body.messages) if m.role == "user"), None)
+        if not question:
+            raise HTTPException(400, "messages 里没有 user 消息")
+        # 作用域钳制在检索层（同 user_kb_grants 方向）：kb_ids=NULL 全库，数组=限定库
+        allowed = set(k.kb_ids) if k.kb_ids is not None else None
+        hits = retrieve(session, question, embedder=embedder, kb_ids=None,
+                        allowed_kb_ids=allowed, recall_k=s.recall_k,
+                        top_k=s.rerank_top_n, min_sim=s.min_sim)
+        if not hits or chat_fn is None:
+            answer, usage, citations = MISS_ANSWER, {"prompt_tokens": 0, "completion_tokens": 0}, []
+        else:
+            out = chat_fn(question, hits)
+            answer = out["answer"]
+            usage = {"prompt_tokens": out.get("prompt_tokens") or 0,
+                     "completion_tokens": out.get("completion_tokens") or 0}
+            citations = [{"n": i, "doc_name": h["doc_name"], "chunk_id": h["id"],
+                          "excerpt": h["content"][:80]} for i, h in enumerate(hits, 1)]
+            # 台账"谁"维度：apikey:{id}（配额聚合同口径）；model 取请求声明，缺省回默认
+            session.add(UsageRecord(tenant_id="default", user_email=f"apikey:{k.id}",
+                                    scenario="chat", model=body.model or s.chat_model,
+                                    prompt_tokens=usage["prompt_tokens"],
+                                    completion_tokens=usage["completion_tokens"],
+                                    latency_ms=out.get("latency_ms")))
+        k.last_used_at = _now()
+        session.commit()
+        return {"id": f"chatcmpl-{uuid4().hex[:12]}", "object": "chat.completion",
+                "created": int(_now().timestamp()), "model": body.model or s.chat_model,
+                "choices": [{"index": 0, "message": {"role": "assistant", "content": answer},
+                             "finish_reason": "stop"}],
+                "usage": {"prompt_tokens": usage["prompt_tokens"],
+                          "completion_tokens": usage["completion_tokens"],
+                          "total_tokens": usage["prompt_tokens"] + usage["completion_tokens"]},
+                "citations": citations}   # 本产品扩展字段：OpenAI 没有但企业客户要溯源
 
     app.add_middleware(_AllowHeaderMiddleware, routes=app.router.routes)
     return app

@@ -18,6 +18,7 @@ const LINKS = [
   { href: "/admin/usage", label: "用量" },
   { href: "/admin/users", label: "用户" },
   { href: "/admin/audit", label: "审计" },
+  { href: "/admin/apikeys", label: "API" },
 ];
 
 export function Nav() {

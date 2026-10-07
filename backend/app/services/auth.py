@@ -41,6 +41,13 @@ def new_session_token() -> tuple[str, str]:
     return plain, token_digest(plain)
 
 
+def new_api_key() -> tuple[str, str]:
+    """(明文 key, 落库摘要)。明文形如 umax-<token>，只在创建响应出现一次；
+    摘要同会话 token 口径（SHA-256），DB 泄露造不出可用 key。"""
+    plain = "umax-" + secrets.token_urlsafe(32)
+    return plain, token_digest(plain)
+
+
 class LoginThrottle:
     """同 key（email|ip）窗口内连续失败达上限即拒；成功清零。可注入 now（monotonic 秒）。"""
 

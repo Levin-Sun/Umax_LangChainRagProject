@@ -9,6 +9,7 @@ ACTIONS = {
     "user_created", "user_updated", "grants_updated",
     "kb_created", "kb_deleted", "document_uploaded", "document_deleted",
     "document_reprocessed", "model_created", "model_updated", "model_deleted",
+    "api_key_created", "api_key_updated", "api_key_deleted",
 }
 
 

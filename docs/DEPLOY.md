@@ -41,7 +41,9 @@ docker compose up -d --build
 2. **首登强制改密**：系统弹「首次登录，请修改初始口令」，改完才能进任何页面（后端 428 门闸兜底，绕过界面也进不去）
 3. `/admin/models` 登记模型：chat / embedding / rerank（vision 可选）各一条，填厂商、地址、key、模型名
 4. `/admin/kb` 建知识库 → 上传第一批文档 → 状态轮询到「就绪」
-5. 聊天页提问验证「带引用回答」；`/admin/usage` 看用量；`/admin/users` 建成员账号并授权知识库（成员首登同样强制改密）
+5. `/admin/apikeys` 签发 API key（可选）：给客户的钉钉/企微/内部系统用——OpenAI SDK 把 `base_url` 设为
+   `http://<服务器IP>:8000/api/v1/openai`、key 填签发明文即可调 `/chat/completions`（回答自带 citations）
+6. 聊天页提问验证「带引用回答」；`/admin/usage` 看用量；`/admin/users` 建成员账号并授权知识库（成员首登同样强制改密）
 
 ## 日常运维
 

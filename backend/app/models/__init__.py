@@ -181,3 +181,22 @@ class UserKbGrant(Base):
     id = Column(Integer, primary_key=True)
     user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
     kb_id = Column(Integer, ForeignKey("knowledge_bases.id", ondelete="CASCADE"), nullable=False)
+
+
+class ApiKey(Base):
+    """开放 API 密钥（§2.2）：客户拿 Bearer key 调 OpenAI 兼容端点，把知识库嵌进自己的系统。
+    key 明文只在创建响应里出现一次，库中只落 SHA-256；作用域（kb_ids）在检索层钳制，
+    配额按自然月 token 计（从 usage_records 聚合）。"""
+    __tablename__ = "api_keys"
+
+    id = Column(Integer, primary_key=True)
+    tenant_id = T()
+    name = Column(String(128), nullable=False)
+    key_hash = Column(String(64), nullable=False, unique=True)
+    key_prefix = Column(String(24), nullable=False, default="", server_default="")  # 打码展示
+    kb_ids = J()  # NULL=全库；数组=限定库（语义同 user_kb_grants 的钳制方向）
+    monthly_token_quota = Column(Integer)  # NULL=不限
+    enabled = Column(Boolean, nullable=False, default=True, server_default="true")
+    last_used_at = Column(DateTime(timezone=True))
+    created_by = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"))
+    created_at = Column(DateTime(timezone=True), server_default=func.now())

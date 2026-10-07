@@ -17,6 +17,7 @@
 
 ## 当前进度
 
+- ✅ **开放 API（2026-10-07，阶段 2·§2.2 落地）**：客户把知识库嵌进钉钉/企微/内部系统的载体——**OpenAI 兼容端点** `POST /api/v1/openai/chat/completions`（Bearer key 认证，不走会话；请求/响应按 OpenAI chat completions 外形，另带本产品 `citations` 引用扩展字段；未命中同款兜底，MISS 不调模型不记账不耗配额）+ **API key 管理**（`api_keys` 表：key 明文只在创建响应出现一次、库中只落 SHA-256；admin 面 CRUD `/api/v1/api-keys`，作用域 kb_ids 在检索层钳制、月度 token 配额超了 429、启停/删除即吊销、用量落 `usage_records` 台账 `apikey:{id}` 名下）。契约守卫升**四轨**（401 登录面/403 admin 面/428 门闸面/轨四 Bearer 面），审计动作登记 `api_key_{created,updated,deleted}`（前后端镜像同步）。前端 `/admin/apikeys`（列表打码/新建弹窗显明文可复制/启停/删除）+ Nav「API」入口。门禁：backend **169 passed+33 子测试**（schemathesis 覆盖新端点 28→33）、frontend **78 用例**+typecheck+build 绿、sdk 闸绿；真机冒烟（建 key→兼容端点 200 OpenAI 外形→错 key 401→删除→旧 key 401→last_used_at 更新）通过
 - ✅ **首登强改密门闸（2026-10-07，初始化向导收尾）**：口令非本人设定的账号（播种 admin / 管理员代建代重置的成员）`users.must_change_password=true`，未改密前所有受护端点 **428 Precondition Required**，豁免仅 auth 三件套（me/logout/change-password）——428 与 403 分轨（403 仍专属 admin 面），契约守卫升**三轨**（401 登录面/403 admin 面/428 门闸面）。生产装配播种 admin 即带标记（首登必改密），幂等 `ADD COLUMN IF NOT EXISTS` 迁移；admin 重置成员口令自动重新置位（重置自己不置）。前端 `MustChangeGate` 全站罩强制改密框（无取消/遮罩不可关），改密成功 refresh 自动解除。门禁：backend **158 passed+28 子测试**（新增 6 用例），frontend **73 用例**+typecheck+build 绿，sdk 新鲜度闸绿；真机冒烟（播种 admin 登录→me 带 true→业务端点 428→改密→200→建库 201）通过
 - ✅ **Docker Compose 交付打包（2026-10-07，§D「半天交付」载体）**：`backend/Dockerfile`（python:3.12-slim，服务与 worker 共镜像换命令）、`frontend/Dockerfile`（node:22-alpine 三段构建 Next **standalone**，构建上下文=仓库根带 sdk-ts 源码）、根 `docker-compose.yml`（postgres+backend+frontend 基础档，redis+worker 走 `--profile arq` 异步入库档；健康检查/重启策略/数据卷 `data/`）、根 `.env.example` 交付环境模板、**[docs/DEPLOY.md](./docs/DEPLOY.md)** 一键交付手册（clone→填 .env→`docker compose up -d --build`→初始化向导→运维自检）。配套适配：uvicorn 绑定地址 `UVICORN_HOST`（容器 0.0.0.0）、Next rewrite 后端源 `BACKEND_ORIGIN`（容器打 backend:8000）、worker Redis 地址走配置（REDIS_HOST）。⚠️ 本机无 Docker，镜像构建与 compose 全链需在有 Docker 的机器上做一次交付冒烟
 - ✅ **测试基建修复（2026-10-07）**：`test_users_audit_events` 无 ORDER BY 依赖 PG 堆序的偶发翻车已修（id 升序锁定）；本机（macOS arm64 无 Docker）以 Postgres.app 16+pgvector 二进制替代 PG 容器跑通全部回归，`pytest` 默认门禁 158 passed 稳定
@@ -30,7 +31,7 @@
 - 链路：切块 → pgvector → BM25+向量 RRF → 重排 → qwen3.7-flash 带引用生成；嵌入/重排支持百炼 API 与本地双 provider，可 `.env` 切换
 - 用法（本机开发）：`docker compose up -d postgres`（只起 PG，全套容器交付见 [docs/DEPLOY.md](./docs/DEPLOY.md)）→ 回归 `cd backend && pytest`；起服务 `python -m app.main`；stage0 验证脚本已归档至 `archive/stage0/`（勿再对真库跑其 ingest）
 - 当前配置：百炼已放行全部模型，`EMBED_PROVIDER=bailian`（qwen3.7-text-embedding 1024 维 + qwen3.7-text-rerank），已重新入库；chat 间歇性 403 已内置重试
-- 下一步：阶段 1 收尾仅剩**评测集语料扩容**（文档量上百后重跑 `archive/stage0/compare_retrieval.py` 验证向量增益）；Docker 交付打包需在有 Docker 的机器上做一次交付冒烟（compose 构建+初始化向导全链）；阶段 2 剩余项按需推进（开放 API、白标设置、评测体系正式化、传图提问界面）。审计查询页「下一页」末页置灰受契约无 total 所限，作为已知限制保留（详见需求文档 §6.5-10）
+- 下一步：开放 API 已落地；阶段 2 剩余项（白标设置、评测体系正式化 Ragas、传图提问界面放开）；阶段 1 收尾仅剩**评测集语料扩容**（文档量上百后重跑 `archive/stage0/compare_retrieval.py` 验证向量增益）；Docker 交付打包需在有 Docker 的机器上做一次交付冒烟（compose 构建+初始化向导全链）。审计查询页「下一页」末页置灰受契约无 total 所限，作为已知限制保留（详见需求文档 §6.5-10）
 
 ## 契约工作流
 

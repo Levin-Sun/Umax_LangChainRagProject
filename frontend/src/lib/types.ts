@@ -12,4 +12,8 @@ export interface UsageOut { scenario: string; model: string; calls: number; prom
 // must_change_password=true 时全站被 428 门闸拦下，前端弹强改密框（首登/管理员重置口令后）
 export interface AuthMe { email: string; name: string; role: "admin" | "member"; kb_ids: number[] | null; must_change_password: boolean }
 export interface UserOut { id: number; email: string; name: string; role: string; status: string; created_at: string; kb_ids: number[] | null }
+// 开放 API key（列表形态）：明文 key 只在创建响应出现一次，列表只有打码前缀
+export interface ApiKeyOut { id: number; name: string; key_prefix: string; kb_ids: number[] | null; monthly_token_quota: number | null; enabled: boolean; last_used_at: string | null; created_at: string }
+// 创建响应 = 列表形态 + 一次性明文 key（此后任何接口都不再返回明文）
+export type ApiKeyCreated = ApiKeyOut & { key: string }
 export interface AuditOut { id: number; user_email: string; action: string; target_type: string | null; target_id: number | null; detail: Record<string, unknown>; ip: string | null; created_at: string }
