@@ -17,6 +17,7 @@ export const P = {
   user: "/api/v1/users/{user_id}",
   userGrants: "/api/v1/users/{user_id}/grants",
   audit: "/api/v1/audit",
+  branding: "/api/v1/branding",
   apiKeys: "/api/v1/api-keys",
   apiKey: "/api/v1/api-keys/{key_id}",
 } as const;

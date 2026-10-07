@@ -10,6 +10,8 @@ from pathlib import Path
 from typing import Annotated
 from uuid import uuid4
 
+import re
+
 from fastapi import Depends, FastAPI, File, HTTPException, Query, Request, Response, UploadFile
 from pydantic import BaseModel, BeforeValidator, Field, StrictBool
 from sqlalchemy import func, text as sa_text
@@ -20,8 +22,9 @@ from starlette.routing import Match
 from starlette.types import ASGIApp, Receive, Scope, Send
 
 from app.core.config import get_settings
-from app.models import (ApiKey, AuditLog, Chunk, Conversation, Document, KnowledgeBase, Message,
-                        ModelConfig, User, UserKbGrant, UserSession, UsageRecord)
+from app.models import (ApiKey, AppSetting, AuditLog, Chunk, Conversation, Document,
+                        KnowledgeBase, Message, ModelConfig, User, UserKbGrant, UserSession,
+                        UsageRecord)
 from app.services.audit import record as audit_record
 from app.services.auth import (LoginThrottle, hash_password, new_api_key, new_session_token,
                                token_digest, verify_password)
@@ -218,6 +221,21 @@ class OpenAiMessageIn(BaseModel):
 class OpenAiChatIn(BaseModel):
     model: Utf8Str | None = None
     messages: list[OpenAiMessageIn]
+
+
+def _nonblank(v):
+    if isinstance(v, str) and not v.strip():
+        raise ValueError("不能为空白")
+    return v
+
+
+BrandName = Annotated[str, BeforeValidator(_nonblank), Field(max_length=64)]
+
+
+class BrandingPut(BaseModel):
+    # 白标（§2.2）：两字段都可选——只带其一即部分更新；logo 显式 null=清除（用 model_fields_set 区分缺席）
+    brand_name: BrandName | None = None
+    logo: Utf8Str | None = None
 
 
 # 契约 fuzz 前提：真实错误码必须写进 spec，否则 schemathesis 判合法响应为违约
@@ -992,6 +1010,57 @@ def create_app(
                           "completion_tokens": usage["completion_tokens"],
                           "total_tokens": usage["prompt_tokens"] + usage["completion_tokens"]},
                 "citations": citations}   # 本产品扩展字段：OpenAI 没有但企业客户要溯源
+
+    # ---- 白标（§2.2）：品牌名+logo 后台可改。GET 匿名可读（登录页首屏要显品牌，
+    # 与 /health 同属匿名面）；PUT admin 独占全审计。app_settings 是通用键值表，
+    # 后续提示词/检索参数后台化都走它，白标只是第一个租户。
+    DEFAULT_BRAND_NAME = "Umax RAG"
+    LOGO_RE = re.compile(r"^data:image/(?:png|jpeg|jpg|webp|gif|svg\+xml);base64,[A-Za-z0-9+/=]+$")
+    LOGO_MAX = 400_000   # base64 字符数上限 ≈ 300KB 二进制，防把 DB 当图床
+
+    def _setting_get(session: Session, key: str, default) -> object:
+        row = session.get(AppSetting, key)
+        return row.value if row else default
+
+    def _setting_put(session: Session, key: str, value, by: str) -> None:
+        row = session.get(AppSetting, key)
+        if row:
+            row.value, row.updated_by = value, by
+        else:
+            session.add(AppSetting(key=key, value=value, updated_by=by))
+
+    def _branding_json(session: Session) -> dict:
+        return {"brand_name": _setting_get(session, "brand_name", DEFAULT_BRAND_NAME),
+                "logo": _setting_get(session, "logo", None)}
+
+    @app.get("/api/v1/branding")
+    def get_branding(session: Session = Depends(get_session)):
+        return _branding_json(session)
+
+    @app.put("/api/v1/branding",
+             responses={**_ERR(400, "logo 仅支持 data:image/* base64（≤400KB）"),
+                        **_ERR_GATE, **_ERR_BODY})
+    def put_branding(body: BrandingPut, request: Request,
+                     admin: User = Depends(require_admin_role),
+                     session: Session = Depends(get_session)):
+        # 先全量校验再落库：logo 非法时 brand_name 也不能写进去（部分更新原子性）
+        if "logo" in body.model_fields_set and body.logo is not None and (
+                not LOGO_RE.match(body.logo) or len(body.logo) > LOGO_MAX):
+            raise HTTPException(400, "logo 仅支持 data:image/* base64（≤400KB）")
+        fields = []
+        if body.brand_name is not None:
+            _setting_put(session, "brand_name", body.brand_name.strip(), admin.email)
+            fields.append("brand_name")
+        if "logo" in body.model_fields_set:
+            _setting_put(session, "logo", body.logo, admin.email)
+            fields.append("logo")
+        if fields:
+            # detail 只记字段名：logo 的 base64 数据体不入审计（肥且无排查价值）
+            audit_record(session, "branding_updated", user_email=admin.email,
+                         target_type="branding", detail={"fields": fields},
+                         ip=_client_ip(request))
+            session.commit()
+        return _branding_json(session)
 
     app.add_middleware(_AllowHeaderMiddleware, routes=app.router.routes)
     return app

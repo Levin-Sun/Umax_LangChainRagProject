@@ -7,7 +7,10 @@ import { useState } from "react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useAuth } from "@/lib/auth";
-import { api } from "@/lib/api";
+import { api, call } from "@/lib/api";
+import { P } from "@/lib/paths";
+import { useAsync } from "@/lib/hooks";
+import type { BrandingOut } from "@/lib/types";
 import { ThemeToggle } from "@/components/ThemeToggle";
 import ChangePasswordDialog from "@/components/ChangePasswordDialog";
 
@@ -19,6 +22,7 @@ const LINKS = [
   { href: "/admin/users", label: "用户" },
   { href: "/admin/audit", label: "审计" },
   { href: "/admin/apikeys", label: "API" },
+  { href: "/admin/branding", label: "品牌" },
 ];
 
 export function Nav() {
@@ -27,6 +31,9 @@ export function Nav() {
   const { me, loaded, logout } = useAuth();
   const [pwOpen, setPwOpen] = useState(false);
   const links = me?.role === "admin" ? LINKS : LINKS.slice(0, 1);
+  // 白标（/branding 匿名可读）：拉取失败/未返回时回落默认——Nav 不因品牌接口抖动而白屏
+  const branding = useAsync(() => call(api.GET(P.branding)) as Promise<BrandingOut>);
+  const brand = branding.data?.brand_name ?? "Umax RAG";
 
   async function onLogout() {
     try { await logout(); } finally { router.push("/"); }
@@ -34,7 +41,8 @@ export function Nav() {
 
   return (
     <nav className="flex h-12 items-center gap-1 border-b border-border/80 px-4">
-      <span className="mr-3 text-h3 font-semibold">Umax RAG</span>
+      {branding.data?.logo && <img src={branding.data.logo} alt="" className="mr-2 h-6 w-auto" />}
+      <span className="mr-3 text-h3 font-semibold">{brand}</span>
       {links.map(({ href, label }) => {
         const active = href === "/" ? path === "/" : path.startsWith(href);
         return (

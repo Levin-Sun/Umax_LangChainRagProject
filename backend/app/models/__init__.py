@@ -183,6 +183,18 @@ class UserKbGrant(Base):
     kb_id = Column(Integer, ForeignKey("knowledge_bases.id", ondelete="CASCADE"), nullable=False)
 
 
+class AppSetting(Base):
+    """运行时可改配置（§2.2 白标起步；"一切差异进配置"铁律的 DB 侧载体）。
+    key 唯一，value JSONB；读多写少，端点侧自带默认值兜底。"""
+    __tablename__ = "app_settings"
+
+    key = Column(String(64), primary_key=True)
+    value = J(nullable=False)
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(),
+                        onupdate=func.now())
+    updated_by = Column(String(255))
+
+
 class ApiKey(Base):
     """开放 API 密钥（§2.2）：客户拿 Bearer key 调 OpenAI 兼容端点，把知识库嵌进自己的系统。
     key 明文只在创建响应里出现一次，库中只落 SHA-256；作用域（kb_ids）在检索层钳制，

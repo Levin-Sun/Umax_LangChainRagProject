@@ -125,6 +125,24 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/branding": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Branding */
+        get: operations["get_branding_api_v1_branding_get"];
+        /** Put Branding */
+        put: operations["put_branding_api_v1_branding_put"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/chat": {
         parameters: {
             query?: never;
@@ -449,6 +467,13 @@ export interface components {
         Body_upload_document_api_v1_kb__kb_id__documents_post: {
             /** File */
             file: string;
+        };
+        /** BrandingPut */
+        BrandingPut: {
+            /** Brand Name */
+            brand_name?: string | null;
+            /** Logo */
+            logo?: string | null;
         };
         /** ChangePasswordIn */
         ChangePasswordIn: {
@@ -1112,6 +1137,95 @@ export interface operations {
             };
             /** @description 需要登录 */
             401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOut"];
+                };
+            };
+        };
+    };
+    get_branding_api_v1_branding_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+        };
+    };
+    put_branding_api_v1_branding_put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["BrandingPut"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description 请求体解析失败 */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOut"];
+                };
+            };
+            /** @description 需要登录 */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOut"];
+                };
+            };
+            /** @description 需要管理员权限 */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+            /** @description 首次登录必须修改初始口令 */
+            428: {
                 headers: {
                     [name: string]: unknown;
                 };

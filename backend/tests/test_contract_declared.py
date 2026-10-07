@@ -44,20 +44,24 @@ _EXPECTED_BASE = {
     ("/api/v1/api-keys/{key_id}", "delete"): {"401", "403", "404"},
     # 开放 API 兼容端点：Bearer key 认证（不走会话），401=无效 key，429=配额尽，400=无 user 消息
     ("/api/v1/openai/chat/completions", "post"): {"400", "401", "429"},
+    # 白标：GET 匿名可读（登录页要显品牌，零错误声明）；PUT admin 面
+    ("/api/v1/branding", "get"): set(),
+    ("/api/v1/branding", "put"): {"400", "401", "403"},
 }
 # 首登门闸豁免集：me（前端靠它知道该弹改密框）/logout（随时可走人）/change-password（解除门闸
 # 唯一通道）；login 不走 get_user，天然不在此门闸的声明面内
 MUST_CHANGE_EXEMPT = {("/api/v1/auth/me", "get"), ("/api/v1/auth/logout", "post"),
                       ("/api/v1/auth/change-password", "post"), ("/api/v1/auth/login", "post")}
+# 匿名可达端点：健康检查 + 登录本身 + 白标读取（登录页要显品牌）
+ANONYMOUS = {("/api/v1/health", "get"), ("/api/v1/auth/login", "post"),
+             ("/api/v1/branding", "get")}
 # Bearer 认证例外面：开放 API 端点不做会话鉴权（客户系统没有浏览器 cookie），
 # 401 语义是"无效 API key"——不参与登录面/门闸面轨，单独成轨守护
 BEARER_AUTH = {("/api/v1/openai/chat/completions", "post")}
-EXPECTED = {(p, m): codes | {"428"} if (p, m) not in MUST_CHANGE_EXEMPT | BEARER_AUTH else codes
+# 428 派生豁免 = 门闸三件套 ∪ Bearer 例外面 ∪ 匿名面（匿名端点不做会话门闸）
+EXPECTED = {(p, m): codes | {"428"}
+            if (p, m) not in MUST_CHANGE_EXEMPT | BEARER_AUTH | ANONYMOUS else codes
             for (p, m), codes in _EXPECTED_BASE.items()}
-
-# 匿名可达端点：健康检查 + 登录本身（登录声明 401 是"邮箱或口令错误"，不是受护）
-ANONYMOUS = {("/api/v1/health", "get"), ("/api/v1/auth/login", "post")}
-
 
 def _all_declared(status: str) -> set[tuple[str, str]]:
     return {(p, m) for p, ms in SPEC["paths"].items()
@@ -94,7 +98,8 @@ def test_health_declares_no_errors():
 # 新端点挂了登录却忘挂门闸（或在豁免端点上误挂 428），都在这里曝光
 def test_must_change_surface_is_exactly_428_declared():
     gate_surface = _all_declared("428")
-    want = {p for p in EXPECTED if p not in MUST_CHANGE_EXEMPT and p not in BEARER_AUTH}
+    want = {p for p in EXPECTED
+            if p not in MUST_CHANGE_EXEMPT and p not in BEARER_AUTH and p not in ANONYMOUS}
     assert gate_surface == want, f"首登门闸声明面漂移：{gate_surface ^ want}"
 
 

@@ -16,4 +16,6 @@ export interface UserOut { id: number; email: string; name: string; role: string
 export interface ApiKeyOut { id: number; name: string; key_prefix: string; kb_ids: number[] | null; monthly_token_quota: number | null; enabled: boolean; last_used_at: string | null; created_at: string }
 // 创建响应 = 列表形态 + 一次性明文 key（此后任何接口都不再返回明文）
 export type ApiKeyCreated = ApiKeyOut & { key: string }
+// 白标（/branding）：GET 匿名可读（登录页首屏），logo 是 data:image base64 或 null
+export interface BrandingOut { brand_name: string; logo: string | null }
 export interface AuditOut { id: number; user_email: string; action: string; target_type: string | null; target_id: number | null; detail: Record<string, unknown>; ip: string | null; created_at: string }
