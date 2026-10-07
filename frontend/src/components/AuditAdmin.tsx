@@ -19,7 +19,8 @@ export const AUDIT_ACTIONS = [
   "api_key_created", "api_key_updated", "api_key_deleted",
   "branding_updated", "settings_updated",
   "eval_question_created", "eval_question_updated", "eval_question_deleted",
-  "eval_run_started", "eval_run_deleted",] as const;
+  "eval_run_started", "eval_run_deleted",
+  "reindex_started",] as const;
 
 const PAGE = 50; // 与后端默认 limit 对齐；上一页/下一页按此步进
 

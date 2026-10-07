@@ -14,6 +14,8 @@ ACTIONS = {
     # 评测集与评测运行（§阶段2）：金标准是"标尺"，改标尺=改结论；删历史=删证据——两者都必须留痕
     "eval_question_created", "eval_question_updated", "eval_question_deleted",
     "eval_run_started", "eval_run_deleted",
+    # 重建索引：一次动全库向量（换 embedding 模型后必做）——破坏面不小，必须留痕
+    "reindex_started",
 }
 
 

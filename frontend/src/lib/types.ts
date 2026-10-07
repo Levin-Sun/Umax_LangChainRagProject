@@ -3,6 +3,8 @@ export interface KbOut { id: number; name: string; description: string | null }
 export interface DocOut { id: number; kb_id: number; name: string; status: DocStatus; error: string | null; size_bytes: number | null; created_at: string }
 // 批量上传逐项结果（部分成功：坏文件只在自己这行有 error）
 export interface BatchUploadItem { name: string; document: DocOut | null; error: string | null }
+// 重建索引（换 embedding 模型后全库重算）：documents=本次要重建的文档数，kb_ids null=全部知识库
+export interface ReindexOut { documents: number; kb_ids: number[] | null }
 export interface ChunkOut { id: number; chunk_index: number; content: string; has_embedding: boolean; meta: Record<string, unknown> }
 export interface Citation { n: number; doc_name: string; chunk_id: number; excerpt: string }
 export interface ChatOut { conversation_id: number; answer: string; citations: Citation[]; cited_docs: string[]; usage: { prompt_tokens: number; completion_tokens: number } }

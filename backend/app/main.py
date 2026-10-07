@@ -486,6 +486,15 @@ class EvalReportOut(BaseModel):
     markdown: str
 
 
+class ReindexIn(BaseModel):
+    kb_ids: list[ReqId] | None = None     # null=全部知识库（换 embedding 模型后真正需要的是全部）
+
+
+class ReindexOut(BaseModel):
+    documents: int                        # 本次将重建的文档数（前端据此显示"共 N 篇"）
+    kb_ids: list[int] | None
+
+
 # 契约 fuzz 前提：真实错误码必须写进 spec，否则 schemathesis 判合法响应为违约
 class ErrorOut(BaseModel):
     detail: str
@@ -1979,6 +1988,76 @@ def create_app(
                      target_type="eval_run", target_id=run_id,
                      detail={"passed": run.passed, "total": run.total}, ip=_client_ip(request))
         session.commit()
+
+    # ==================== 重建索引（§3.3 风险对策「换 embedding 模型翻车」）====================
+    def _execute_reindex(doc_ids: list[int]) -> None:
+        """逐篇重建（各自独立 session 提交）。单篇失败只记在那篇身上——一篇坏文件不该让
+        整库重建停在中途（与批量上传的"部分成功"同一口径）。整轮的异常只记日志：
+        此时各篇状态已落库，前端看得到哪些成了、哪些没有。"""
+        c = cfg.effective()
+        for doc_id in doc_ids:
+            try:
+                with Session(engine) as session:
+                    doc = session.get(Document, doc_id)
+                    if doc is None:
+                        continue         # 重建期间被删了：跳过，不是错误
+                    kb = session.get(KnowledgeBase, doc.kb_id)
+                    ingest_document(session, doc, read_stored(doc), embedder=embedder,
+                                    mineru=mineru, vision_fn=vision_fn,
+                                    caption_images=c["doc_image_caption"],
+                                    **_chunk_params(session, kb))
+            except Exception as exc:     # 文件丢了/解析器炸了：只影响这一篇
+                logging.getLogger("umax").exception("重建索引失败 doc=%s", doc_id)
+                try:
+                    with Session(engine) as s2:
+                        d2 = s2.get(Document, doc_id)
+                        if d2 is not None and d2.status != "ready":
+                            # 错误文案与 ingest_document 的失败口径一致（同一处代码路径产出的东西要同形）
+                            d2.status = "failed"
+                            d2.error = f"{exc.__class__.__name__}: {exc}"
+                            s2.commit()
+                except Exception:
+                    logging.getLogger("umax").exception("重建失败态回写也失败 doc=%s", doc_id)
+
+    @app.post("/api/v1/reindex", status_code=202, response_model=ReindexOut,
+              responses={**_ERR(400, "知识库不存在，或范围内没有可重建的文档"),
+                         **_ERR_BODY, **_ERR_GATE})
+    def reindex(body: ReindexIn, request: Request,
+                admin: User = Depends(require_license),
+                session: Session = Depends(get_session)):
+        """一键重建索引：范围内文档**全部重新解析/切块/向量化**。
+
+        为什么需要它：换 embedding 模型后旧向量与新查询不可比，全库必须从头算一遍；
+        客户"先传资料、后买 key"或中途换型都会撞上，一篇篇点「重试」不现实。
+        **语义是"全量重来"而不是"只补缺失"**——可预测比省算力重要（按钮上也这么写），
+        想只补缺失的少数文档，用单篇「重试」即可。
+
+        必须后台跑：同步档下几十上百篇要几分钟，占着请求必然被浏览器/反代掐断。
+        进度就靠文档自己的状态机（pending→parsing→ready/failed）——前端已在轮询它，不另造一套进度。
+        """
+        kb_ids = _valid_kb_ids(session, body.kb_ids)
+        q = session.query(Document)
+        if kb_ids is not None:
+            q = q.filter(Document.kb_id.in_(kb_ids))
+        docs = q.order_by(Document.id).all()
+        if not docs:
+            raise HTTPException(400, "没有可重建的文档：先上传文档")
+        # 状态先翻 pending 再返回：前端轮询立刻看到"排队中"，也不会把正在重建的库误显示成"就绪"
+        for d in docs:
+            d.status, d.error = "pending", None
+        doc_ids = [d.id for d in docs]
+        single = kb_ids[0] if kb_ids and len(kb_ids) == 1 else None
+        audit_record(session, "reindex_started", user_email=admin.email,
+                     target_type="kb" if single else "reindex", target_id=single,
+                     detail={"kb_ids": kb_ids, "documents": len(doc_ids)},
+                     ip=_client_ip(request))
+        session.commit()
+        if queue is not None:
+            for doc_id in doc_ids:       # 异步档交给 worker（同 reprocess 的口径）
+                queue.enqueue_import(doc_id)
+        else:
+            spawn_fn(lambda: _execute_reindex(doc_ids))
+        return {"documents": len(doc_ids), "kb_ids": kb_ids}
 
     app.add_middleware(_AllowHeaderMiddleware, routes=app.router.routes)
     return app

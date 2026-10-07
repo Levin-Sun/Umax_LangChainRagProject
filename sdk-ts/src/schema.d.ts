@@ -538,6 +538,34 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/reindex": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Reindex
+         * @description 一键重建索引：范围内文档**全部重新解析/切块/向量化**。
+         *
+         *     为什么需要它：换 embedding 模型后旧向量与新查询不可比，全库必须从头算一遍；
+         *     客户"先传资料、后买 key"或中途换型都会撞上，一篇篇点「重试」不现实。
+         *     **语义是"全量重来"而不是"只补缺失"**——可预测比省算力重要（按钮上也这么写），
+         *     想只补缺失的少数文档，用单篇「重试」即可。
+         *
+         *     必须后台跑：同步档下几十上百篇要几分钟，占着请求必然被浏览器/反代掐断。
+         *     进度就靠文档自己的状态机（pending→parsing→ready/failed）——前端已在轮询它，不另造一套进度。
+         */
+        post: operations["reindex_api_v1_reindex_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/retrieve": {
         parameters: {
             query?: never;
@@ -1255,6 +1283,18 @@ export interface components {
             content: string;
             /** Role */
             role: string;
+        };
+        /** ReindexIn */
+        ReindexIn: {
+            /** Kb Ids */
+            kb_ids?: number[] | null;
+        };
+        /** ReindexOut */
+        ReindexOut: {
+            /** Documents */
+            documents: number;
+            /** Kb Ids */
+            kb_ids: number[] | null;
         };
         /** RetrieveIn */
         RetrieveIn: {
@@ -3911,6 +3951,75 @@ export interface operations {
             };
             /** @description 本月配额已用尽 */
             429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOut"];
+                };
+            };
+        };
+    };
+    reindex_api_v1_reindex_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ReindexIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ReindexOut"];
+                };
+            };
+            /** @description 请求体解析失败 */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOut"];
+                };
+            };
+            /** @description 需要登录 */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOut"];
+                };
+            };
+            /** @description 需要管理员权限 */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+            /** @description 首次登录必须修改初始口令 */
+            428: {
                 headers: {
                     [name: string]: unknown;
                 };

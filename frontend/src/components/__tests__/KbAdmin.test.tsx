@@ -266,3 +266,68 @@ it("删库：库名输错时确认按钮仍禁用，取消不发请求", async (
   expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
   expect(DELETE).not.toHaveBeenCalled();
 });
+
+// ---- 重建索引（§3.3「换 embedding 模型翻车」）：确认对话框 + 范围 + 进度可见 ----
+describe("重建索引", () => {
+  const lib = { id: 1, name: "运营库", description: null };
+
+  it("本库重建：确认后才 POST，范围是本库", async () => {
+    const POST = vi.fn(async () => ok({ documents: 85, kb_ids: [1] }));
+    render(<KbAdmin api={fakeApi({
+      GET: (u) => (u === P.kb ? ok([lib]) : ok([])), POST,
+    })} />);
+    await userEvent.click(await screen.findByText("运营库"));
+    await userEvent.click(await screen.findByRole("button", { name: "重建本库索引" }));
+    // 破坏面（全库重算 + 产生费用）必须在动手前讲清楚
+    const dialog = await screen.findByRole("dialog", { name: "重建索引确认" });
+    expect(within(dialog).getByText(/全部重新解析、重新切块、重新向量化/)).toBeInTheDocument();
+    expect(within(dialog).getByText(/会真实调用模型（产生费用）/)).toBeInTheDocument();
+    expect(POST).not.toHaveBeenCalled();
+    await userEvent.click(within(dialog).getByRole("button", { name: "开始重建" }));
+    await waitFor(() => expect(POST).toHaveBeenCalledWith(P.reindex,
+      { body: { kb_ids: [1] } }));
+    expect(await screen.findByText(/已开始重建 85 篇文档的索引/)).toBeInTheDocument();
+  });
+
+  it("全部库重建：scope 传 null，取消不发请求", async () => {
+    const POST = vi.fn(async () => ok({ documents: 120, kb_ids: null }));
+    render(<KbAdmin api={fakeApi({
+      GET: (u) => (u === P.kb ? ok([lib]) : ok([])), POST,
+    })} />);
+    await userEvent.click(await screen.findByText("运营库"));
+    await userEvent.click(await screen.findByRole("button", { name: "重建全部库索引" }));
+    const dialog = await screen.findByRole("dialog", { name: "重建索引确认" });
+    expect(within(dialog).getByText(/全部知识库/)).toBeInTheDocument();
+    await userEvent.click(within(dialog).getByRole("button", { name: "取消" }));
+    expect(POST).not.toHaveBeenCalled();
+
+    await userEvent.click(screen.getByRole("button", { name: "重建全部库索引" }));
+    await userEvent.click(within(await screen.findByRole("dialog", { name: "重建索引确认" }))
+      .getByRole("button", { name: "开始重建" }));
+    await waitFor(() => expect(POST).toHaveBeenCalledWith(P.reindex, { body: { kb_ids: null } }));
+  });
+
+  it("进度条就地取材自文档状态（排队/解析中一多就显示已完成比例）", async () => {
+    const mk = (id: number, status: string): DocOut => ({ id, kb_id: 1, name: `d${id}.txt`,
+      status: status as DocOut["status"], error: null, size_bytes: 10,
+      created_at: "2026-10-08T10:00:00+00:00" });
+    render(<KbAdmin api={fakeApi({
+      GET: (u) => (u === P.kb ? ok([lib])
+        : ok([mk(1, "pending"), mk(2, "parsing"), mk(3, "ready"), mk(4, "failed")])),
+    })} />);
+    await userEvent.click(await screen.findByText("运营库"));
+    const status = await screen.findByRole("status");
+    expect(status).toHaveTextContent("索引处理中：已完成 2/4");
+    expect(status).toHaveTextContent("1 排队");
+    expect(status).toHaveTextContent("1 解析中");
+  });
+
+  it("没有在跑的文档时不显示进度行（不制造虚假的「正在忙」）", async () => {
+    const done: DocOut = { id: 1, kb_id: 1, name: "ok.txt", status: "ready", error: null,
+      size_bytes: 10, created_at: "2026-10-08T10:00:00+00:00" };
+    render(<KbAdmin api={fakeApi({ GET: (u) => (u === P.kb ? ok([lib]) : ok([done])) })} />);
+    await userEvent.click(await screen.findByText("运营库"));
+    await screen.findByText("ok.txt");
+    expect(screen.queryByRole("status")).not.toBeInTheDocument();
+  });
+});

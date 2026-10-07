@@ -1598,6 +1598,56 @@
         "title": "OpenAiMessageIn",
         "type": "object"
       },
+      "ReindexIn": {
+        "properties": {
+          "kb_ids": {
+            "anyOf": [
+              {
+                "items": {
+                  "maximum": 2147483647.0,
+                  "minimum": -2147483648.0,
+                  "type": "integer"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Kb Ids"
+          }
+        },
+        "title": "ReindexIn",
+        "type": "object"
+      },
+      "ReindexOut": {
+        "properties": {
+          "documents": {
+            "title": "Documents",
+            "type": "integer"
+          },
+          "kb_ids": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "integer"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Kb Ids"
+          }
+        },
+        "required": [
+          "documents",
+          "kb_ids"
+        ],
+        "title": "ReindexOut",
+        "type": "object"
+      },
       "RetrieveIn": {
         "properties": {
           "kb_ids": {
@@ -4902,6 +4952,85 @@
           }
         },
         "summary": "Openai Chat Completions"
+      }
+    },
+    "/api/v1/reindex": {
+      "post": {
+        "description": "一键重建索引：范围内文档**全部重新解析/切块/向量化**。\n\n为什么需要它：换 embedding 模型后旧向量与新查询不可比，全库必须从头算一遍；\n客户\"先传资料、后买 key\"或中途换型都会撞上，一篇篇点「重试」不现实。\n**语义是\"全量重来\"而不是\"只补缺失\"**——可预测比省算力重要（按钮上也这么写），\n想只补缺失的少数文档，用单篇「重试」即可。\n\n必须后台跑：同步档下几十上百篇要几分钟，占着请求必然被浏览器/反代掐断。\n进度就靠文档自己的状态机（pending→parsing→ready/failed）——前端已在轮询它，不另造一套进度。",
+        "operationId": "reindex_api_v1_reindex_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ReindexIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReindexOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            },
+            "description": "请求体解析失败"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            },
+            "description": "需要登录"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            },
+            "description": "需要管理员权限"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          },
+          "428": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            },
+            "description": "首次登录必须修改初始口令"
+          }
+        },
+        "summary": "Reindex"
       }
     },
     "/api/v1/retrieve": {

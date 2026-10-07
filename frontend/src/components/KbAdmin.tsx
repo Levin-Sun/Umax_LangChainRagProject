@@ -1,5 +1,5 @@
 "use client";
-// 知识库后台：kb 列表/新建（无删除端点，不做）→ 选中后文档表轮询 + 上传 + reprocess + chunks 抽屉
+// 知识库后台：kb 列表/新建/删除 → 选中后文档表轮询 + 上传 + 重建索引 + reprocess + chunks 抽屉
 import { useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -8,7 +8,7 @@ import AdminBanner from "@/components/AdminBanner";
 import { call, callVoid, uploadDocument, uploadDocuments, type Client } from "@/lib/api";
 import { P } from "@/lib/paths";
 import { useAsync, usePolling } from "@/lib/hooks";
-import type { BatchUploadItem, ChunkOut, DocOut, KbOut } from "@/lib/types";
+import type { BatchUploadItem, ChunkOut, DocOut, KbOut, ReindexOut } from "@/lib/types";
 
 // 0.1MB（104857.6 B）以上一律按 MB 显示（1 位小数）——KB 在几十万字节时读起来更长，
 // 也占列宽；不足 0.1MB 才用 KB（1 位小数）保证小文件仍可读
@@ -37,10 +37,13 @@ export default function KbAdmin({ api }: { api: Client }) {
   const [newName, setNewName] = useState("");
   const [busy, setBusy] = useState(false);
   const [batchErrors, setBatchErrors] = useState<string[]>([]);
+  const [notice, setNotice] = useState<string | null>(null);   // 中性提示（重建已开始等），与错误分开
   const [deleteFor, setDeleteFor] = useState<DocOut | null>(null);
   const [dragging, setDragging] = useState(false);
   const [kbDeleteFor, setKbDeleteFor] = useState<KbOut | null>(null);
   const [kbDeleteTyped, setKbDeleteTyped] = useState("");
+  // 重建索引：scope=null 表示全部知识库（换 embedding 模型后真正要重跑的就是全部）
+  const [reindexFor, setReindexFor] = useState<{ scope: number[] | null; label: string } | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
   const [actionErr, setActionErr] = useState<unknown>(null);
   const [chunks, setChunks] = useState<{ doc: DocOut; rows: ChunkOut[] } | null>(null);
@@ -49,6 +52,28 @@ export default function KbAdmin({ api }: { api: Client }) {
     () => (kbId === null ? Promise.resolve([] as DocOut[])
       : call(api.GET(P.kbDocs, { params: { path: { kb_id: kbId } } })) as Promise<DocOut[]>),
     { intervalMs: 3000, stopWhen: terminal, enabled: kbId !== null });
+  // 进度就地取材：文档状态机（排队→解析→就绪/失败）本来就是进度，不另造一套。
+  // 上传与重建共用这一条，所以文案是「索引处理中」——对两件事都成立，没有撒谎的余地。
+  const list = docs.data ?? [];
+  const inflight = list.filter((d) => d.status === "pending" || d.status === "parsing");
+  const settled = list.filter((d) => d.status === "ready" || d.status === "failed").length;
+
+  async function startReindex(scope: number[] | null) {
+    setReindexFor(null);
+    setBusy(true);
+    setActionErr(null);
+    setNotice(null);
+    try {
+      const out = await call(api.POST(P.reindex, { body: { kb_ids: scope } }) as never) as ReindexOut;
+      setNotice(`已开始重建 ${out.documents} 篇文档的索引——进度见下表，可以关掉页面（服务端会跑完）`);
+      docs.reload();   // 立刻翻到"排队中"，不然要等下一次轮询才知道动起来了
+      kbs.reload();
+    } catch (e) {
+      setActionErr(e);
+    } finally {
+      setBusy(false);
+    }
+  }
 
   async function createKb() {
     if (!newName.trim()) return;
@@ -195,6 +220,34 @@ export default function KbAdmin({ api }: { api: Client }) {
                 ))}
               </ul>
             )}
+            {notice && (
+              <p className="rounded-lg border border-border bg-muted/60 px-3 py-2 text-caption text-ink-2">
+                {notice}
+              </p>
+            )}
+            {/* 进度：文档状态机就是进度，上传与重建共用这一条（对两件事都成立，没有撒谎的余地） */}
+            {inflight.length > 0 && (
+              <p role="status" className="text-caption text-ink-2">
+                索引处理中：已完成 {settled}/{list.length}
+                （{list.filter((d) => d.status === "pending").length} 排队 ·
+                {" "}{list.filter((d) => d.status === "parsing").length} 解析中）
+              </p>
+            )}
+            {/* 重建索引（§3.3「换 embedding 模型翻车」对策）：换模型后旧向量作废，全库得重算 */}
+            <div className="flex flex-wrap items-center gap-2">
+              <Button type="button" variant="outline" className="h-8 rounded-lg" disabled={busy}
+                      onClick={() => setReindexFor({
+                        scope: [kbId], label: kbs.data?.find((k) => k.id === kbId)?.name ?? "本库" })}>
+                重建本库索引
+              </Button>
+              <Button type="button" variant="ghost" className="h-8 rounded-lg text-ink-3" disabled={busy}
+                      onClick={() => setReindexFor({ scope: null, label: "全部知识库" })}>
+                重建全部库索引
+              </Button>
+              <span className="text-caption text-ink-3">
+                换了 embedding 模型后必须重建：旧向量与新模型不可比，不重建就搜不准。
+              </span>
+            </div>
             {/* overflow-x-auto：空间被压到极限时表格在自己盒子内滚动，绝不溢出压到抽屉上 */}
             <div className="overflow-x-auto">
               <table className="w-full text-body text-ink-2">
@@ -234,6 +287,31 @@ export default function KbAdmin({ api }: { api: Client }) {
           </div>
         )}
       </section>
+      {reindexFor && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 px-4"
+             onClick={() => setReindexFor(null)}>
+          <div role="dialog" aria-label="重建索引确认" onClick={(e) => e.stopPropagation()}
+               className="w-full max-w-md space-y-3 rounded-xl border border-border bg-card px-6 py-5 shadow-lg">
+            <h3 className="text-h2 font-semibold text-ink-1">重建索引</h3>
+            <p className="text-body text-ink-2">
+              将把「{reindexFor.label}」的文档<strong>全部重新解析、重新切块、重新向量化</strong>。
+              这是换 embedding 模型之后必须做的一步——旧向量与新模型不在同一个空间里，不重建就搜不准。
+            </p>
+            <ul className="space-y-1 text-caption text-ink-3">
+              <li>· 重建期间文档显示为「排队中/解析中」，页面下方有进度，可以关掉页面</li>
+              <li>· 会真实调用模型（产生费用），文档越多越久</li>
+              <li>· 只重建向量，文档与切块的内容不会变</li>
+            </ul>
+            <div className="flex items-center gap-3 pt-1">
+              <Button className="h-9 rounded-lg" onClick={() => void startReindex(reindexFor.scope)}>
+                开始重建
+              </Button>
+              <Button variant="ghost" className="h-9 rounded-lg text-ink-3"
+                      onClick={() => setReindexFor(null)}>取消</Button>
+            </div>
+          </div>
+        </div>
+      )}
       {kbDeleteFor && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 px-4"
              onClick={() => { setKbDeleteFor(null); setKbDeleteTyped(""); }}>
@@ -242,7 +320,7 @@ export default function KbAdmin({ api }: { api: Client }) {
                className="w-full max-w-md space-y-3 rounded-xl border border-border bg-card px-6 py-5 shadow-lg">
             <h3 className="text-h2 font-semibold text-ink-1">删除知识库</h3>
             <p className="text-body text-ink-2">
-              这会删除「{kbDeleteFor.name}」及其**全部文档与索引**，且不可恢复（重新使用需再次上传）。
+              这会删除「{kbDeleteFor.name}」及其全部文档与索引，且不可恢复（重新使用需再次上传）。
               历史用量台账会保留。
             </p>
             <label className="block space-y-1">

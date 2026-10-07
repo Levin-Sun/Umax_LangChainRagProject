@@ -72,6 +72,9 @@ _EXPECTED_BASE = {
     ("/api/v1/eval/runs/{run_id}", "get"): {"401", "403", "404"},
     ("/api/v1/eval/runs/{run_id}", "delete"): {"401", "403", "404"},
     ("/api/v1/eval/runs/{run_id}/report", "get"): {"401", "403", "404"},
+    # 重建索引（§3.3「换 embedding 模型翻车」对策）：admin 面 + 授权门闸；
+    # 400=范围不存在或范围内没有文档（空转不是成功）
+    ("/api/v1/reindex", "post"): {"400", "401", "403"},
 }
 # 首登门闸豁免集：me（前端靠它知道该弹改密框）/logout（随时可走人）/change-password（解除门闸
 # 唯一通道）；login 不走 get_user，天然不在此门闸的声明面内
