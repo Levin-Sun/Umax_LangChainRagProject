@@ -136,6 +136,12 @@ class Message(Base):
 
 
 class License(Base):
+    """授权记录表（§3.3 预留）。
+
+    一期授权信任根是**厂商签名的授权文件**（Ed25519，见 services/license.py）：
+    客户改库改不了签名，所以有效性判定不依赖本表。本表留给二期 SaaS——那时由服务端
+    为各租户签发并在此落账，届时才是真正的授权台账。
+    """
     __tablename__ = "licenses"
 
     id = Column(Integer, primary_key=True)

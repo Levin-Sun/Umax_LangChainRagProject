@@ -31,6 +31,7 @@ from app.services.auth import (LoginThrottle, hash_password, new_api_key, new_se
 from app.services.citations import parse_citations
 from app.services.crypto import decrypt_secret, encrypt_secret
 from app.services.ingest import ingest_document, read_stored, supported_ext
+from app.services.license import load_license_status, machine_fingerprint
 from app.services.retrieval import retrieve
 
 
@@ -355,6 +356,9 @@ def create_app(
     queue=None,          # ImportQueue 协议；None=同步入库
     mineru=None,         # MinerUClient；None=扫描件解析直接失败并说明原因
     secret: str | None = None,  # 网关主密钥（GATEWAY_SECRET），None=读配置
+    license_public_key: str | None = None,   # License 公钥；空=开发模式不校验
+    license_file: str | None = None,         # 授权文件路径
+    machine_fingerprint: str | None = None,  # 本机指纹（测试注入；None=现算）
 ) -> FastAPI:
     app = FastAPI(title="Umax RAG", version="0.1.0")
     s = get_settings()
@@ -402,6 +406,30 @@ def create_app(
         if user.role != "admin":
             raise HTTPException(403, "需要管理员权限")
         return user
+
+    # ---- License 授权（§D）：每请求现读文件——续期换文件立即生效、签名即信任根 ----
+    lic_public_key = s.license_public_key if license_public_key is None else license_public_key
+    lic_file = Path(license_file) if license_file else s.license_file
+    lic_fingerprint = machine_fingerprint or None
+
+    def license_status():
+        return load_license_status(lic_file, lic_public_key, fingerprint=lic_fingerprint)
+
+    def require_license(admin: User = Depends(require_admin_role)) -> User:
+        """写操作门闸：授权失效即只读（读与问答照常，改密不受影响）——续费压力落在管理动作上。"""
+        st = license_status()
+        if st.enforced and not st.valid:
+            raise HTTPException(403, f"授权不可用：{st.reason}")
+        return admin
+
+    @app.get("/api/v1/license", responses={**_ERR_GATE})
+    def get_license(admin: User = Depends(require_admin_role)):
+        st = license_status()
+        return {"enforced": st.enforced, "valid": st.valid, "reason": st.reason,
+                "license_key": st.license_key, "customer": st.customer,
+                "issued_at": st.issued_at, "expires_at": st.expires_at,
+                "days_left": st.days_left, "features": st.features,
+                "machine_fingerprint": st.machine_fingerprint}
 
     def allowed_kb_ids(session: Session, user: User) -> set[int] | None:
         """None=admin 隐式全库；member=授权集合（可为空集——消费端必须区分 None 与 set()）。"""
@@ -498,7 +526,7 @@ def create_app(
     @app.post("/api/v1/users", status_code=201,
               responses={**_ERR(400, "email 重复或 role 非法"), **_ERR_GATE, **_ERR_BODY})
     def create_user_api(body: UserIn, request: Request,
-                        admin: User = Depends(require_admin_role), session: Session = Depends(get_session)):
+                        admin: User = Depends(require_license), session: Session = Depends(get_session)):
         if body.role not in ROLES:
             raise HTTPException(400, "role 仅支持 admin/member")
         if session.query(User).filter_by(tenant_id="default", email=body.email).first():
@@ -517,7 +545,7 @@ def create_app(
                responses={**_ERR(400, "不能对当前登录管理员降级/禁用，role/status 非法"),
                           **_ERR(404, "用户不存在"), **_ERR_GATE, **_ERR_BODY})
     def patch_user(user_id: PathId, body: UserPatchIn, request: Request,
-                   admin: User = Depends(require_admin_role), session: Session = Depends(get_session)):
+                   admin: User = Depends(require_license), session: Session = Depends(get_session)):
         u = session.get(User, user_id)
         if not u:
             raise HTTPException(404, "用户不存在")
@@ -558,7 +586,7 @@ def create_app(
                 responses={**_ERR(400, "不能删除当前登录管理员"), **_ERR(404, "用户不存在"),
                            **_ERR_GATE})
     def delete_user(user_id: PathId, request: Request,
-                    admin: User = Depends(require_admin_role),
+                    admin: User = Depends(require_license),
                     session: Session = Depends(get_session)):
         u = session.get(User, user_id)
         if not u:
@@ -589,7 +617,7 @@ def create_app(
              responses={**_ERR(400, "管理员无授权表 / 知识库不存在"), **_ERR(404, "用户不存在"),
                         **_ERR_GATE, **_ERR_BODY})
     def put_grants(user_id: PathId, body: GrantsIn, request: Request,
-                   admin: User = Depends(require_admin_role), session: Session = Depends(get_session)):
+                   admin: User = Depends(require_license), session: Session = Depends(get_session)):
         u = session.get(User, user_id)
         if not u:
             raise HTTPException(404, "用户不存在")
@@ -642,7 +670,7 @@ def create_app(
     @app.post("/api/v1/kb", status_code=201,
               responses={**_ERR_BODY, **_ERR_GATE})
     def create_kb(body: KbIn, request: Request,
-                  admin: User = Depends(require_admin_role),
+                  admin: User = Depends(require_license),
                   session: Session = Depends(get_session)):
         kb = KnowledgeBase(tenant_id="default", name=body.name, description=body.description,
                            embedding_model=s.embedding_model, chunk_target=s.chunk_target)
@@ -680,7 +708,7 @@ def create_app(
               responses={**_ERR(404, "知识库不存在"), **_ERR(415, "不支持的文件类型"),
                          **_ERR_BODY, **_ERR_GATE})
     def upload_document(kb_id: PathId, request: Request, file: UploadFile = File(...),
-                        admin: User = Depends(require_admin_role),
+                        admin: User = Depends(require_license),
                         session: Session = Depends(get_session)):
         kb = session.get(KnowledgeBase, kb_id)
         if not kb:
@@ -738,7 +766,7 @@ def create_app(
     @app.patch("/api/v1/documents/{doc_id}",
                responses={**_ERR(404, "文档不存在"), **_ERR_BODY, **_ERR_GATE})
     def patch_document(doc_id: PathId, body: DocPatchIn,
-                       admin: User = Depends(require_admin_role),
+                       admin: User = Depends(require_license),
                        session: Session = Depends(get_session)):
         # 有意不记审计（spec §5 / 任务 5 表）：状态机内部推进（worker 回写 pending/ready/failed），
         # 不是人工写操作——记了只会淹没真实操作事件
@@ -754,7 +782,7 @@ def create_app(
     @app.post("/api/v1/documents/{doc_id}/reprocess", status_code=202,
               responses={**_ERR(404, "文档不存在"), **_ERR_GATE})
     def reprocess(doc_id: PathId, request: Request,
-                  admin: User = Depends(require_admin_role),
+                  admin: User = Depends(require_license),
                   session: Session = Depends(get_session)):
         doc = session.get(Document, doc_id)
         if not doc:
@@ -922,7 +950,7 @@ def create_app(
               responses={**_ERR(400, "scenario 非法"), **_ERR(503, "未配置 GATEWAY_SECRET"),
                          **_ERR_GATE})
     def create_model(body: ModelIn, request: Request,
-                     admin: User = Depends(require_admin_role),
+                     admin: User = Depends(require_license),
                      session: Session = Depends(get_session)):
         if body.scenario not in SCENARIOS:
             raise HTTPException(400, f"scenario 仅支持 {'/'.join(sorted(SCENARIOS))}")
@@ -951,7 +979,7 @@ def create_app(
                responses={**_ERR(400, "scenario 非法"), **_ERR(404, "模型配置不存在"),
                           **_ERR(503, "未配置 GATEWAY_SECRET"), **_ERR_GATE})
     def patch_model(model_id: PathId, body: ModelPatchIn, request: Request,
-                    admin: User = Depends(require_admin_role),
+                    admin: User = Depends(require_license),
                     session: Session = Depends(get_session)):
         m = session.get(ModelConfig, model_id)
         if not m:
@@ -976,7 +1004,7 @@ def create_app(
     @app.delete("/api/v1/models/{model_id}", status_code=204,
                 responses={**_ERR(503, "未配置 GATEWAY_SECRET"), **_ERR_GATE})
     def delete_model(model_id: PathId, request: Request,
-                     admin: User = Depends(require_admin_role),
+                     admin: User = Depends(require_license),
                      session: Session = Depends(get_session)):
         m = session.get(ModelConfig, model_id)
         if m:
@@ -1037,7 +1065,7 @@ def create_app(
     @app.post("/api/v1/api-keys", status_code=201,
               responses={**_ERR(400, "存在不存在的知识库 id"), **_ERR_GATE, **_ERR_BODY})
     def create_api_key(body: ApiKeyIn, request: Request,
-                       admin: User = Depends(require_admin_role),
+                       admin: User = Depends(require_license),
                        session: Session = Depends(get_session)):
         ids = _valid_kb_ids(session, body.kb_ids)
         plain, digest = new_api_key()
@@ -1065,7 +1093,7 @@ def create_app(
                responses={**_ERR(400, "存在不存在的知识库 id"), **_ERR(404, "API key 不存在"),
                           **_ERR_GATE, **_ERR_BODY})
     def patch_api_key(key_id: PathId, body: ApiKeyPatchIn, request: Request,
-                      admin: User = Depends(require_admin_role),
+                      admin: User = Depends(require_license),
                       session: Session = Depends(get_session)):
         k = session.get(ApiKey, key_id)
         if not k:
@@ -1093,7 +1121,7 @@ def create_app(
     @app.delete("/api/v1/api-keys/{key_id}", status_code=204,
                 responses={**_ERR(404, "API key 不存在"), **_ERR_GATE})
     def delete_api_key(key_id: PathId, request: Request,
-                       admin: User = Depends(require_admin_role),
+                       admin: User = Depends(require_license),
                        session: Session = Depends(get_session)):
         k = session.get(ApiKey, key_id)
         if not k:
@@ -1177,7 +1205,7 @@ def create_app(
              responses={**_ERR(400, "logo 仅支持 data:image/* base64（≤400KB）"),
                         **_ERR_GATE, **_ERR_BODY})
     def put_branding(body: BrandingPut, request: Request,
-                     admin: User = Depends(require_admin_role),
+                     admin: User = Depends(require_license),
                      session: Session = Depends(get_session)):
         # 先全量校验再落库：logo 非法时 brand_name 也不能写进去（部分更新原子性）
         if "logo" in body.model_fields_set and body.logo is not None and (
@@ -1239,7 +1267,7 @@ def build_production_app(upload_dir: str = "uploads",
             import logging
             logging.getLogger("umax").warning(
                 "已播种初始管理员 %s（ADMIN_EMAIL/ADMIN_PASSWORD）——首次登录强制修改口令", s.admin_email)
-    chat_fn = embedder = None
+    chat_fn = embedder = vision_fn = None
     bailian_chat = bailian_embedder = None
     if s.dashscope_api_key:
         # .env 百炼直连（阶段 0 链路）：作为网关表未配置时的开发/冒烟兜底
@@ -1262,6 +1290,8 @@ def build_production_app(upload_dir: str = "uploads",
     else:
         chat_fn, embedder = bailian_chat, bailian_embedder
     mineru = MinerUClient(s.mineru_base_url) if s.mineru_base_url else None
+    # 装配可见性（售后排查"后台配了模型为什么没生效"的第一手依据；测试也据此守护漏传）
+    # 历史教训：vision_fn 曾在网关分支里算出来却没传进 create_app，视觉能力静默空转
     queue = None
     if s.queue_backend == "arq":
         from app.queue import ArqQueue
@@ -1272,8 +1302,15 @@ def build_production_app(upload_dir: str = "uploads",
 
         logging.getLogger("umax").warning(
             "ADMIN_EMAIL/ADMIN_PASSWORD 未配置：将按默认账号播种初始管理员，部署后必须登录改密")
-    return create_app(engine=engine, embedder=embedder, chat_fn=chat_fn,
-                      upload_dir=upload_dir, mineru=mineru, queue=queue)
+    app = create_app(engine=engine, embedder=embedder, chat_fn=chat_fn,
+                     upload_dir=upload_dir, mineru=mineru, queue=queue,
+                     vision_fn=vision_fn, license_public_key=s.license_public_key,
+                     license_file=str(s.license_file))
+    app.state.wired = {"chat": chat_fn is not None, "embedder": embedder is not None,
+                       "vision": vision_fn is not None, "mineru": mineru is not None,
+                       "queue": queue is not None,
+                       "license_enforced": bool(s.license_public_key)}
+    return app
 
 
 def main() -> None:

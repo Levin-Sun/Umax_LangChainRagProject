@@ -46,6 +46,8 @@ _EXPECTED_BASE = {
     ("/api/v1/api-keys/{key_id}", "delete"): {"401", "403", "404"},
     # 开放 API 兼容端点：Bearer key 认证（不走会话），401=无效 key，429=配额尽，400=无 user 消息
     ("/api/v1/openai/chat/completions", "post"): {"400", "401", "429"},
+    # 授权状态：admin 面只读（客户据此拿指纹申请授权；到期时写操作 403）
+    ("/api/v1/license", "get"): {"401", "403"},
     # 白标：GET 匿名可读（登录页要显品牌，零错误声明）；PUT admin 面
     ("/api/v1/branding", "get"): set(),
     ("/api/v1/branding", "put"): {"400", "401", "403"},

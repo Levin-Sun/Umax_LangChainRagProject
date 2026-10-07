@@ -48,10 +48,16 @@ services:
       REDIS_HOST: redis
       MINERU_BASE_URL: ${MINERU_BASE_URL:-}
       UVICORN_HOST: 0.0.0.0
+      # License 授权（§D）：留空＝开发模式不校验
+      LICENSE_PUBLIC_KEY: ${LICENSE_PUBLIC_KEY:-}
+      LICENSE_FILE: /app/license.json
+      MACHINE_FINGERPRINT: ${MACHINE_FINGERPRINT:-}
     ports:
       - "${BACKEND_PORT:-8000}:8000"
     volumes:
       - ./data/uploads:/app/uploads
+      # 授权文件由交付时放置（不存在则视为无授权，配了公钥就会拦写操作）
+      - ./license.json:/app/license.json:ro
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request;urllib.request.urlopen('http://127.0.0.1:8000/api/v1/health')"]
       interval: 10s

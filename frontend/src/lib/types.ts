@@ -18,4 +18,6 @@ export interface ApiKeyOut { id: number; name: string; key_prefix: string; kb_id
 export type ApiKeyCreated = ApiKeyOut & { key: string }
 // 白标（/branding）：GET 匿名可读（登录页首屏），logo 是 data:image base64 或 null
 export interface BrandingOut { brand_name: string; logo: string | null }
+// 授权状态（/license，admin 面）：enforced=false 表示未启用校验（开发模式）
+export interface LicenseOut { enforced: boolean; valid: boolean; reason: string | null; license_key: string | null; customer: string | null; issued_at: string | null; expires_at: string | null; days_left: number | null; features: Record<string, unknown>; machine_fingerprint: string }
 export interface AuditOut { id: number; user_email: string; action: string; target_type: string | null; target_id: number | null; detail: Record<string, unknown>; ip: string | null; created_at: string }

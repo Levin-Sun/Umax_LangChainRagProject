@@ -38,6 +38,11 @@ class Settings(BaseSettings):
     # 语料目录（冒烟测试用真实脏文档）
     docs_dir: Path = Path(__file__).resolve().parents[3] / "DirtyDocs"
 
+    # ---- License 授权（§D）----
+    # 公钥留空＝开发模式不校验；生产部署填厂商下发的公钥（见 docs/DEPLOY.md 授权步骤）
+    license_public_key: str = ""
+    license_file: Path = Path(__file__).resolve().parents[3] / "license.json"
+
     # ---- 切块与检索参数 ----
     chunk_target: int = 300
     chunk_min: int = 60

@@ -45,6 +45,29 @@ docker compose up -d --build
    `http://<服务器IP>:8000/api/v1/openai`、key 填签发明文即可调 `/chat/completions`（回答自带 citations）
 6. 聊天页提问验证「带引用回答」；`/admin/usage` 看用量；`/admin/users` 建成员账号并授权知识库（成员首登同样强制改密）
 
+## 第 4 步：License 授权（商业闭环；开发/试用可跳过）
+
+授权文件用厂商私钥签名，客户部署只带公钥验签——**授权文件自身即信任根**，改库或手改文件内容都会验签失败。
+
+1. 客户打开「管理后台 → 授权」，复制页面上的**机器指纹**发给服务商
+2. 服务商在自己机器上签发（**私钥绝不外发**）：
+   ```bash
+   cd backend
+   python scripts/issue_license.py keygen          # 首次：生成密钥对，私钥存档好
+   python scripts/issue_license.py issue --private-key <私钥> \
+       --customer "客户名" --fingerprint <客户指纹> --days 365 --out license.json
+   ```
+3. 客户把 `license.json` 放到部署根目录，`.env` 填写公钥并固定指纹：
+   ```
+   LICENSE_PUBLIC_KEY=<服务商下发的公钥>
+   MACHINE_FINGERPRINT=<交付时固定下来的标识>
+   ```
+4. 重启：`docker compose up -d`，回到「授权」页确认状态为**有效**
+
+**行为**：授权到期或失效后系统转为**只读**——问答与查看照常，建库/上传/改模型等管理操作返回 403 并说明原因；自助改密不受影响。续期只需替换 `license.json`（每请求现读，**无需重启**）。
+
+> ⚠️ `MACHINE_FINGERPRINT` 必须显式设置：容器重建会改变容器内 machine-id，不固定会导致授权突然失效。
+
 ## 日常运维
 
 | 操作 | 命令 |
@@ -65,4 +88,4 @@ docker compose up -d --build
 
 - HTTPS 由客户侧反代终结（nginx/caddy 对 3000 端口），编排内不自带证书
 - MinerU 扫描件解析为可选外挂服务（`MINERU_BASE_URL`），未启用时上传扫描件会明确报错提示
-- License 校验、白标设置按计划在后续阶段接入
+- 白标设置在「管理后台 → 品牌」；License 见上第 4 步
