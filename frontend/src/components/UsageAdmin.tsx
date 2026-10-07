@@ -32,7 +32,7 @@ export default function UsageAdmin({ api }: { api: Client }) {
       </div>
       <div className="space-y-2">
         <h3 className="text-h2 font-semibold">按人用量（今日 / 本月）</h3>
-        <div className="overflow-hidden rounded-xl border border-border bg-card shadow-sm">
+        <div className="overflow-x-auto rounded-xl border border-border bg-card shadow-sm">
           <table className="w-full text-body text-ink-2">
             <thead><tr className="border-b border-border bg-muted/60 text-left text-h3 font-medium text-ink-2">
               <th className="px-4 py-2.5 font-medium">用户</th>
@@ -63,7 +63,7 @@ export default function UsageAdmin({ api }: { api: Client }) {
         </div>
       </div>
       <h3 className="text-h2 font-semibold">按场景 / 模型</h3>
-      <div className="overflow-hidden rounded-xl border border-border bg-card shadow-sm">
+      <div className="overflow-x-auto rounded-xl border border-border bg-card shadow-sm">
         <table className="w-full text-body text-ink-2">
           <thead><tr className="border-b border-border bg-muted/60 text-left text-h3 font-medium text-ink-2">
             <th className="px-4 py-2.5 font-medium">场景</th><th className="py-2.5 font-medium">模型</th>

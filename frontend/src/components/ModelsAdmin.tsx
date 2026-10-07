@@ -75,7 +75,7 @@ export default function ModelsAdmin({ api }: { api: Client }) {
   return (
     <div className="mx-auto w-full max-w-5xl space-y-6 px-6 py-6">
       <AdminBanner error={list.error ?? rowErr} />
-      <div className="overflow-hidden rounded-xl border border-border bg-card shadow-sm">
+      <div className="overflow-x-auto rounded-xl border border-border bg-card shadow-sm">
         <table className="w-full text-body text-ink-2">
           <thead><tr className="border-b border-border bg-muted/60 text-left text-h3 font-medium text-ink-2">
             <th className="px-4 py-2.5 font-medium">场景</th><th className="py-2.5 font-medium">模型</th>

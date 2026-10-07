@@ -58,7 +58,7 @@ export default function AuditAdmin({ api }: { api: Client }) {
         </label>
         <Button type="submit" className="h-9 rounded-lg">查询</Button>
       </form>
-      <div className="overflow-hidden rounded-xl border border-border bg-card shadow-sm">
+      <div className="overflow-x-auto rounded-xl border border-border bg-card shadow-sm">
         <table className="w-full text-body text-ink-2">
           <thead><tr className="border-b border-border bg-muted/60 text-left text-h3 font-medium text-ink-2">
             <th className="px-4 py-2.5 font-medium">时间</th><th className="py-2.5 font-medium">用户</th>

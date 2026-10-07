@@ -36,3 +36,24 @@ describe("style guard", () => {
     expect(violations).toEqual([]);
   });
 });
+
+// 溢出守护（真机踩过）：表格必须包在 overflow-x-auto 容器里。
+// 起因：知识库页抽屉是固定宽兄弟列，窄屏下 auto 表格布局的最小内容宽度撑破所在列，
+// 内容直接画到抽屉上（文字重叠、列挤在一起）。表格能在自己盒子里横向滚动就不会外溢。
+it("每个 table 都包在 overflow-x-auto 容器中", () => {
+  const root = path.resolve(__dirname, "..");
+  const violations: string[] = [];
+  for (const file of collecttsx(root)) {
+    const src = fs.readFileSync(file, "utf8");
+    for (const m of src.matchAll(/<table/g)) {
+      const before = src.slice(0, m.index);
+      const lastDiv = before.lastIndexOf("<div");
+      const tag = lastDiv >= 0 ? before.slice(lastDiv, before.indexOf(">", lastDiv) + 1) : "";
+      if (!tag.includes("overflow-x-auto")) {
+        const line = before.split("\n").length;
+        violations.push(`${path.relative(root, file)}:${line} 表格缺 overflow-x-auto 容器`);
+      }
+    }
+  }
+  expect(violations).toEqual([]);
+});

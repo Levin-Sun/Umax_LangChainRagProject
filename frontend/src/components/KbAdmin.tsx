@@ -10,9 +10,20 @@ import { P } from "@/lib/paths";
 import { useAsync, usePolling } from "@/lib/hooks";
 import type { BatchUploadItem, ChunkOut, DocOut, KbOut } from "@/lib/types";
 
-// 上传时间按本地时区展示到分钟：客户看的是"什么时候传的"，秒级精度没有意义
-const fmtTime = (iso: string) => new Date(iso).toLocaleString(undefined, {
-  year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" });
+const fmtBytes = (n: number | null) => {
+  if (!n) return "—";
+  if (n < 1024) return `${n} B`;
+  if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`;
+  return `${(n / 1024 / 1024).toFixed(1)} MB`;
+};
+
+// 上传时间按本地时区展示到分钟：客户看的是"什么时候传的"，秒级精度没有意义。
+// 用紧凑固定格式而非 locale 默认（后者会给 "10/08/2026, 01:55 AM"，更长且在窄屏把表格撑出横向滚动）
+const fmtTime = (iso: string) => {
+  const d = new Date(iso);
+  const p = (n: number) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`;
+};
 
 const STATUS_LABEL: Record<string, string> = {
   pending: "排队中", parsing: "解析中", ready: "就绪", failed: "失败",
@@ -97,7 +108,9 @@ export default function KbAdmin({ api }: { api: Client }) {
   }
 
   return (
-    <div className="mx-auto flex w-full max-w-5xl gap-6 px-6 py-6">
+    // 抽屉占固定宽（360）+ 库列表（224）：容器仍卡 max-w-5xl 时中间列只剩 ~370px，
+    // 表格最小内容宽度撑破所在列、直接画到抽屉上（真机踩过）。开抽屉时放宽上限。
+    <div className={`mx-auto flex w-full gap-6 px-6 py-6 ${chunks ? "max-w-[1700px]" : "max-w-5xl"}`}>
       <aside className="w-56 shrink-0 space-y-3">
         <form className="flex gap-2" onSubmit={(e) => { e.preventDefault(); createKb(); }}>
           <Input aria-label="新知识库名" placeholder="新知识库名" className="h-9 rounded-lg border-border"
@@ -126,7 +139,7 @@ export default function KbAdmin({ api }: { api: Client }) {
         )}
         {kbId !== null && (
           <div className="space-y-3 rounded-xl border border-border bg-card px-6 py-5 shadow-sm">
-            <div className="flex items-center gap-3">
+            <div className="flex flex-wrap items-center gap-3">
               <label className="text-body text-ink-2">
                 <input type="file" accept=".txt,.md,.pdf,.docx,.xlsx,.pptx" disabled={busy} multiple
                        aria-label="上传文档"
@@ -143,19 +156,26 @@ export default function KbAdmin({ api }: { api: Client }) {
                 ))}
               </ul>
             )}
-            <table className="w-full text-body text-ink-2">
-              <thead><tr className="border-b border-border text-left text-h3 font-medium text-ink-2">
-                <th className="py-2 font-medium">文档</th><th className="font-medium">状态</th>
-                <th className="font-medium">大小</th><th className="font-medium">上传时间</th><th /></tr></thead>
+            {/* overflow-x-auto：空间被压到极限时表格在自己盒子内滚动，绝不溢出压到抽屉上 */}
+            <div className="overflow-x-auto">
+              <table className="w-full text-body text-ink-2">
+                <thead><tr className="border-b border-border text-left text-h3 font-medium text-ink-2">
+                  <th className="whitespace-nowrap py-2 pr-3 font-medium xl:pr-4">文档</th>
+                  <th className="whitespace-nowrap pr-3 font-medium xl:pr-4">状态</th>
+                  <th className="whitespace-nowrap pr-3 text-right font-medium xl:pr-4">大小</th>
+                  <th className="whitespace-nowrap pr-3 font-medium xl:pr-4">上传时间</th><th /></tr></thead>
               <tbody>
                 {(docs.data ?? []).map((d) => (
                   <tr key={d.id} className="border-b border-border last:border-0">
-                    <td className="py-2.5">{d.name}</td>
-                    <td><Badge variant={d.status === "failed" ? "destructive" : "secondary"} className="rounded-full font-normal">
+                    <td className="py-2.5 pr-3 xl:pr-4">
+                      {/* max-w 必须落在单元格内层 block 上：auto 表格布局会忽略 td 自身的 max-width */}
+                      <span className="block max-w-40 truncate xl:max-w-72" title={d.name}>{d.name}</span>
+                    </td>
+                    <td className="pr-3 xl:pr-4"><Badge variant={d.status === "failed" ? "destructive" : "secondary"} className="whitespace-nowrap rounded-full font-normal">
                       {STATUS_LABEL[d.status] ?? d.status}</Badge>
                       {d.error && <p className="mt-0.5 max-w-60 truncate text-caption text-destructive" title={d.error}>{d.error}</p>}</td>
-                    <td className="font-medium">{d.size_bytes ?? 0} B</td>
-                    <td className="text-ink-3">{fmtTime(d.created_at)}</td>
+                    <td className="whitespace-nowrap pr-3 text-right font-medium xl:pr-4">{fmtBytes(d.size_bytes)}</td>
+                    <td className="whitespace-nowrap pr-3 text-ink-3 xl:pr-4">{fmtTime(d.created_at)}</td>
                     <td className="space-x-1 text-right">
                       {d.status === "failed" && <Button size="sm" variant="outline" className="h-7 rounded-lg" onClick={() => reprocess(d)}>重试入库</Button>}
                       <Button size="sm" variant="ghost" className="h-7 rounded-lg text-ink-1" onClick={() => viewChunks(d)}>看切块</Button>
@@ -164,8 +184,9 @@ export default function KbAdmin({ api }: { api: Client }) {
                     </td>
                   </tr>
                 ))}
-              </tbody>
-            </table>
+                </tbody>
+              </table>
+            </div>
             {docs.loading && !docs.data && <p className="text-caption text-ink-3">载入…</p>}
             <AdminBanner error={docs.error} />
           </div>
@@ -191,7 +212,7 @@ export default function KbAdmin({ api }: { api: Client }) {
         </div>
       )}
       {chunks && (
-        <aside className="w-[380px] shrink-0 space-y-3 overflow-y-auto border-l border-border/80 p-4">
+        <aside className="w-[340px] shrink-0 space-y-3 overflow-y-auto border-l border-border/80 p-4 xl:w-[360px]">
           <div className="flex items-center justify-between">
             <h3 className="text-h3 font-medium text-ink-2">{chunks.doc.name}：{chunks.rows.length} 块</h3>
             <Button size="sm" variant="ghost" className="h-7 px-2 text-ink-3" onClick={() => setChunks(null)}>关闭</Button>
