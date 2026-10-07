@@ -871,6 +871,7 @@ export interface components {
             expect_any: string[];
             /** Id */
             id: number;
+            judge?: components["schemas"]["EvalJudgeVerdictOut"] | null;
             /** Latency Ms */
             latency_ms: number | null;
             /** Note */
@@ -885,6 +886,64 @@ export interface components {
             rank: number;
             /** Top Docs */
             top_docs: string[];
+        };
+        /**
+         * EvalJudgeStatsOut
+         * @description 裁判汇总（与确定性判据分栏呈现）。judged=判过的题数，scored=判词能解析的题数——
+         *     两者不等说明裁判输出格式有问题，那是裁判的毛病，不该算在回答头上。
+         */
+        EvalJudgeStatsOut: {
+            /**
+             * Faithful
+             * @default 0
+             */
+            faithful: number;
+            /**
+             * Faithful Rate
+             * @default 0
+             */
+            faithful_rate: number;
+            /**
+             * Judged
+             * @default 0
+             */
+            judged: number;
+            /** Model */
+            model?: string | null;
+            /**
+             * Relevance
+             * @default 0
+             */
+            relevance: number;
+            /**
+             * Relevance Rate
+             * @default 0
+             */
+            relevance_rate: number;
+            /**
+             * Scored
+             * @default 0
+             */
+            scored: number;
+        };
+        /**
+         * EvalJudgeVerdictOut
+         * @description 单题判词（faithful/relevance 为 None=判词无法解析，不是 0 分）。
+         */
+        EvalJudgeVerdictOut: {
+            /** Faithful */
+            faithful?: number | null;
+            /** Model */
+            model?: string | null;
+            /** Raw */
+            raw?: string | null;
+            /**
+             * Reason
+             * @default
+             */
+            reason: string;
+            /** Relevance */
+            relevance?: number | null;
         };
         /**
          * EvalMetricsOut
@@ -913,6 +972,7 @@ export interface components {
              * @default 0
              */
             hit_rate: number;
+            judge?: components["schemas"]["EvalJudgeStatsOut"];
             /**
              * Mrr
              * @default 0
@@ -1033,6 +1093,8 @@ export interface components {
             id: number;
             /** Items */
             items: components["schemas"]["EvalItemOut"][];
+            /** Judge */
+            judge: boolean;
             /** Kb Ids */
             kb_ids: number[] | null;
             metrics: components["schemas"]["EvalMetricsOut"];
@@ -1053,6 +1115,11 @@ export interface components {
         };
         /** EvalRunIn */
         EvalRunIn: {
+            /**
+             * Judge
+             * @default false
+             */
+            judge: boolean;
             /** Kb Ids */
             kb_ids?: number[] | null;
         };
@@ -1070,6 +1137,8 @@ export interface components {
             finished_at: string | null;
             /** Id */
             id: number;
+            /** Judge */
+            judge: boolean;
             /** Kb Ids */
             kb_ids: number[] | null;
             metrics: components["schemas"]["EvalMetricsOut"];

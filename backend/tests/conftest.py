@@ -15,6 +15,20 @@ def _admin_url() -> str:
     return settings.psycopg_url("postgres")
 
 
+@pytest.fixture(autouse=True)
+def _settings_cache_isolated():
+    """每个用例后清掉 get_settings 的 lru_cache。
+
+    真机教训（2026-10-08）：有用例 monkeypatch.setenv 后调 get_settings()，把"被改过的环境"
+    缓存了下来，而清缓存那句写在用例末尾——一旦中间断言失败就永远执行不到，缓存里那份
+    Settings 便带着 monkeypatch 的值活下去，后续用例集体把 LICENSE_PUBLIC_KEY 当成已配置
+    → 所有写操作 403。**一个真失败被放大成 49 个无关失败**，排查成本全落在噪声里。
+    放进 autouse teardown：无论用例怎么结束都清得掉。
+    """
+    yield
+    get_settings.cache_clear()
+
+
 @pytest.fixture(scope="session")
 def engine() -> Engine:
     """会话级：重建测试库（drop 重建=最快迁移），建 vector 扩展，create_all。"""

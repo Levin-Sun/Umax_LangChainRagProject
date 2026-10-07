@@ -30,9 +30,10 @@ def _sync_spawn(fn):
     fn()
 
 
-def _client(engine, tmp_path, *, chat_fn=_chat, spawn=_sync_spawn):
+def _client(engine, tmp_path, *, chat_fn=_chat, spawn=_sync_spawn, judge_fn=None):
     return TestClient(create_app(engine=engine, secret="k-secret", embedder=None,
-                                 chat_fn=chat_fn, upload_dir=str(tmp_path), spawn=spawn))
+                                 chat_fn=chat_fn, upload_dir=str(tmp_path), spawn=spawn,
+                                 judge_fn=judge_fn))
 
 
 @pytest.fixture
@@ -233,6 +234,84 @@ def test_disabled_questions_are_skipped(client, engine):
     client.patch(f"/api/v1/eval/questions/{other['id']}", json={"enabled": False})
     run = client.post("/api/v1/eval/runs", json={"kb_ids": [kb["id"]]}).json()
     assert run["total"] == 1 and run["metrics"]["pass_rate"] == 1.0
+
+
+# ---- 裁判模型（§阶段2 Ragas 侧）：软指标，永不并入通过率 ----
+def _judge(question, answer, hits):
+    return {"faithful": 1, "relevance": 0, "reason": "没回答问题", "model": "judge-1",
+            "prompt_tokens": 100, "completion_tokens": 20}
+
+
+def test_judge_scores_recorded_separately_from_pass_rate(engine, db, tmp_path):
+    """裁判分单独成段：同一轮里通过率仍是确定性判据算出来的，裁判只加一节软指标。"""
+    c = _client(engine, tmp_path, judge_fn=_judge)
+    seed_user(engine, *ADMIN, role="admin")
+    login(c, *ADMIN)
+    kb = _mk_kb_with_doc(c)
+    _mk_question(c)
+    run = c.post("/api/v1/eval/runs", json={"kb_ids": [kb["id"]], "judge": True}).json()
+    assert run["judge"] is True
+    m = run["metrics"]
+    assert (m["pass_rate"], m["hit_rate"]) == (1.0, 1.0)      # 硬指标不受裁判影响
+    assert m["judge"]["judged"] == 1 and m["judge"]["scored"] == 1
+    assert (m["judge"]["faithful"], m["judge"]["relevance"]) == (1, 0)
+    assert m["judge"]["model"] == "judge-1"
+    item = c.get(f"/api/v1/eval/runs/{run['id']}").json()["items"][0]
+    assert item["judge"]["reason"] == "没回答问题" and item["judge"]["faithful"] == 1
+    # 裁判也是真花钱的调用：与生成分别记一笔（同一轮共 2 条 chat 台账）
+    with Session(engine) as s:
+        rows = s.query(UsageRecord).filter_by(scenario="chat").all()
+    assert sorted(r.model for r in rows) == ["fake-chat", "judge-1"]
+    # 报告里裁判分单独一段，并写明它为什么不并入通过率
+    md = c.get(f"/api/v1/eval/runs/{run['id']}/report").json()["markdown"]
+    assert "## 裁判评分" in md and "faithfulness（答案是否只依据资料）：1/1（100%）" in md
+    assert "裁判分**不并入通过率**" in md and "裁判：faithfulness=1 relevance=0" in md
+
+
+def test_run_without_judge_flag_has_no_judge_scores(engine, db, tmp_path):
+    """默认不请裁判：不花那份钱，指标里也如实留着 0/None（区分"没启用"与"判失败"）。"""
+    c = _client(engine, tmp_path, judge_fn=_judge)
+    seed_user(engine, *ADMIN, role="admin")
+    login(c, *ADMIN)
+    kb = _mk_kb_with_doc(c)
+    _mk_question(c)
+    run = c.post("/api/v1/eval/runs", json={"kb_ids": [kb["id"]]}).json()
+    assert run["judge"] is False
+    assert run["metrics"]["judge"] == {"judged": 0, "scored": 0, "faithful": 0,
+                                       "relevance": 0, "faithful_rate": 0.0,
+                                       "relevance_rate": 0.0, "model": None}
+    item = c.get(f"/api/v1/eval/runs/{run['id']}").json()["items"][0]
+    assert item["judge"] is None
+    with Session(engine) as s:
+        assert s.query(UsageRecord).count() == 1        # 只有生成那一笔
+
+
+def test_judge_requested_without_configured_model_is_400(engine, db, tmp_path):
+    c = _client(engine, tmp_path)          # judge_fn 缺省 None
+    seed_user(engine, *ADMIN, role="admin")
+    login(c, *ADMIN)
+    kb = _mk_kb_with_doc(c)
+    _mk_question(c)
+    r = c.post("/api/v1/eval/runs", json={"kb_ids": [kb["id"]], "judge": True})
+    assert r.status_code == 400 and "裁判模型" in r.json()["detail"]
+    assert c.post("/api/v1/eval/runs", json={"kb_ids": [kb["id"]]}).status_code == 202
+
+
+def test_judge_failure_does_not_break_deterministic_checks(engine, db, tmp_path):
+    """裁判挂了只损失软指标：这道题的确定性判据与整轮评测都必须照常完成。"""
+    def bad_judge(question, answer, hits):
+        raise RuntimeError("裁判模型 429")
+
+    c = _client(engine, tmp_path, judge_fn=bad_judge)
+    seed_user(engine, *ADMIN, role="admin")
+    login(c, *ADMIN)
+    kb = _mk_kb_with_doc(c)
+    _mk_question(c)
+    run = c.post("/api/v1/eval/runs", json={"kb_ids": [kb["id"]], "judge": True}).json()
+    assert (run["status"], run["passed"]) == ("done", 1)
+    assert run["metrics"]["judge"]["judged"] == 0
+    item = c.get(f"/api/v1/eval/runs/{run['id']}").json()["items"][0]
+    assert item["judge"] is None and "裁判调用失败" in item["error"]
 
 
 # ---- 权限：评测面是 admin 专属（金标准是"标尺"，改标尺=改结论）----

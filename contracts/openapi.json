@@ -545,6 +545,16 @@
             "title": "Id",
             "type": "integer"
           },
+          "judge": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/EvalJudgeVerdictOut"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "latency_ms": {
             "anyOf": [
               {
@@ -619,6 +629,110 @@
         "title": "EvalItemOut",
         "type": "object"
       },
+      "EvalJudgeStatsOut": {
+        "description": "裁判汇总（与确定性判据分栏呈现）。judged=判过的题数，scored=判词能解析的题数——\n两者不等说明裁判输出格式有问题，那是裁判的毛病，不该算在回答头上。",
+        "properties": {
+          "faithful": {
+            "default": 0,
+            "title": "Faithful",
+            "type": "integer"
+          },
+          "faithful_rate": {
+            "default": 0.0,
+            "title": "Faithful Rate",
+            "type": "number"
+          },
+          "judged": {
+            "default": 0,
+            "title": "Judged",
+            "type": "integer"
+          },
+          "model": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Model"
+          },
+          "relevance": {
+            "default": 0,
+            "title": "Relevance",
+            "type": "integer"
+          },
+          "relevance_rate": {
+            "default": 0.0,
+            "title": "Relevance Rate",
+            "type": "number"
+          },
+          "scored": {
+            "default": 0,
+            "title": "Scored",
+            "type": "integer"
+          }
+        },
+        "title": "EvalJudgeStatsOut",
+        "type": "object"
+      },
+      "EvalJudgeVerdictOut": {
+        "description": "单题判词（faithful/relevance 为 None=判词无法解析，不是 0 分）。",
+        "properties": {
+          "faithful": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Faithful"
+          },
+          "model": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Model"
+          },
+          "raw": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Raw"
+          },
+          "reason": {
+            "default": "",
+            "title": "Reason",
+            "type": "string"
+          },
+          "relevance": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Relevance"
+          }
+        },
+        "title": "EvalJudgeVerdictOut",
+        "type": "object"
+      },
       "EvalMetricsOut": {
         "description": "汇总指标（JSONB 里存的就是这个形状）。**全字段给默认值**：运行中的 run 其 metrics 还是空 {},\n响应模型必须把它补成全 0 而不是 500——\"还没跑完\"是正常状态，不是错误。\n形状写进 schema 而不是留 dict：前端才拿得到真类型，\"指针随便点\"的错误在编译期就没了。",
         "properties": {
@@ -644,6 +758,9 @@
             "default": 0.0,
             "title": "Hit Rate",
             "type": "number"
+          },
+          "judge": {
+            "$ref": "#/components/schemas/EvalJudgeStatsOut"
           },
           "mrr": {
             "default": 0.0,
@@ -978,6 +1095,10 @@
             "title": "Items",
             "type": "array"
           },
+          "judge": {
+            "title": "Judge",
+            "type": "boolean"
+          },
           "kb_ids": {
             "anyOf": [
               {
@@ -1025,6 +1146,7 @@
           "passed",
           "metrics",
           "kb_ids",
+          "judge",
           "chat_model",
           "embedding_model",
           "error",
@@ -1038,6 +1160,11 @@
       },
       "EvalRunIn": {
         "properties": {
+          "judge": {
+            "default": false,
+            "title": "Judge",
+            "type": "boolean"
+          },
           "kb_ids": {
             "anyOf": [
               {
@@ -1120,6 +1247,10 @@
             "title": "Id",
             "type": "integer"
           },
+          "judge": {
+            "title": "Judge",
+            "type": "boolean"
+          },
           "kb_ids": {
             "anyOf": [
               {
@@ -1167,6 +1298,7 @@
           "passed",
           "metrics",
           "kb_ids",
+          "judge",
           "chat_model",
           "embedding_model",
           "error",

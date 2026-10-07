@@ -36,6 +36,7 @@ from app.services.citations import parse_citations
 from app.services.crypto import decrypt_secret, encrypt_secret
 from app.services.evaluation import aggregate, check_item, load_golden, render_report
 from app.services.ingest import ingest_document, read_stored, supported_ext
+from app.services.judge import judge_stats, make_judge_fn
 from app.services.license import load_license_status, machine_fingerprint
 from app.services.retrieval import retrieve
 from app.services.settings import DEFAULT_MISS_ANSWER, SettingsStore
@@ -371,6 +372,9 @@ class EvalQuestionPatchIn(BaseModel):
 
 class EvalRunIn(BaseModel):
     kb_ids: list[ReqId] | None = None     # null=全部知识库（评测单个库是最常见用法）
+    # 裁判模型（§阶段2 Ragas 侧）：开了就每题多调一次模型判 faithfulness/relevance。
+    # 默认关——它花的是真金白银，且**永不并入通过率**（裁判会漂移，证据不能建立在会变的东西上）
+    judge: StrictBool = False
 
 
 class EvalQuestionOut(BaseModel):
@@ -391,6 +395,27 @@ class EvalCategoryOut(BaseModel):
     passed: int = 0
 
 
+class EvalJudgeStatsOut(BaseModel):
+    """裁判汇总（与确定性判据分栏呈现）。judged=判过的题数，scored=判词能解析的题数——
+    两者不等说明裁判输出格式有问题，那是裁判的毛病，不该算在回答头上。"""
+    judged: int = 0
+    scored: int = 0
+    faithful: int = 0
+    relevance: int = 0
+    faithful_rate: float = 0.0
+    relevance_rate: float = 0.0
+    model: str | None = None
+
+
+class EvalJudgeVerdictOut(BaseModel):
+    """单题判词（faithful/relevance 为 None=判词无法解析，不是 0 分）。"""
+    faithful: int | None = None
+    relevance: int | None = None
+    reason: str = ""
+    raw: str | None = None
+    model: str | None = None
+
+
 class EvalMetricsOut(BaseModel):
     """汇总指标（JSONB 里存的就是这个形状）。**全字段给默认值**：运行中的 run 其 metrics 还是空 {},
     响应模型必须把它补成全 0 而不是 500——"还没跑完"是正常状态，不是错误。
@@ -404,6 +429,7 @@ class EvalMetricsOut(BaseModel):
     mrr: float = 0.0
     avg_latency_ms: int = 0
     categories: list[EvalCategoryOut] = []
+    judge: EvalJudgeStatsOut = Field(default_factory=EvalJudgeStatsOut)
 
 
 class EvalChecksOut(BaseModel):
@@ -423,6 +449,7 @@ class EvalRunOut(BaseModel):
     passed: int
     metrics: EvalMetricsOut
     kb_ids: list[int] | None
+    judge: bool                  # 本轮是否请了裁判（区分"没启用"与"启用了但全判失败"）
     chat_model: str | None
     embedding_model: str | None
     error: str | None
@@ -444,6 +471,7 @@ class EvalItemOut(BaseModel):
     cited_docs: list[str]
     top_docs: list[str]
     checks: EvalChecksOut
+    judge: EvalJudgeVerdictOut | None = None
     passed: bool
     rank: int
     latency_ms: int | None
@@ -571,6 +599,8 @@ def create_app(
     spawn: Callable[[Callable[[], None]], None] | None = None,
     # 后台任务启动器（评测用）。None=真线程；测试注入同步实现（lambda fn: fn()），
     # 让"后台跑完再看结果"在单测里是确定性的——不靠 sleep 赌时序
+    judge_fn: Callable[[str, str, list[dict]], dict] | None = None,
+    # LLM 裁判（§阶段2 Ragas 侧）：(question, answer, hits) -> 判词；None=未配置裁判通路（请求评测带 judge 即 400）
 ) -> FastAPI:
     app = FastAPI(title="Umax RAG", version="0.1.0")
     s = get_settings()
@@ -1688,7 +1718,7 @@ def create_app(
 
     def _run_json(r: EvalRun) -> dict:
         return {"id": r.id, "status": r.status, "total": r.total, "passed": r.passed,
-                "metrics": r.metrics or {}, "kb_ids": r.kb_ids,
+                "metrics": r.metrics or {}, "kb_ids": r.kb_ids, "judge": bool(r.judge),
                 "chat_model": r.chat_model, "embedding_model": r.embedding_model,
                 "error": r.error, "created_by": r.created_by,
                 "started_at": r.started_at, "finished_at": r.finished_at}
@@ -1699,8 +1729,8 @@ def create_app(
                 "expect_all": i.expect_all or [], "expect_any": i.expect_any or [],
                 "cites": i.cites or [], "answer": i.answer,
                 "cited_docs": i.cited_docs or [], "top_docs": i.top_docs or [],
-                "checks": i.checks or {}, "passed": bool(i.passed), "rank": i.rank,
-                "latency_ms": i.latency_ms, "error": i.error}
+                "checks": i.checks or {}, "judge": i.judge, "passed": bool(i.passed),
+                "rank": i.rank, "latency_ms": i.latency_ms, "error": i.error}
 
     def _kb_scope_text(session: Session, kb_ids: list[int] | None) -> str:
         if kb_ids is None:
@@ -1736,6 +1766,7 @@ def create_app(
                     answer: str | None = None
                     cited_docs: list[str] = []
                     top_docs: list[str] = []
+                    hits: list[dict] = []
                     err: str | None = None
                     try:
                         hits = retrieve(session, q.question, embedder=embedder,
@@ -1764,20 +1795,37 @@ def create_app(
                     checks = check_item({"expect_all": q.expect_all, "expect_any": q.expect_any,
                                          "cites": q.cites},
                                         answer=answer, cited_docs=cited_docs, top_docs=top_docs)
+                    # 裁判只判"真发生过生成"的题（有命中且有回答）：对未命中兜底话术打 faithfulness
+                    # 没有意义（那句话本来就不是从资料里生成的），硬判只会往指标里灌噪声
+                    verdict: dict | None = None
+                    if run.judge and judge_fn is not None and hits and answer and err is None:
+                        try:
+                            verdict = judge_fn(q.question, answer, hits)
+                            session.add(UsageRecord(
+                                tenant_id="default", user_email=run.created_by or "eval@local",
+                                kb_id=usage_kb_id, scenario="chat",
+                                model=(verdict.get("model") or s.chat_model),
+                                prompt_tokens=verdict.get("prompt_tokens") or 0,
+                                completion_tokens=verdict.get("completion_tokens") or 0,
+                                latency_ms=verdict.get("latency_ms")))
+                        except Exception as exc:   # 裁判挂了不该让这道题的确定性判据失效
+                            verdict = None
+                            err = err or f"裁判调用失败：{exc.__class__.__name__}: {exc}"
                     latency_ms = int((time.monotonic() - t0) * 1000)
                     session.add(EvalItemResult(
                         run_id=run.id, question_id=q.id, question=q.question,
                         category=q.category, note=q.note, expect_all=q.expect_all,
                         expect_any=q.expect_any, cites=q.cites, answer=answer,
                         cited_docs=cited_docs, top_docs=top_docs, checks=checks,
-                        passed=checks["passed"], rank=checks["rank"],
+                        judge=verdict, passed=checks["passed"], rank=checks["rank"],
                         latency_ms=latency_ms, error=err))
                     results.append({**checks, "category": q.category, "cites": q.cites,
-                                    "latency_ms": latency_ms})
+                                    "latency_ms": latency_ms, "judge": verdict})
                     run.total = len(results)
                     run.passed = sum(1 for r in results if r["passed"])
                     session.commit()
                 metrics = aggregate(results)
+                metrics["judge"] = judge_stats(results)
                 run.metrics, run.total, run.passed = metrics, metrics["total"], metrics["passed"]
                 run.chat_model = sorted(used_models)[0] if used_models else None
                 run.embedding_model = s.embedding_model if embedder is not None else None
@@ -1855,7 +1903,7 @@ def create_app(
         session.commit()
 
     @app.post("/api/v1/eval/runs", status_code=202, response_model=EvalRunOut,
-              responses={**_ERR(400, "知识库 id 不存在，或没有启用中的金标准题"),
+              responses={**_ERR(400, "知识库 id 不存在、没有启用中的金标准题，或未配置裁判模型"),
                          **_ERR_BODY, **_ERR_GATE})
     def start_eval_run(body: EvalRunIn, request: Request,
                        admin: User = Depends(require_license),
@@ -1865,7 +1913,9 @@ def create_app(
         kb_ids = _valid_kb_ids(session, body.kb_ids)   # 与开放 API 同一套库存在性校验
         if not session.query(EvalQuestion).filter_by(enabled=True).count():
             raise HTTPException(400, "没有启用中的金标准题：先到金标准集里添加或启用")
-        run = EvalRun(tenant_id="default", status="running", kb_ids=kb_ids,
+        if body.judge and judge_fn is None:
+            raise HTTPException(400, "未配置裁判模型：先在模型页登记 chat 模型")
+        run = EvalRun(tenant_id="default", status="running", kb_ids=kb_ids, judge=body.judge,
                       created_by=admin.email)
         session.add(run)
         session.flush()
@@ -1962,6 +2012,11 @@ def build_production_app(upload_dir: str = "uploads",
                             "must_change_password BOOLEAN NOT NULL DEFAULT FALSE"))
         con.execute(sa_text("ALTER TABLE users ADD COLUMN IF NOT EXISTS daily_token_limit INTEGER"))
         con.execute(sa_text("ALTER TABLE users ADD COLUMN IF NOT EXISTS monthly_token_limit INTEGER"))
+        # 评测的裁判字段（§阶段2 Ragas 侧）：表是上一轮刚建的，加列同样走幂等 pragmatics——
+        # 客户库里的历史运行不会因为加列而丢分（judge 为空即"未启用裁判"）
+        con.execute(sa_text("ALTER TABLE eval_runs ADD COLUMN IF NOT EXISTS judge BOOLEAN "
+                            "NOT NULL DEFAULT FALSE"))
+        con.execute(sa_text("ALTER TABLE eval_item_results ADD COLUMN IF NOT EXISTS judge JSONB"))
     # 播种初始管理员（spec §2）：users 空表时按 ADMIN_EMAIL/ADMIN_PASSWORD 落一条 role=admin，
     # 口令 hash 后入库（明文永不落库）。测试装配 create_app 不播种，走 conftest.seed_user——
     # 故这里只在 build_production_app 里做，且放在 engine 判定之后（注入 engine 也要播种）。
@@ -1986,19 +2041,22 @@ def build_production_app(upload_dir: str = "uploads",
                 logging.getLogger("umax").info(
                     "已播种 %d 条预置金标准题（可在评测页删改）", len(gold))
     chat_fn = embedder = vision_fn = None
+    judge_fn = None
     bailian_chat = bailian_embedder = None
     cfg_store = SettingsStore(engine, s)          # 配置中心：端点与生成层共用同一实例
     prompt_of = lambda key: (lambda: cfg_store.effective()[key])  # noqa: E731  每次调用现取
+    bailian_client = None
     if s.dashscope_api_key:
         # .env 百炼直连（阶段 0 链路）：作为网关表未配置时的开发/冒烟兜底
-        bailian_chat = make_chat_fn(ChatClient(api_key=s.dashscope_api_key,
-                                               base_url=s.dashscope_compat_base,
-                                               model=s.chat_model),
+        bailian_client = ChatClient(api_key=s.dashscope_api_key,
+                                    base_url=s.dashscope_compat_base, model=s.chat_model)
+        bailian_chat = make_chat_fn(bailian_client,
                                     system_prompt=prompt_of("chat_system_prompt"))
         bailian_embedder = BailianEmbedder(api_key=s.dashscope_api_key,
                                            base_url=s.dashscope_compat_base,
                                            model=s.embedding_model,
                                            dimensions=s.embedding_dim)
+    gw = None
     if s.gateway_secret:
         from app.services.gateway import ModelGateway
 
@@ -2011,6 +2069,26 @@ def build_production_app(upload_dir: str = "uploads",
         vision_fn = gw.make_vision_fn(vision_prompt=prompt_of("vision_prompt"))  # 未配 vision 场景则端点降级
     else:
         chat_fn, embedder = bailian_chat, bailian_embedder
+
+    def _judge_complete(messages: list[dict]) -> dict:
+        """裁判的通路：网关优先（后台换裁判模型即生效），表里没有 chat 模型时退 .env 直连。
+
+        "配了但全挂"（GatewayError）**刻意不降级**——与问答同一口径：那是配置错误要修，
+        静默换一家只会让"为什么分数变了"变成无解之谜。
+        """
+        from app.services.gateway import NoProviderError
+
+        if gw is not None:
+            try:
+                return gw.chat(messages, log=False)
+            except NoProviderError:
+                if bailian_client is None:
+                    raise
+        if bailian_client is None:
+            raise NoProviderError("没有可用的裁判通路（网关未配 chat 模型且未配 DASHSCOPE_API_KEY）")
+        return bailian_client.complete(messages)
+
+    judge_fn = make_judge_fn(_judge_complete) if (gw is not None or bailian_client is not None) else None
     mineru = MinerUClient(s.mineru_base_url) if s.mineru_base_url else None
     # 装配可见性（售后排查"后台配了模型为什么没生效"的第一手依据；测试也据此守护漏传）
     # 历史教训：vision_fn 曾在网关分支里算出来却没传进 create_app，视觉能力静默空转
@@ -2027,10 +2105,11 @@ def build_production_app(upload_dir: str = "uploads",
     app = create_app(engine=engine, embedder=embedder, chat_fn=chat_fn,
                      upload_dir=upload_dir, mineru=mineru, queue=queue,
                      vision_fn=vision_fn, license_public_key=s.license_public_key,
-                     license_file=str(s.license_file), settings_store=cfg_store)
+                     license_file=str(s.license_file), settings_store=cfg_store,
+                     judge_fn=judge_fn)
     app.state.wired = {"chat": chat_fn is not None, "embedder": embedder is not None,
                        "vision": vision_fn is not None, "mineru": mineru is not None,
-                       "queue": queue is not None,
+                       "queue": queue is not None, "judge": judge_fn is not None,
                        "license_enforced": bool(s.license_public_key)}
     return app
 

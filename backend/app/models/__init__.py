@@ -258,6 +258,9 @@ class EvalRun(Base):
     passed = Column(Integer, nullable=False, default=0)
     metrics = J(nullable=False, default=dict)
     kb_ids = J()                       # NULL=全部知识库；数组=限定库
+    judge = Column(Boolean, nullable=False, default=False, server_default="false")
+    # 本轮是否启用裁判模型（§阶段2 Ragas 侧）：区分"没启用"与"启用了但全判失败"——
+    # 后者 judged>0 而 scored=0，前者两者皆 0，混在一起就说不清了
     chat_model = Column(String(128))
     embedding_model = Column(String(128))
     error = Column(Text)
@@ -285,6 +288,7 @@ class EvalItemResult(Base):
     cited_docs = J(nullable=False, default=list)
     top_docs = J(nullable=False, default=list)
     checks = J(nullable=False, default=dict)
+    judge = J()   # LLM 裁判判词 {faithful, relevance, reason, raw, model}（NULL=本轮未启用裁判）
     passed = Column(Boolean, nullable=False, default=False)
     rank = Column(Integer, nullable=False, default=0)
     latency_ms = Column(Integer)

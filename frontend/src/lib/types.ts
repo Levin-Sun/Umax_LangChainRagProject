@@ -38,6 +38,10 @@ export interface EvalCategoryScore { category: string; total: number; passed: nu
 export interface EvalMetrics { total: number; passed: number; pass_rate: number; with_cites: number; hit: number; hit_rate: number; mrr: number; avg_latency_ms: number; categories: EvalCategoryScore[] }
 // retrieval=null：该题没设金标准文档（不适用，不是失败）
 export interface EvalChecks { kw_all: boolean; kw_any: boolean; citation: boolean; retrieval: boolean | null; passed: boolean; rank: number }
-export interface EvalItemOut { id: number; question_id: number | null; question: string; category: string; note: string | null; expect_all: string[]; expect_any: string[]; cites: string[]; answer: string | null; cited_docs: string[]; top_docs: string[]; checks: EvalChecks; passed: boolean; rank: number; latency_ms: number | null; error: string | null }
-export interface EvalRunOut { id: number; status: EvalRunStatus; total: number; passed: number; metrics: EvalMetrics; kb_ids: number[] | null; chat_model: string | null; embedding_model: string | null; error: string | null; created_by: string | null; started_at: string; finished_at: string | null }
+// 裁判（LLM 裁判，Ragas 侧）：软指标，永不并入通过率——裁判模型会漂移，硬指标必须可复算。
+// judged=判过的题数，scored=判词能解析的题数；faithful/relevance 为 null=判词没解析出来（不是 0 分）
+export interface EvalJudgeStats { judged: number; scored: number; faithful: number; relevance: number; faithful_rate: number; relevance_rate: number; model: string | null }
+export interface EvalJudgeVerdict { faithful: number | null; relevance: number | null; reason: string; raw: string | null; model: string | null }
+export interface EvalItemOut { id: number; question_id: number | null; question: string; category: string; note: string | null; expect_all: string[]; expect_any: string[]; cites: string[]; answer: string | null; cited_docs: string[]; top_docs: string[]; checks: EvalChecks; judge: EvalJudgeVerdict | null; passed: boolean; rank: number; latency_ms: number | null; error: string | null }
+export interface EvalRunOut { id: number; status: EvalRunStatus; total: number; passed: number; metrics: EvalMetrics & { judge: EvalJudgeStats }; kb_ids: number[] | null; judge: boolean; chat_model: string | null; embedding_model: string | null; error: string | null; created_by: string | null; started_at: string; finished_at: string | null }
 export interface EvalRunDetailOut extends EvalRunOut { items: EvalItemOut[] }

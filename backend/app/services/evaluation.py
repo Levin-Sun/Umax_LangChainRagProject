@@ -144,6 +144,27 @@ def render_report(*, meta: dict, metrics: dict, items: Sequence[dict]) -> str:
     ]
     for c in metrics["categories"]:
         lines.append(f"| {c['category']} | {c['passed']}/{c['total']} | {c['total']} |")
+    judge = metrics.get("judge") or {}
+    if judge.get("judged"):
+        # 裁判分单独成段、并在正文里写明"它为什么不能和通过率混着看"——
+        # 交付文档是要给客户看的，分数口径的说明比分数本身更重要
+        lines += [
+            "",
+            "## 裁判评分（LLM 裁判，独立于通过率）",
+            "",
+            f"- 裁判模型：{judge.get('model') or '未知'}",
+            f"- faithfulness（答案是否只依据资料）：{judge['faithful']}/{judge['scored']}"
+            f"（{judge['faithful_rate']:.0%}）",
+            f"- relevance（是否切中问题）：{judge['relevance']}/{judge['scored']}"
+            f"（{judge['relevance_rate']:.0%}）",
+        ]
+        if judge["judged"] != judge["scored"]:
+            lines.append(f"- ⚠️ 判词无法解析 {judge['judged'] - judge['scored']} 题"
+                         f"（裁判输出格式问题，未计入分母）")
+        lines += ["",
+                  "> 裁判分**不并入通过率**：确定性判据（关键词/引用/检索）同一配置跑两次必然一致，"
+                  "而裁判模型会随版本变松变紧。两者分开看，才既有人能复算的硬指标，"
+                  "又有能抓住\"编造资料外内容\"这类关键词看不见的问题的软指标。"]
     lines += ["", "## 明细", ""]
     for i, r in enumerate(items, 1):
         checks = r.get("checks") or {}
@@ -159,6 +180,10 @@ def render_report(*, meta: dict, metrics: dict, items: Sequence[dict]) -> str:
                      f"引用={'✅' if checks.get('citation') else '❌'}"
                      + ("" if checks.get("retrieval") is None
                         else f" 检索={'✅' if checks.get('retrieval') else '❌'}"))
+        verdict = r.get("judge")
+        if verdict:
+            lines.append(f"- 裁判：faithfulness={verdict.get('faithful')} "
+                         f"relevance={verdict.get('relevance')}——{verdict.get('reason') or ''}")
         if r.get("answer"):
             lines.append(f"- 回答：\n```\n{r['answer']}\n```")
         if r.get("error"):

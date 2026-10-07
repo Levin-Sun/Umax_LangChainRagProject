@@ -33,6 +33,7 @@ export default function EvalAdmin({ api }: { api: Client }) {
   const [draft, setDraft] = useState(EMPTY_DRAFT);
   const [editing, setEditing] = useState<number | null>(null);
   const [confirmDel, setConfirmDel] = useState<number | null>(null);
+  const [useJudge, setUseJudge] = useState(false);
 
   const questions = useAsync(() => call(api.GET(P.evalQuestions)) as Promise<EvalQuestionOut[]>);
   // 有 running 的连跑就轮询（1.5s）；全终态自然停。——usePolling 的 deps=[tick,enabled] 不感知 fn，
@@ -56,7 +57,7 @@ export default function EvalAdmin({ api }: { api: Client }) {
     setErr(null);
     setReport(null);
     try {
-      const run = await call(api.POST(P.evalRuns, { body: {} }) as never) as EvalRunOut;
+      const run = await call(api.POST(P.evalRuns, { body: { judge: useJudge } }) as never) as EvalRunOut;
       setActiveRunId(run.id);
       runs.reload();
       detail.reload();
@@ -183,10 +184,16 @@ export default function EvalAdmin({ api }: { api: Client }) {
       {tab === "runs" && (
         <>
           <div className="space-y-3 rounded-xl border border-border bg-card px-6 py-4 shadow-sm">
-            <div className="flex items-center gap-3">
+            <div className="flex flex-wrap items-center gap-3">
               <Button className="h-9 rounded-lg" disabled={busy} onClick={() => void startRun()}>
                 {busy ? "提交中…" : "开始评测"}
               </Button>
+              {/* 裁判是可选的额外开销：默认关，开了每题多一次模型调用 */}
+              <label className="flex items-center gap-2 text-body text-ink-2">
+                <input type="checkbox" aria-label="请裁判模型评分" checked={useJudge}
+                       disabled={busy} onChange={(e) => setUseJudge(e.target.checked)} />
+                同时请裁判模型评分（faithfulness / 相关性）
+              </label>
               <span className="text-caption text-ink-3">
                 对全部启用中的金标准题跑一遍完整问答链路（检索 → 生成 → 引用），
                 在全部知识库范围内评测；预算 20 题一轮约 1~2 分钟。
@@ -194,6 +201,7 @@ export default function EvalAdmin({ api }: { api: Client }) {
             </div>
             <p className="text-caption text-ink-3">
               改完检索参数（召回条数/最低相似度/提示词）跑一轮，与本页历史逐项对比，就知道有没有变准。
+              裁判分**不并入通过率**（裁判会随版本变松变紧），它专门抓关键词判据看不见的「编造资料外内容」。
             </p>
           </div>
 
@@ -229,8 +237,23 @@ export default function EvalAdmin({ api }: { api: Client }) {
                   </div>
                 ))}
               </div>
-              {active.metrics.categories.length > 0 && (
-                <div className="overflow-x-auto">
+              {/* 裁判分单独一段：与通过率并列但分栏——软指标不能和可复算的硬指标混着看 */}
+              {active.metrics.judge.scored > 0 && (
+                <div className="rounded-lg border border-border bg-muted/30 px-4 py-3">
+                  <div className="text-caption text-ink-3">
+                    裁判评分（{active.metrics.judge.model ?? "未知模型"}，不并入通过率）
+                  </div>
+                  <div className="text-body text-ink-1">
+                    faithfulness {active.metrics.judge.faithful}/{active.metrics.judge.scored}
+                    （{pct(active.metrics.judge.faithful_rate)}）· relevance{" "}
+                    {active.metrics.judge.relevance}/{active.metrics.judge.scored}
+                    （{pct(active.metrics.judge.relevance_rate)}）
+                    {active.metrics.judge.judged !== active.metrics.judge.scored
+                      && ` · ⚠️ 判词未解析 ${active.metrics.judge.judged - active.metrics.judge.scored} 题`}
+                  </div>
+                </div>
+              )}
+              {active.metrics.categories.length > 0 && (                <div className="overflow-x-auto">
                   <table className="w-full text-body">
                     <thead><tr className="text-left text-caption text-ink-3">
                       <th className="py-1 pr-4 font-medium">考察点</th>
@@ -270,6 +293,10 @@ export default function EvalAdmin({ api }: { api: Client }) {
                                   {it.expect_any.length > 0 ? `（任一：${it.expect_any.join("、")}）` : ""}</p>
                                 <p>命中Top5：{it.top_docs.join("、") || "无"}</p>
                                 <p>引用：{it.cited_docs.join("、") || "无"}</p>
+                                {it.judge && (
+                                  <p>裁判：faithfulness={it.judge.faithful ?? "未解析"}{" "}
+                                    relevance={it.judge.relevance ?? "未解析"}——{it.judge.reason}</p>
+                                )}
                                 <pre className="whitespace-pre-wrap text-body text-ink-1">{it.answer ?? "（无回答）"}</pre>
                                 {it.error && <p className="text-destructive">错误：{it.error}</p>}
                               </div>
@@ -323,7 +350,8 @@ export default function EvalAdmin({ api }: { api: Client }) {
                         <td className="px-4 py-2 text-ink-2">{fmtTime(r.started_at)}</td>
                         <td className="px-4 py-2 text-ink-2">
                           {r.status === "running" ? `进行中 ${r.total}` :
-                            r.status === "failed" ? "失败" : "已完成"}
+                            r.status === "failed" ? "失败" :
+                            (r.judge ? "已完成·含裁判" : "已完成")}
                         </td>
                         <td className="px-4 py-2 text-ink-1">{r.passed}/{r.total}（{pct(r.metrics.pass_rate)}）</td>
                         <td className="px-4 py-2 text-ink-2">

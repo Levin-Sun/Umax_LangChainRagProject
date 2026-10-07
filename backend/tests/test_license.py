@@ -211,6 +211,8 @@ def test_production_wiring_reports_all_scenarios(engine, db, tmp_path, monkeypat
                               encrypted_api_key=encrypt_secret("sk-x", secret)))
         s.commit()
     app = build_production_app(upload_dir=str(tmp_path), engine=engine)
+    # judge=True：配了 GATEWAY_SECRET 就有裁判通路（裁判走的就是 chat 模型那条路）
     assert app.state.wired == {"chat": True, "embedder": True, "vision": True,
-                               "mineru": False, "queue": False, "license_enforced": True}
-    get_settings.cache_clear()
+                               "mineru": False, "queue": False, "judge": True,
+                               "license_enforced": True}
+    get_settings.cache_clear()   # 双保险：conftest 的 autouse teardown 也会清（断言失败也清得到）

@@ -14,12 +14,14 @@ const question: EvalQuestionOut = {
   cites: ["rag_dirty_doc_01.txt"], category: "错别字干扰", note: "校准记录",
   enabled: true, created_at: "2026-10-08T09:00:00+00:00" };
 
+const NO_JUDGE = { judged: 0, scored: 0, faithful: 0, relevance: 0, faithful_rate: 0,
+                   relevance_rate: 0, model: null };
 const metrics = { total: 20, passed: 18, pass_rate: 0.9, with_cites: 20, hit: 20,
   hit_rate: 1.0, mrr: 0.975, avg_latency_ms: 1200,
-  categories: [{ category: "版本冲突", total: 3, passed: 3 }] };
+  categories: [{ category: "版本冲突", total: 3, passed: 3 }], judge: NO_JUDGE };
 
 const run = (over: Partial<EvalRunOut> = {}): EvalRunOut => ({
-  id: 1, status: "done", total: 20, passed: 18, metrics, kb_ids: null,
+  id: 1, status: "done", total: 20, passed: 18, metrics, kb_ids: null, judge: false,
   chat_model: "qwen3.7-flash", embedding_model: "qwen3.7-text-embedding", error: null,
   created_by: "admin@umax.local", started_at: "2026-10-08T10:00:00+00:00",
   finished_at: "2026-10-08T10:01:00+00:00", ...over });
@@ -30,12 +32,14 @@ const detail = (over: Partial<EvalRunDetailOut> = {}): EvalRunDetailOut => ({
       note: null, expect_all: ["不支持"], expect_any: [], cites: ["rag_dirty_doc_01.txt"],
       answer: "生鲜不支持七天无理由 [1]", cited_docs: ["rag_dirty_doc_01.txt"],
       top_docs: ["rag_dirty_doc_01.txt"], checks: { kw_all: true, kw_any: true, citation: true,
-        retrieval: true, passed: true, rank: 1 }, passed: true, rank: 1, latency_ms: 800, error: null },
+        retrieval: true, passed: true, rank: 1 }, judge: null, passed: true, rank: 1,
+      latency_ms: 800, error: null },
     { id: 2, question_id: 2, question: "运费谁承担", category: "缺失内容", note: null,
       expect_all: ["商家承担"], expect_any: [], cites: ["rag_dirty_doc_01.txt"],
       answer: "资料里没有相关内容，无法回答。", cited_docs: [], top_docs: ["rag_dirty_doc_01.txt"],
       checks: { kw_all: false, kw_any: true, citation: false, retrieval: true, passed: false,
         rank: 1 },
+      judge: null,
       passed: false, rank: 1, latency_ms: 700, error: null }], ...over });
 
 const renderPage = (stubs: Parameters<typeof fakeApi>[0]) =>
@@ -71,9 +75,35 @@ describe("评测页", () => {
       ? ok(created ? [second, run()] : [run()]) : ok(detail())));
     renderPage({ POST, GET });
     await userEvent.click(await screen.findByRole("button", { name: "开始评测" }));
-    await waitFor(() => expect(POST).toHaveBeenCalledWith(P.evalRuns, { body: {} }));
+    await waitFor(() => expect(POST).toHaveBeenCalledWith(P.evalRuns, { body: { judge: false } }));
     // 起完立即 reload 历史：新记录出现（不 reload 的话 usePolling 不感知 fn，列表会一直是旧的）
     expect(await screen.findByText(/7\/20（35%）/)).toBeInTheDocument();
+  });
+
+  it("勾上裁判再起评测：body 带 judge=true，结果里裁判分单独一段", async () => {
+    const judged = run({
+      id: 3, judge: true,
+      metrics: { ...metrics, judge: { judged: 20, scored: 20, faithful: 18, relevance: 20,
+                                      faithful_rate: 0.9, relevance_rate: 1.0,
+                                      model: "qwen3.7-flash" } } });
+    const POST = vi.fn(async () => ok(judged));
+    const GET = vi.fn(async (url: string) => (url === P.evalRuns ? ok([judged]) : ok(detail({
+      judge: true,
+      metrics: judged.metrics,
+      items: [{ ...detail().items[0], judge: { faithful: 1, relevance: 0,
+                                               reason: "没回答问题", raw: null,
+                                               model: "qwen3.7-flash" } }] }))));
+    renderPage({ POST, GET });
+    await userEvent.click(await screen.findByLabelText("请裁判模型评分"));
+    await userEvent.click(await screen.findByRole("button", { name: "开始评测" }));
+    await waitFor(() => expect(POST).toHaveBeenCalledWith(P.evalRuns, { body: { judge: true } }));
+    // 裁判分与通过率分栏呈现（不是混成一个总分），且写明"不并入通过率"
+    expect(await screen.findByText(/裁判评分（qwen3.7-flash，不并入通过率）/)).toBeInTheDocument();
+    expect(screen.getByText(/faithfulness 18\/20（90%）/)).toBeInTheDocument();
+    expect(screen.getByText("已完成·含裁判")).toBeInTheDocument();
+    // 逐题能看到裁判判词与理由（"为什么扣分"要落到题上才有用）
+    await userEvent.click(screen.getByText(/✅ 生鲜能七天无理由退货吗/));
+    expect(await screen.findByText(/裁判：faithfulness=1 relevance=0——没回答问题/)).toBeInTheDocument();
   });
 
   it("上一轮失败的原因直接上屏（不让用户猜）", async () => {
@@ -98,8 +128,7 @@ describe("评测页", () => {
     expect(await screen.findByText(/资料里没有相关内容/)).toBeInTheDocument();
   });
 
-  it("报告：拉 Markdown 并展示（可下载）", async () => {
-    renderPage({
+  it("报告：拉 Markdown 并展示（可下载）", async () => {    renderPage({
       GET: (url) => (url === P.evalRuns ? ok([run()])
         : url === P.evalRunReport ? ok({ markdown: "# 评测报告\n\n## 总分：18/20（90%）" })
         : ok(detail())),
