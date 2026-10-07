@@ -7,7 +7,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import AdminBanner from "@/components/AdminBanner";
-import { call, type Client } from "@/lib/api";
+import { call, callVoid, type Client } from "@/lib/api";
 import { P } from "@/lib/paths";
 import { useAsync } from "@/lib/hooks";
 import type { AuthMe, KbOut, UserOut } from "@/lib/types";
@@ -38,6 +38,11 @@ export default function UsersAdmin({ api, me }: { api: Client; me: AuthMe }) {
     for (const k of ["email", "name", "password"] as const) {
       if (!form[k].trim()) { setFormErr("邮箱/姓名/初始口令均为必填"); return; }
     }
+    // 体验反馈①②：与后端同口径的本地校验——把 422 的"请求不合法"挡在请求发出前
+    if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(form.email.trim())) {
+      setFormErr("邮箱格式不正确，应为 name@example.com"); return;
+    }
+    if (form.password.length < 8) { setFormErr("初始口令至少 8 位"); return; }
     setFormErr(null);
     setBusy(true);
     try {
@@ -58,6 +63,20 @@ export default function UsersAdmin({ api, me }: { api: Client; me: AuthMe }) {
     try {
       await call(api.PATCH(P.user, { params: { path: { user_id: u.id } }, body }));
       setResetFor(null); setResetPw(""); setResetPw2("");
+      list.reload();
+    } catch (e) {
+      setRowErr(e);
+    } finally {
+      setRowBusy(false);
+    }
+  }
+
+  async function del(u: UserOut) {
+    if (rowBusy) return;
+    setRowBusy(true);
+    setRowErr(null);
+    try {
+      await callVoid(api.DELETE(P.user, { params: { path: { user_id: u.id } } }));
       list.reload();
     } catch (e) {
       setRowErr(e);
@@ -131,6 +150,10 @@ export default function UsersAdmin({ api, me }: { api: Client; me: AuthMe }) {
                             onClick={() => { setResetFor(resetFor === u.id ? null : u.id); setResetPw(""); setResetPw2(""); }}>
                       重置口令
                     </Button>
+                    {!self && (
+                      <Button size="sm" variant="ghost" className="h-7 rounded-lg text-destructive hover:text-destructive"
+                              disabled={rowBusy} onClick={() => void del(u)}>删除</Button>
+                    )}
                     {resetFor === u.id && (
                       <span className="ml-2 inline-flex flex-wrap items-center gap-1.5">
                         <Input aria-label="新口令" type="password" placeholder="新口令" className="h-7 w-28 rounded-lg border-border"

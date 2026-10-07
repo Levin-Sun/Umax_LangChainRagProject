@@ -159,3 +159,23 @@ it("renders skeleton while me is still in flight (no premature business GET)", (
   expect(screen.getByText("加载中…")).toBeInTheDocument();
   expect(screen.queryByRole("log")).not.toBeInTheDocument();
 });
+
+// ---- 会话删除（体验反馈④）：悬停 ✕ → DELETE，删除当前会话回"新建会话"态，列表移除 ----
+it("deletes a conversation via DELETE and clears it from the list", async () => {
+  const DELETE = vi.fn(() => { listed.length = 0; return ok(undefined); });   // 有状态：删后列表空
+  const listed: ConversationOut[] = [...convs];
+  const full = fakeApi({
+    GET: (u) => (u.includes("/auth/me") ? ok(ME)
+      : u === P.conversations ? ok(listed)
+      : u === P.convMessages ? ok(history) : undefined),
+    DELETE,
+  });
+  render(<AuthProvider client={full as never}><ChatApp api={full as never} /></AuthProvider>);
+  const item = await screen.findByText("退货政策");
+  await userEvent.hover(item);
+  await userEvent.click(screen.getByRole("button", { name: "删除会话 退货政策" }));
+  await waitFor(() => expect(DELETE).toHaveBeenCalledWith(P.conversation, expect.objectContaining({
+    params: { path: { conv_id: 1 } },
+  })));
+  await waitFor(() => expect(screen.queryByText("退货政策")).not.toBeInTheDocument());
+});

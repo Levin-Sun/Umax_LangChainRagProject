@@ -2,6 +2,7 @@ export const P = {
   chat: "/api/v1/chat",
   conversations: "/api/v1/conversations",
   convMessages: "/api/v1/conversations/{conv_id}/messages",
+  conversation: "/api/v1/conversations/{conv_id}",
   kb: "/api/v1/kb",
   kbDocs: "/api/v1/kb/{kb_id}/documents",
   docReprocess: "/api/v1/documents/{doc_id}/reprocess",

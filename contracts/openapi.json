@@ -579,6 +579,7 @@
         "properties": {
           "email": {
             "maxLength": 255,
+            "pattern": "^[^@\\s]+@[^@\\s]+\\.[^@\\s]+$",
             "title": "Email",
             "type": "string"
           },
@@ -1483,6 +1484,70 @@
           }
         },
         "summary": "List Conversations"
+      }
+    },
+    "/api/v1/conversations/{conv_id}": {
+      "delete": {
+        "operationId": "delete_conversation_api_v1_conversations__conv_id__delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "conv_id",
+            "required": true,
+            "schema": {
+              "maximum": 2147483647,
+              "minimum": -2147483648,
+              "title": "Conv Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            },
+            "description": "需要登录"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            },
+            "description": "会话不存在"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          },
+          "428": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            },
+            "description": "首次登录必须修改初始口令"
+          }
+        },
+        "summary": "Delete Conversation"
       }
     },
     "/api/v1/conversations/{conv_id}/messages": {
@@ -2790,6 +2855,88 @@
       }
     },
     "/api/v1/users/{user_id}": {
+      "delete": {
+        "operationId": "delete_user_api_v1_users__user_id__delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "user_id",
+            "required": true,
+            "schema": {
+              "maximum": 2147483647,
+              "minimum": -2147483648,
+              "title": "User Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            },
+            "description": "不能删除当前登录管理员"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            },
+            "description": "需要登录"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            },
+            "description": "需要管理员权限"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            },
+            "description": "用户不存在"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          },
+          "428": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            },
+            "description": "首次登录必须修改初始口令"
+          }
+        },
+        "summary": "Delete User"
+      },
       "patch": {
         "operationId": "patch_user_api_v1_users__user_id__patch",
         "parameters": [

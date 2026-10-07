@@ -81,3 +81,33 @@ def test_chat_endpoint_converts_gateway_failure_to_miss(engine, db, tmp_path):
     r = c.post("/api/v1/chat", json={"question": "生鲜能退吗", "kb_ids": [kb["id"]]})
     assert r.status_code == 200, r.text
     assert r.json()["answer"] == "资料里没有相关内容，无法回答。"
+
+
+# ---- 体验反馈④（2026-10-07）：会话删除——仅本人（别人的/不存在同文案 404），消息级联清 ----
+def test_delete_conversation_owner_only_cascades(engine, db, tmp_path):
+    from fastapi.testclient import TestClient
+    from sqlalchemy.orm import Session
+
+    from app.main import create_app
+    from app.models import Message
+    from tests.conftest import login, seed_user
+
+    app = create_app(engine=engine, secret="s", embedder=None,
+                     chat_fn=lambda q, h: {"answer": "a", "prompt_tokens": 1, "completion_tokens": 1},
+                     upload_dir=str(tmp_path))
+    seed_user(engine, "a@x.com", "Passw0rd-1", role="admin")   # 建库需 admin；会话按邮箱隔离不受角色影响
+    seed_user(engine, "b@x.com", "Passw0rd-1", role="member")
+    c = TestClient(app)
+    login(c, "a@x.com", "Passw0rd-1")
+    kb = c.post("/api/v1/kb", json={"name": "k"}).json()
+    conv = c.post("/api/v1/chat", json={"question": "你好", "kb_ids": [kb["id"]]}).json()["conversation_id"]
+    # 别人的会话与不存在的会话同文案 404（不可探测）
+    c2 = TestClient(app)
+    login(c2, "b@x.com", "Passw0rd-1")
+    assert c2.delete(f"/api/v1/conversations/{conv}").status_code == 404
+    assert c.delete("/api/v1/conversations/99999").status_code == 404
+    # 本人删除 204，消息级联清空，列表不再出现
+    assert c.delete(f"/api/v1/conversations/{conv}").status_code == 204
+    with Session(engine) as s:
+        assert s.query(Message).filter_by(conversation_id=conv).count() == 0
+    assert all(x["id"] != conv for x in c.get("/api/v1/conversations").json())

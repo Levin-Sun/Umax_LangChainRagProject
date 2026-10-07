@@ -6,7 +6,7 @@ from app.models import AuditLog
 # 由 backend/tests/test_audit_actions_sync.py 守护漂移（加动作漏改任一处即测试红）。
 ACTIONS = {
     "login_success", "login_failed", "logout",
-    "user_created", "user_updated", "grants_updated",
+    "user_created", "user_updated", "user_deleted", "grants_updated",
     "kb_created", "kb_deleted", "document_uploaded", "document_deleted",
     "document_reprocessed", "model_created", "model_updated", "model_deleted",
     "api_key_created", "api_key_updated", "api_key_deleted",

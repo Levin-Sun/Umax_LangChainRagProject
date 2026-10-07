@@ -90,3 +90,40 @@ it("收编⑱：重置口令不足 8 位时保存禁用并给文案", async () =
   expect(devRow.getByText("新口令至少 8 位")).toBeInTheDocument();
   expect(devRow.getByRole("button", { name: "保存" })).toBeDisabled();
 });
+
+// ---- 体验反馈①②③（2026-10-07）：创建表单友好校验 + 用户删除 ----
+it("创建：邮箱格式不合法 → 友好文案拦截，不发请求", async () => {
+  const POST = vi.fn();
+  renderAdmin(fakeApi({ GET: (u) => (u === P.kb ? ok([]) : ok(rows)), POST }));
+  await screen.findByText("dev@x.com");
+  await userEvent.type(screen.getByLabelText("邮箱"), "not-an-email");
+  await userEvent.type(screen.getByLabelText("姓名"), "新人");
+  await userEvent.type(screen.getByLabelText("初始口令"), "Passw0rd-1");
+  await userEvent.click(screen.getByRole("button", { name: "新建用户" }));
+  expect(await screen.findByText("邮箱格式不正确，应为 name@example.com")).toBeInTheDocument();
+  expect(POST).not.toHaveBeenCalled();
+});
+
+it("创建：初始口令不足 8 位 → 友好文案拦截，不发请求", async () => {
+  const POST = vi.fn();
+  renderAdmin(fakeApi({ GET: (u) => (u === P.kb ? ok([]) : ok(rows)), POST }));
+  await screen.findByText("dev@x.com");
+  await userEvent.type(screen.getByLabelText("邮箱"), "n@x.com");
+  await userEvent.type(screen.getByLabelText("姓名"), "新人");
+  await userEvent.type(screen.getByLabelText("初始口令"), "short");
+  await userEvent.click(screen.getByRole("button", { name: "新建用户" }));
+  expect(await screen.findByText("初始口令至少 8 位")).toBeInTheDocument();
+  expect(POST).not.toHaveBeenCalled();
+});
+
+it("删除：非本人行显删除按钮走 DELETE；本人行无删除", async () => {
+  const DELETE = vi.fn(() => ok(undefined));
+  renderAdmin(fakeApi({ GET: (u) => (u === P.kb ? ok([]) : ok(rows)), DELETE }));
+  const adminRow = await screen.findByRole("row", { name: /admin@x\.com/ });
+  expect(within(adminRow).queryByRole("button", { name: "删除" })).toBeNull();
+  const devRow = await screen.findByRole("row", { name: /dev@x\.com/ });
+  await userEvent.click(within(devRow).getByRole("button", { name: "删除" }));
+  await waitFor(() => expect(DELETE).toHaveBeenCalledWith(P.user, expect.objectContaining({
+    params: { path: { user_id: 2 } },
+  })));
+});

@@ -153,3 +153,55 @@ def test_users_audit_events(client, engine):
     assert (rows[0][0], rows[0][1]) == ("user_created", uid)
     assert ("grants_updated", uid) in [(x[0], x[1]) for x in rows]
     assert any(x[0] == "user_updated" and x[2] == {"fields": ["status"]} for x in rows)
+
+
+# ---- 体验反馈①②③（2026-10-07）：邮箱格式校验 + 用户删除 ----
+import re
+
+
+@pytest.mark.parametrize("bad", ["abc", "a@b", "a b@c.com", "@x.com", "a@.com", "a@x"])
+def test_create_user_rejects_invalid_email(client, bad):
+    r = client.post("/api/v1/users", json={"email": bad, "name": "n",
+                                           "password": "Passw0rd-1", "role": "member"})
+    assert r.status_code == 422, f"{bad} 应被格式校验拦下：{r.status_code} {r.text}"
+    # 合法邮箱里的 + 号（邮件路由标签）不受影响
+    assert client.post("/api/v1/users", json={"email": "a+b@x.co", "name": "n",
+                                              "password": "Passw0rd-1", "role": "member"}).status_code == 201
+
+
+def test_delete_user_admin_only_with_cascade_and_audit(client, engine, db):
+    from app.models import Conversation, KnowledgeBase, Message, UserKbGrant
+    from sqlalchemy.orm import Session as _S
+    # 目标用户带全套关联数据：会话/消息/授权/会话
+    r = client.post("/api/v1/users", json={"email": "gone@x.com", "name": "将删",
+                                           "password": "Passw0rd-1", "role": "member"})
+    uid = r.json()["id"]
+    with _S(engine) as s:
+        kb = KnowledgeBase(tenant_id="default", name="待删者的库")
+        s.add(kb)
+        s.flush()
+        s.add(UserKbGrant(user_id=uid, kb_id=kb.id))
+        conv = Conversation(tenant_id="default", user_email="gone@x.com", title="t", kb_ids=[])
+        s.add(conv)
+        s.flush()
+        s.add(Message(tenant_id="default", conversation_id=conv.id, role="user",
+                      content=[{"type": "text", "text": "hi"}]))
+        s.commit()
+        conv_id = conv.id
+    # 匿名不可删（member 403 由 admin 声明面轨守护，不再重证）
+    anon = TestClient(create_app(engine=engine, secret="x", embedder=None,
+                                 chat_fn=None, upload_dir="/tmp"))
+    assert anon.delete(f"/api/v1/users/{uid}").status_code == 401
+    # 自删保护
+    me_id = client.get("/api/v1/users").json()[0]["id"]
+    assert client.delete(f"/api/v1/users/{me_id}").status_code == 400
+    # 正常删除
+    assert client.delete(f"/api/v1/users/{uid}").status_code == 204
+    assert client.delete(f"/api/v1/users/{uid}").status_code == 404   # 再删 404
+    with _S(engine) as s:
+        assert s.get(__import__("app.models", fromlist=["User"]).User, uid) is None
+        assert s.query(UserKbGrant).filter_by(user_id=uid).count() == 0
+        assert s.query(Conversation).filter_by(user_email="gone@x.com").count() == 0
+        assert s.query(Message).filter_by(conversation_id=conv_id).count() == 0
+        from app.models import AuditLog
+        assert s.query(AuditLog).filter_by(action="user_deleted").count() == 1

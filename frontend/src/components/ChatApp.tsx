@@ -6,7 +6,7 @@ import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { ErrorBanner } from "@/components/ErrorBanner";
-import { call, type Client } from "@/lib/api";
+import { call, callVoid, type Client } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 import { P } from "@/lib/paths";
 import { useAsync } from "@/lib/hooks";
@@ -56,6 +56,16 @@ export default function ChatApp({ api }: { api: Client }) {
     () => (!ready || activeConv === null ? Promise.resolve([] as MessageOut[])
       : call(api.GET(P.convMessages, { params: { path: { conv_id: activeConv } } })) as Promise<MessageOut[]>),
     [activeConv, ready]);
+
+  async function delConversation(id: number) {
+    try {
+      await callVoid(api.DELETE(P.conversation, { params: { path: { conv_id: id } } }));
+      if (id === convId) openConversation(null);   // 删的是当前打开的会话 → 回到"新建会话"态
+      convs.reload();
+    } catch (e) {
+      setSendErr(e);
+    }
+  }
 
   function openConversation(id: number | null) {
     // 任务7欠账①：点击当前已打开会话 = no-op（旧实现无条件 setTurns([]) 把本地
@@ -128,10 +138,15 @@ export default function ChatApp({ api }: { api: Client }) {
         </Button>
         <ul className="mt-3 space-y-0.5">
           {(convs.data ?? []).map((c) => (
-            <li key={c.id}>
-              <button className={`w-full truncate rounded-lg px-2.5 py-2 text-left text-body transition-colors hover:bg-accent/60 ${c.id === convId ? "bg-card font-medium text-ink-1 shadow-sm" : "text-ink-3"}`}
+            <li key={c.id} className="group relative">
+              <button className={`w-full truncate rounded-lg px-2.5 py-2 pr-7 text-left text-body transition-colors hover:bg-accent/60 ${c.id === convId ? "bg-card font-medium text-ink-1 shadow-sm" : "text-ink-3"}`}
                       onClick={() => openConversation(c.id)}>
                 {c.title}
+              </button>
+              <button aria-label={`删除会话 ${c.title}`}
+                      className="absolute right-1.5 top-1/2 -translate-y-1/2 hidden rounded px-1 text-caption text-ink-3 hover:text-destructive group-hover:block"
+                      onClick={(e) => { e.stopPropagation(); void delConversation(c.id); }}>
+                ✕
               </button>
             </li>
           ))}

@@ -13,12 +13,11 @@ import type { AuditOut } from "@/lib/types";
 
 export const AUDIT_ACTIONS = [
   "login_success", "login_failed", "logout",
-  "user_created", "user_updated", "grants_updated",
+  "user_created", "user_updated", "user_deleted", "grants_updated",
   "kb_created", "kb_deleted", "document_uploaded", "document_deleted",
   "document_reprocessed", "model_created", "model_updated", "model_deleted",
   "api_key_created", "api_key_updated", "api_key_deleted",
-  "branding_updated",
-] as const;
+  "branding_updated",] as const;
 
 const PAGE = 50; // 与后端默认 limit 对齐；上一页/下一页按此步进
 

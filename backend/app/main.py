@@ -181,8 +181,13 @@ class ChangePasswordIn(BaseModel):
     new_password: Utf8Str = Field(min_length=8, max_length=256)
 
 
+# 邮箱格式约束进 spec（pattern 自动入 schema，422 由 FastAPI 默认声明）：
+# 要求 @ 后至少带一个点分的域名标签（"a@x"、"a@.com" 都拒），+ 号路由标签放行
+EMAIL_PATTERN = r"^[^@\s]+@[^@\s]+\.[^@\s]+$"
+
+
 class UserIn(BaseModel):
-    email: Utf8Str = Field(max_length=255)
+    email: Utf8Str = Field(max_length=255, pattern=EMAIL_PATTERN)
     name: Utf8Str = Field(default="", max_length=128)
     password: Utf8Str = Field(min_length=8, max_length=256)
     role: str = Field(default="member", json_schema_extra={"pattern": ROLE_PATTERN})
@@ -541,6 +546,25 @@ def create_app(
         session.commit()
         return _user_json(u, _grants_map(session))
 
+    @app.delete("/api/v1/users/{user_id}", status_code=204,
+                responses={**_ERR(400, "不能删除当前登录管理员"), **_ERR(404, "用户不存在"),
+                           **_ERR_GATE})
+    def delete_user(user_id: PathId, request: Request,
+                    admin: User = Depends(require_admin_role),
+                    session: Session = Depends(get_session)):
+        u = session.get(User, user_id)
+        if not u:
+            raise HTTPException(404, "用户不存在")
+        if u.id == admin.id:
+            raise HTTPException(400, "不能删除当前登录管理员")
+        # 连带清理：本人会话/消息（保密与干净卸载）；sessions/grants 走 FK CASCADE
+        session.query(Conversation).filter_by(user_email=u.email).delete()
+        email = u.email
+        session.delete(u)
+        audit_record(session, "user_deleted", user_email=admin.email, target_type="user",
+                     target_id=user_id, detail={"email": email}, ip=_client_ip(request))
+        session.commit()
+
     @app.get("/api/v1/users/{user_id}/grants",
              responses={**_ERR(400, "管理员隐式全库，无授权表"), **_ERR(404, "用户不存在"),
                         **_ERR_GATE})
@@ -812,6 +836,16 @@ def create_app(
         return [{"id": c.id, "title": c.title, "kb_ids": c.kb_ids}
                 for c in session.query(Conversation).filter(Conversation.user_email == user.email)
                 .order_by(Conversation.id)]
+
+    @app.delete("/api/v1/conversations/{conv_id}", status_code=204,
+                responses={**_ERR(404, "会话不存在"), **_ERR_LOGIN_GATE})
+    def delete_conversation(conv_id: PathId, user: User = Depends(get_user),
+                            session: Session = Depends(get_session)):
+        conv = session.get(Conversation, conv_id)
+        if not conv or conv.user_email != user.email:
+            raise HTTPException(404, "会话不存在")
+        session.delete(conv)   # messages 走 FK CASCADE；自助数据管理不进审计流
+        session.commit()
 
     @app.get("/api/v1/conversations/{conv_id}/messages",
              responses={**_ERR(404, "会话不存在"), **_ERR_LOGIN_GATE})
