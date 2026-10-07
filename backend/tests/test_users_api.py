@@ -146,8 +146,10 @@ def test_users_audit_events(client, engine):
     client.put(f"/api/v1/users/{uid}/grants", json={"kb_ids": []})
     client.patch(f"/api/v1/users/{uid}", json={"status": "disabled"})
     with Session(engine) as s:
+        # ORDER BY id：无序查询的返回顺序由 PG 堆序决定，rows[0] 断言会偶发翻车（实测踩过）
         rows = [(a.action, a.target_id, a.detail) for a in s.query(AuditLog).filter(
-            AuditLog.action.in_(["user_created", "grants_updated", "user_updated"]))]
+            AuditLog.action.in_(["user_created", "grants_updated", "user_updated"]))
+            .order_by(AuditLog.id)]
     assert (rows[0][0], rows[0][1]) == ("user_created", uid)
     assert ("grants_updated", uid) in [(x[0], x[1]) for x in rows]
     assert any(x[0] == "user_updated" and x[2] == {"fields": ["status"]} for x in rows)

@@ -1,28 +1,114 @@
+# Umax RAG 一键私有化交付编排（§D 部署：clone + 填 .env + docker compose up -d）
+# 快速上手见 docs/DEPLOY.md；环境变量模板见 .env.example（仓库根）。
+# 国内拉镜像不畅时先配镜像源（依次试 docker.1ms.run / docker.m.daocloud.io / docker.1panel.live），
+# 拉取后重新打 tag 即可，例如：
+#   docker pull docker.1ms.run/pgvector/pgvector:pg16 && docker tag docker.1ms.run/pgvector/pgvector:pg16 pgvector/pgvector:pg16
 services:
   postgres:
     image: pgvector/pgvector:pg16
     container_name: umaxrag-pg
     environment:
-      POSTGRES_USER: rag
-      POSTGRES_PASSWORD: rag_dev_2026
-      POSTGRES_DB: umaxrag
+      POSTGRES_USER: ${PG_USER:-rag}
+      POSTGRES_PASSWORD: ${PG_PASSWORD:-rag_dev_2026}
+      POSTGRES_DB: ${PG_DB:-umaxrag}
     ports:
-      - "5432:5432"
+      - "${PG_PORT:-5432}:5432"
     volumes:
       - ./data/pg:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U rag -d umaxrag"]
+      test: ["CMD-SHELL", "pg_isready -U ${PG_USER:-rag} -d ${PG_DB:-umaxrag}"]
       interval: 5s
       timeout: 3s
       retries: 30
+    restart: unless-stopped
 
-  redis:
-    image: redis:7-alpine          # ARQ 队列；国内拉取失败时 docker pull docker.1ms.run/redis:7-alpine && docker tag ... redis:7-alpine
-    container_name: umaxrag-redis
+  backend:
+    build: ./backend
+    image: umax-backend
+    container_name: umaxrag-backend
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      # 数据库连 compose 网络内的 postgres 服务
+      PG_HOST: postgres
+      PG_PORT: 5432
+      PG_USER: ${PG_USER:-rag}
+      PG_PASSWORD: ${PG_PASSWORD:-rag_dev_2026}
+      PG_DB: ${PG_DB:-umaxrag}
+      # 首登强改密：播种 admin 的邮箱与初始口令（部署后首登强制修改）
+      ADMIN_EMAIL: ${ADMIN_EMAIL:-admin@umax.local}
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD:?请在 .env 里设置 ADMIN_PASSWORD（至少 8 位强口令）}
+      # 模型网关主密钥（不配则模型登记页 503）
+      GATEWAY_SECRET: ${GATEWAY_SECRET:-}
+      # 模型 key（BYO-key 也可部署后在 /admin/models 页面登记）
+      DASHSCOPE_API_KEY: ${DASHSCOPE_API_KEY:-}
+      # 入库调度：sync=同步（默认，小规模可用）；arq=异步（依赖 redis + worker）
+      QUEUE_BACKEND: ${QUEUE_BACKEND:-sync}
+      REDIS_HOST: redis
+      MINERU_BASE_URL: ${MINERU_BASE_URL:-}
+      UVICORN_HOST: 0.0.0.0
     ports:
-      - "6379:6379"
+      - "${BACKEND_PORT:-8000}:8000"
+    volumes:
+      - ./data/uploads:/app/uploads
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request;urllib.request.urlopen('http://127.0.0.1:8000/api/v1/health')"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+    restart: unless-stopped
+
+  frontend:
+    build:
+      context: .
+      dockerfile: frontend/Dockerfile
+    image: umax-frontend
+    container_name: umaxrag-frontend
+    depends_on:
+      backend:
+        condition: service_healthy
+    ports:
+      - "${FRONTEND_PORT:-3000}:3000"
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3000/').then(r=>{if(!r.ok)process.exit(1)})"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+    restart: unless-stopped
+
+  # —— 异步入库档（QUEUE_BACKEND=arq 时启用）：docker compose --profile arq up -d ——
+  redis:
+    image: redis:7-alpine
+    container_name: umaxrag-redis
+    profiles: ["arq"]
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 5s
       timeout: 3s
       retries: 30
+    restart: unless-stopped
+
+  worker:
+    build: ./backend
+    image: umax-backend   # 与 backend 同镜像，仅换命令
+    container_name: umaxrag-worker
+    profiles: ["arq"]
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    environment:
+      PG_HOST: postgres
+      PG_USER: ${PG_USER:-rag}
+      PG_PASSWORD: ${PG_PASSWORD:-rag_dev_2026}
+      PG_DB: ${PG_DB:-umaxrag}
+      DASHSCOPE_API_KEY: ${DASHSCOPE_API_KEY:-}
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      MINERU_BASE_URL: ${MINERU_BASE_URL:-}
+    volumes:
+      - ./data/uploads:/app/uploads   # 与 backend 共享上传盘（worker 读原始文件）
+    command: ["python", "-m", "arq", "app.worker.WorkerSettings"]
+    restart: unless-stopped

@@ -896,9 +896,13 @@ def build_production_app(upload_dir: str = "uploads",
 
 
 def main() -> None:
+    import os
+
     import uvicorn
 
-    uvicorn.run(build_production_app(), host="127.0.0.1", port=8000)
+    # 容器内必须绑 0.0.0.0 才能被反代/compose 网络访问；本机开发默认 127.0.0.1 不变
+    uvicorn.run(build_production_app(), host=os.environ.get("UVICORN_HOST", "127.0.0.1"),
+                port=int(os.environ.get("UVICORN_PORT", "8000")))
 
 
 if __name__ == "__main__":

@@ -47,7 +47,8 @@ async def import_document(ctx: dict, document_id: int) -> dict:
 class WorkerSettings:
     from arq.connections import RedisSettings
 
-    redis_settings = RedisSettings(host="localhost", port=6379)
+    # Redis 地址走统一配置（REDIS_HOST/REDIS_PORT）：容器部署 worker 连 compose 网络的 redis 服务
+    redis_settings = RedisSettings(host=get_settings().redis_host, port=get_settings().redis_port)
     functions = [import_document]
     on_startup = _startup
     max_jobs = 4  # 解析吃内存，单机起步
