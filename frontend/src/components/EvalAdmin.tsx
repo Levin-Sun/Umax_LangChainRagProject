@@ -165,6 +165,7 @@ export default function EvalAdmin({ api }: { api: Client }) {
 
   const list = runs.data ?? [];
   const d = detail.data;
+  const judge = d?.metrics.judge;   // 契约里可选（老运行没有裁判分）
   const active = activeRunId === null ? null : list.find((r) => r.id === activeRunId) ?? d;
 
   return (
@@ -237,19 +238,20 @@ export default function EvalAdmin({ api }: { api: Client }) {
                   </div>
                 ))}
               </div>
-              {/* 裁判分单独一段：与通过率并列但分栏——软指标不能和可复算的硬指标混着看 */}
-              {active.metrics.judge.scored > 0 && (
+              {/* 裁判分单独一段：与通过率并列但分栏——软指标不能和可复算的硬指标混着看。
+                  契约里 judge 是带默认值的可选字段（老运行没有它），所以先取出来再判空 */}
+              {judge && judge.scored > 0 && (
                 <div className="rounded-lg border border-border bg-muted/30 px-4 py-3">
                   <div className="text-caption text-ink-3">
-                    裁判评分（{active.metrics.judge.model ?? "未知模型"}，不并入通过率）
+                    裁判评分（{judge.model ?? "未知模型"}，不并入通过率）
                   </div>
                   <div className="text-body text-ink-1">
-                    faithfulness {active.metrics.judge.faithful}/{active.metrics.judge.scored}
-                    （{pct(active.metrics.judge.faithful_rate)}）· relevance{" "}
-                    {active.metrics.judge.relevance}/{active.metrics.judge.scored}
-                    （{pct(active.metrics.judge.relevance_rate)}）
-                    {active.metrics.judge.judged !== active.metrics.judge.scored
-                      && ` · ⚠️ 判词未解析 ${active.metrics.judge.judged - active.metrics.judge.scored} 题`}
+                    faithfulness {judge.faithful}/{judge.scored}
+                    （{pct(judge.faithful_rate)}）· relevance{" "}
+                    {judge.relevance}/{judge.scored}
+                    （{pct(judge.relevance_rate)}）
+                    {judge.judged !== judge.scored
+                      && ` · ⚠️ 判词未解析 ${judge.judged - judge.scored} 题`}
                   </div>
                 </div>
               )}

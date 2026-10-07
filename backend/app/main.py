@@ -40,6 +40,7 @@ from app.services.judge import judge_stats, make_judge_fn
 from app.services.license import load_license_status, machine_fingerprint
 from app.services.retrieval import retrieve
 from app.services.settings import DEFAULT_MISS_ANSWER, SettingsStore
+from app.services.text import clean_text
 
 
 SCENARIOS = {"chat", "embedding", "rerank", "vision"}
@@ -56,6 +57,8 @@ EVAL_RUN_STATUSES = ("running", "done", "failed")
 # role/status 枚举同款派生（任务 4）：约束写进 schema，运行时校验集合是同一事实源，防漂移
 ROLES = {"admin", "member"}
 USER_STATUSES = {"active", "disabled"}
+# 消息角色（多模态会话）：user/assistant/system 三个，同样是响应侧枚举的单一事实源
+MESSAGE_ROLES = ("user", "assistant", "system")
 ROLE_PATTERN = "^(" + "|".join(sorted(ROLES)) + ")$"
 USER_STATUS_PATTERN = "^(" + "|".join(sorted(USER_STATUSES)) + ")$"
 # 契约 fuzz 修复①：id 落 PG INTEGER（int32）——裸 integer 无界，fuzz 发 2^31 直接 SQL 溢出 500，
@@ -157,25 +160,8 @@ def _query_int(v):
 QueryInt = Annotated[int, BeforeValidator(_query_int)]        # query 侧整数（limit/offset）
 
 
-def _clean_text(v):
-    # fuzz 修复⑧：契约里这些字段是 type:string，含 NUL(\u0000)/JSON 转义 \udXXX 孤立代理码点的
-    # 字符串是合法正数据，但 PG 文本列存不了（NUL 直接 DataError、孤立代理无法编 UTF-8 →
-    # UntranslatableCharacter，都是 500 违约）；而拒收 422 又犯"拒绝合法请求"违约，且 JSONB
-    # 嵌套串（capabilities 值）在 schema 里根本无法表达排除约束。唯一两侧自洽的行为=规范化入库：
-    # NUL 剔除、孤立代理→U+FFFD，dict/list 递归下钻（键与值都处理）。
-    if isinstance(v, str):
-        if "\x00" in v:
-            v = v.replace("\x00", "")
-        try:
-            v.encode("utf-8")
-        except UnicodeEncodeError:
-            v = "".join("\ufffd" if "\ud800" <= c <= "\udfff" else c for c in v)
-        return v
-    if isinstance(v, dict):
-        return {_clean_text(k): _clean_text(x) for k, x in v.items()}
-    if isinstance(v, list):
-        return [_clean_text(x) for x in v]
-    return v
+# 规范化闸的实现在 services/text（请求侧与模型输出侧共用同一份规则）
+_clean_text = clean_text
 
 
 def _utf8_str(v):
@@ -188,6 +174,12 @@ JsonSafe = Annotated[dict, BeforeValidator(_utf8_str)]         # JSONB 列（cap
 
 DocStatus = Literal[*DOC_STATUSES]   # 3.11+ 解包写法：与 DOC_STATUSES 不会漂移
 EvalRunStatus = Literal[*EVAL_RUN_STATUSES]
+# 响应侧枚举（评审补齐）：契约要能自己说清 role 只有两个值——此前是裸 string，
+# 前端手写联合类型只能算"口头约定"，而且两边都不报错（耦合断言一上来就抓到了这类漂移）
+RoleName = Literal[*sorted(ROLES)]
+UserStatusName = Literal[*sorted(USER_STATUSES)]
+ScenarioName = Literal[*sorted(SCENARIOS)]
+MessageRoleName = Literal[*MESSAGE_ROLES]
 
 
 class DocOut(BaseModel):
@@ -346,6 +338,226 @@ class BrandingPut(BaseModel):
     # 白标（§2.2）：两字段都可选——只带其一即部分更新；logo 显式 null=清除（用 model_fields_set 区分缺席）
     brand_name: BrandName | None = None
     logo: Utf8Str | None = None
+
+
+# ---- 响应模型（评审补齐：此前 33 个"会返回正文"的端点没有 schema，前端只能手写类型 + 强转，
+# 后端改一个字段名不会有任何测试变红 —— "契约是唯一事实源"在这半边是空的）----
+# 约定：这里的字段必须与端点真正返回的键**逐字对齐**。pydantic 会**默默丢掉**模型里没声明的字段
+# （评测 run 的 judge 字段就这样消失过一次），所以改动后要用 /tmp/snapshot_responses.py 做字段快照 diff。
+class HealthOut(BaseModel):
+    status: str
+    commit: str
+    started_at: datetime
+
+
+class AuthMeOut(BaseModel):
+    email: str
+    name: str
+    role: RoleName
+    kb_ids: list[int] | None      # null=admin 隐式全库
+    must_change_password: bool
+
+
+class KbOut(BaseModel):
+    id: int
+    name: str
+    description: str | None
+
+
+class HitOut(BaseModel):
+    """检索命中的切块（/retrieve 的返回）。rerank_score 只在配置了精排时出现。"""
+    id: int
+    doc_name: str
+    kb_id: int
+    chunk_index: int
+    content: str
+    score: float
+    bm25_hit: bool
+    vec_hit: bool
+    rerank_score: float | None = None
+
+
+class CitationOut(BaseModel):
+    n: int
+    doc_name: str
+    chunk_id: int
+    excerpt: str
+
+
+class ChatUsageOut(BaseModel):
+    prompt_tokens: int
+    completion_tokens: int
+
+
+class ChatOut(BaseModel):
+    conversation_id: int
+    answer: str
+    citations: list[CitationOut]
+    cited_docs: list[str]
+    usage: ChatUsageOut
+
+
+class ConversationOut(BaseModel):
+    id: int
+    title: str
+    kb_ids: list[int]
+
+
+class ImageUrlOut(BaseModel):
+    url: str
+
+
+class MessagePartOut(BaseModel):
+    """多模态消息片段。
+
+    两个刻意的选择：①**字段全显式声明**（而不是把 image_url 丢给 extra 透传）——
+    契约要能自己说清"消息可以带图"；代价是文本片段会带一个 `image_url: null`（前端 falsy 处理，无害）。
+    ②**extra=allow**——片段是 JSONB 自由结构，以后加 type（文件、音频）或加字段时
+    不能因为模型没声明就被 response_model 悄悄丢掉。"""
+    model_config = ConfigDict(extra="allow")
+
+    type: str
+    text: str | None = None
+    image_url: ImageUrlOut | None = None
+
+
+class MessageOut(BaseModel):
+    id: int
+    role: MessageRoleName
+    content: list[MessagePartOut]
+    citations: list[CitationOut] | None
+
+
+class ModelOut(BaseModel):
+    id: int
+    scenario: ScenarioName
+    provider: str
+    base_url: str
+    model_name: str
+    capabilities: dict
+    is_default: bool
+    fallback_rank: int
+    enabled: bool
+    api_key_masked: str          # 只回打码：明文 key 永不回传
+
+
+class UsageSummaryOut(BaseModel):
+    scenario: str
+    model: str
+    calls: int
+    prompt_tokens: int
+    completion_tokens: int
+
+
+class QuotaOut(BaseModel):
+    """配额状态（/usage/me）：限额 null=不限。"""
+    daily_used: int
+    daily_limit: int | None
+    monthly_used: int
+    monthly_limit: int | None
+    near_limit: bool
+    exceeded: bool
+    warn_ratio: float
+
+
+class UsageUserOut(QuotaOut):
+    id: int
+    email: str
+    name: str
+
+
+class UserOut(BaseModel):
+    id: int
+    email: str
+    name: str
+    role: RoleName
+    status: UserStatusName
+    created_at: str
+    kb_ids: list[int] | None
+    daily_token_limit: int | None
+    monthly_token_limit: int | None
+
+
+class AuditOut(BaseModel):
+    id: int
+    user_email: str | None
+    action: str
+    target_type: str | None
+    target_id: int | None
+    detail: dict
+    ip: str | None
+    created_at: datetime
+
+
+class ApiKeyOut(BaseModel):
+    id: int
+    name: str
+    key_prefix: str
+    kb_ids: list[int] | None
+    monthly_token_quota: int | None
+    enabled: bool
+    last_used_at: str | None
+    created_at: str
+
+
+class ApiKeyCreatedOut(ApiKeyOut):
+    key: str                    # 一次性明文：只在创建响应出现，此后任何接口都不回传
+
+
+class BrandingOut(BaseModel):
+    brand_name: str
+    logo: str | None
+
+
+class LicenseOut(BaseModel):
+    enforced: bool
+    valid: bool
+    reason: str | None
+    license_key: str | None
+    customer: str | None
+    issued_at: str | None
+    expires_at: str | None
+    days_left: int | None
+    features: dict
+    machine_fingerprint: str
+
+
+class SettingsSnapshotOut(BaseModel):
+    """配置中心快照：生效值 / 默认值 / 被覆盖的键 / 跨字段警告 / 标签与说明。"""
+    values: dict[str, str | int | float | bool]
+    defaults: dict[str, str | int | float | bool]
+    overridden: list[str]
+    warnings: list[str]
+    labels: dict[str, str]
+    help: dict[str, str]
+
+
+class OpenAiMessageOut(BaseModel):
+    role: str
+    content: str
+
+
+class OpenAiChoiceOut(BaseModel):
+    index: int
+    message: OpenAiMessageOut
+    finish_reason: str
+
+
+class OpenAiUsageOut(BaseModel):
+    prompt_tokens: int
+    completion_tokens: int
+    total_tokens: int
+
+
+class OpenAiChatOut(BaseModel):
+    """OpenAI 兼容响应 + 本产品扩展（citations）：客户拿现成 SDK 就能接，又能溯源。"""
+    id: str
+    object: str
+    created: int
+    model: str
+    choices: list[OpenAiChoiceOut]
+    usage: OpenAiUsageOut
+    citations: list[CitationOut]
 
 
 # ---- 评测（§阶段2「评测体系正式化」）----
@@ -729,7 +941,7 @@ def create_app(
             raise HTTPException(403, f"授权不可用：{st.reason}")
         return admin
 
-    @app.get("/api/v1/license", responses={**_ERR_GATE})
+    @app.get("/api/v1/license", response_model=LicenseOut, responses={**_ERR_GATE})
     def get_license(admin: User = Depends(require_admin_role)):
         st = license_status()
         return {"enforced": st.enforced, "valid": st.valid, "reason": st.reason,
@@ -781,7 +993,7 @@ def create_app(
         session.commit()
         response.delete_cookie(SESSION_COOKIE, path="/")
 
-    @app.get("/api/v1/auth/me", responses=_ERR_UNAUTH)
+    @app.get("/api/v1/auth/me", response_model=AuthMeOut, responses=_ERR_UNAUTH)
     def auth_me(user: User = Depends(get_user), session: Session = Depends(get_session)):
         allowed = allowed_kb_ids(session, user)
         return {"email": user.email, "name": user.name, "role": user.role,
@@ -827,12 +1039,12 @@ def create_app(
             q = q.filter(UserSession.token_hash != except_hash)
         q.delete()
 
-    @app.get("/api/v1/users", responses={**_ERR_GATE})
+    @app.get("/api/v1/users", response_model=list[UserOut], responses={**_ERR_GATE})
     def list_users(admin: User = Depends(require_admin_role), session: Session = Depends(get_session)):
         g = _grants_map(session)
         return [_user_json(u, g) for u in session.query(User).order_by(User.id)]
 
-    @app.post("/api/v1/users", status_code=201,
+    @app.post("/api/v1/users", status_code=201, response_model=UserOut,
               responses={**_ERR(400, "email 重复或 role 非法"), **_ERR_GATE, **_ERR_BODY})
     def create_user_api(body: UserIn, request: Request,
                         admin: User = Depends(require_license), session: Session = Depends(get_session)):
@@ -852,7 +1064,7 @@ def create_app(
         session.commit()
         return _user_json(u, _grants_map(session))
 
-    @app.patch("/api/v1/users/{user_id}",
+    @app.patch("/api/v1/users/{user_id}", response_model=UserOut,
                responses={**_ERR(400, "不能对当前登录管理员降级/禁用，role/status 非法"),
                           **_ERR(404, "用户不存在"), **_ERR_GATE, **_ERR_BODY})
     def patch_user(user_id: PathId, body: UserPatchIn, request: Request,
@@ -917,7 +1129,7 @@ def create_app(
                      target_id=user_id, detail={"email": email}, ip=_client_ip(request))
         session.commit()
 
-    @app.get("/api/v1/users/{user_id}/grants",
+    @app.get("/api/v1/users/{user_id}/grants", response_model=list[int],
              responses={**_ERR(400, "管理员隐式全库，无授权表"), **_ERR(404, "用户不存在"),
                         **_ERR_GATE})
     def get_grants(user_id: PathId, admin: User = Depends(require_admin_role),
@@ -929,7 +1141,7 @@ def create_app(
             raise HTTPException(400, "管理员隐式全库，无授权表")
         return sorted(_grants_map(session).get(u.id, []))
 
-    @app.put("/api/v1/users/{user_id}/grants",
+    @app.put("/api/v1/users/{user_id}/grants", response_model=list[int],
              responses={**_ERR(400, "管理员无授权表 / 知识库不存在"), **_ERR(404, "用户不存在"),
                         **_ERR_GATE, **_ERR_BODY})
     def put_grants(user_id: PathId, body: GrantsIn, request: Request,
@@ -951,7 +1163,7 @@ def create_app(
         return ids
 
     # ---- 审计查询（spec §5，任务 5）：admin 独占，过滤+分页，倒序 ----
-    @app.get("/api/v1/audit", responses={**_ERR_GATE})
+    @app.get("/api/v1/audit", response_model=list[AuditOut], responses={**_ERR_GATE})
     def list_audit(user: Annotated[str | None, Query(max_length=255)] = None,
                    action: Annotated[str | None, Query(max_length=32)] = None,
                    limit: QueryInt = 50, offset: QueryInt = 0,
@@ -974,7 +1186,7 @@ def create_app(
 
     started_at = _now().isoformat()
 
-    @app.get("/api/v1/health")
+    @app.get("/api/v1/health", response_model=HealthOut)
     def health(session: Session = Depends(get_session)):
         session.execute(sa_text("SELECT 1"))
         # commit/started_at：排查"改了不生效"的第一手信息——先确认进程跑的是哪份代码
@@ -986,7 +1198,7 @@ def create_app(
         if allowed is not None and not set(kb_ids or []) <= allowed:
             raise HTTPException(403, "无权访问指定知识库")
 
-    @app.post("/api/v1/kb", status_code=201,
+    @app.post("/api/v1/kb", status_code=201, response_model=KbOut,
               responses={**_ERR_BODY, **_ERR_GATE})
     def create_kb(body: KbIn, request: Request,
                   admin: User = Depends(require_license),
@@ -1003,7 +1215,7 @@ def create_app(
         session.commit()
         return {"id": kb.id, "name": kb.name, "description": kb.description}
 
-    @app.get("/api/v1/kb", responses={**_ERR_LOGIN_GATE})
+    @app.get("/api/v1/kb", response_model=list[KbOut], responses={**_ERR_LOGIN_GATE})
     def list_kb(user: User = Depends(get_user), session: Session = Depends(get_session)):
         # member 的库列表在查询层过滤（不是前端隐藏）——空授权=空列表
         allowed = allowed_kb_ids(session, user)
@@ -1043,7 +1255,7 @@ def create_app(
 
                 logging.getLogger("umax").warning("原文件清理失败 %s：%s", f, exc)
 
-    @app.get("/api/v1/kb/{kb_id}/documents",
+    @app.get("/api/v1/kb/{kb_id}/documents", response_model=list[DocOut],
              responses={**_ERR(404, "知识库不存在"), **_ERR_LOGIN_GATE})
     def list_documents(kb_id: PathId, user: User = Depends(get_user),
                        session: Session = Depends(get_session)):
@@ -1056,6 +1268,20 @@ def create_app(
 
     # ---- 文档与入库 ----
     BATCH_MAX = 20   # 单批文件数上限：挡住"一次传一个文件夹"把单请求打成长时间占用
+
+    def _read_or_fail(session: Session, doc: Document) -> bytes | None:
+        """读原始文件；读不出来就把文档标 failed 并返回 None。
+
+        评审踩过：`read_stored` 抛在 ingest 的 try 之外，于是原文件被删/磁盘满/运维清过 uploads 时——
+        同步档是未声明的 500、异步档是任务失败重试——而**文档行永远停在 pending**：界面一直"排队中"，
+        没有线索指向"原文件没了"。失败态本身就是排查信息，四个入口（上传/批量/重处理/重建）口径必须一致。
+        """
+        try:
+            return read_stored(doc)
+        except OSError as exc:
+            doc.status, doc.error = "failed", f"原文件不可读：{exc}"
+            session.commit()
+            return None
 
     def _store_upload(session: Session, kb: KnowledgeBase, file: UploadFile,
                       request: Request, admin: User) -> tuple[Document | None, str, str | None]:
@@ -1106,7 +1332,11 @@ def create_app(
             if err or doc is None:
                 results.append({"name": name, "document": None, "error": err})
                 continue
-            stored.append((doc, read_stored(doc)))
+            raw = _read_or_fail(session, doc)
+            if raw is None:            # 读不出来：这一项以 failed 形态返回，其余照常
+                results.append({"name": name, "document": _doc_json(doc), "error": None})
+                continue
+            stored.append((doc, raw))
             results.append({"name": name, "document": _doc_json(doc), "error": None})
         session.commit()
         if queue is not None:
@@ -1144,7 +1374,9 @@ def create_app(
         if queue is not None:
             queue.enqueue_import(doc.id)
             return _doc_json(doc)  # pending，worker 接手
-        raw = read_stored(doc)
+        raw = _read_or_fail(session, doc)
+        if raw is None:
+            return _doc_json(doc)      # failed 带着原因回给前端，不是 500
         doc = ingest_document(session, doc, raw, embedder=embedder, mineru=mineru,
                               vision_fn=vision_fn,
                               caption_images=cfg.effective()["doc_image_caption"],
@@ -1186,7 +1418,7 @@ def create_app(
             raise HTTPException(404, "文档不存在")
         return doc
 
-    @app.get("/api/v1/documents/{doc_id}",
+    @app.get("/api/v1/documents/{doc_id}", response_model=DocOut,
              responses={**_ERR(404, "文档不存在"), **_ERR_LOGIN_GATE})
     def get_document(doc_id: PathId, user: User = Depends(get_user),
                      session: Session = Depends(get_session)):
@@ -1202,7 +1434,7 @@ def create_app(
                 for c in session.query(Chunk).filter_by(document_id=doc_id)
                 .order_by(Chunk.chunk_index)]
 
-    @app.patch("/api/v1/documents/{doc_id}",
+    @app.patch("/api/v1/documents/{doc_id}", response_model=DocOut,
                responses={**_ERR(404, "文档不存在"), **_ERR_BODY, **_ERR_GATE})
     def patch_document(doc_id: PathId, body: DocPatchIn,
                        admin: User = Depends(require_license),
@@ -1218,7 +1450,7 @@ def create_app(
         session.commit()
         return _doc_json(doc)
 
-    @app.post("/api/v1/documents/{doc_id}/reprocess", status_code=202,
+    @app.post("/api/v1/documents/{doc_id}/reprocess", status_code=202, response_model=DocOut,
               responses={**_ERR(404, "文档不存在"), **_ERR_GATE})
     def reprocess(doc_id: PathId, request: Request,
                   admin: User = Depends(require_license),
@@ -1236,7 +1468,10 @@ def create_app(
             session.commit()
             queue.enqueue_import(doc.id)
             return _doc_json(doc)
-        doc = ingest_document(session, doc, read_stored(doc), embedder=embedder,
+        raw = _read_or_fail(session, doc)
+        if raw is None:
+            return _doc_json(doc)
+        doc = ingest_document(session, doc, raw, embedder=embedder,
                               mineru=mineru, vision_fn=vision_fn,
                               caption_images=cfg.effective()["doc_image_caption"],
                               **_chunk_params(session, session.get(KnowledgeBase, doc.kb_id)))
@@ -1261,11 +1496,11 @@ def create_app(
     SettingsPutIn = pydantic_create_model("SettingsPutIn",
                                           __config__=ConfigDict(extra="forbid"), **_fields)
 
-    @app.get("/api/v1/settings", responses={**_ERR_GATE})
+    @app.get("/api/v1/settings", response_model=SettingsSnapshotOut, responses={**_ERR_GATE})
     def get_settings_api(admin: User = Depends(require_admin_role)):
         return cfg.snapshot()
 
-    @app.put("/api/v1/settings",
+    @app.put("/api/v1/settings", response_model=SettingsSnapshotOut,
              responses={**_ERR_GATE, **_ERR_BODY})
     def put_settings_api(body: SettingsPutIn, request: Request,
                          admin: User = Depends(require_license),
@@ -1315,11 +1550,11 @@ def create_app(
             raise HTTPException(429, f"本月 token 配额已用尽（{st['monthly_used']}/"
                                      f"{st['monthly_limit']}），请联系管理员调整")
 
-    @app.get("/api/v1/usage/me", responses={**_ERR_LOGIN_GATE})
+    @app.get("/api/v1/usage/me", response_model=QuotaOut, responses={**_ERR_LOGIN_GATE})
     def usage_me(user: User = Depends(get_user), session: Session = Depends(get_session)):
         return _quota_state(session, user)
 
-    @app.get("/api/v1/usage/users", responses={**_ERR_GATE})
+    @app.get("/api/v1/usage/users", response_model=list[UsageUserOut], responses={**_ERR_GATE})
     def usage_users(admin: User = Depends(require_admin_role),
                     session: Session = Depends(get_session)):
         """按人看用量与限额（"谁快超了"的一眼视图；被拦状态由 exceeded 字段承载，不写审计避免刷屏）。"""
@@ -1330,13 +1565,11 @@ def create_app(
         return rows
 
     def _chunk_params(session: Session, kb: KnowledgeBase | None) -> dict:
-        """切块参数：建库时锁定的值优先（§3.3「建库时锁定切分参数」），否则用当前配置。"""
-        c = cfg.effective()
-        return {"chunk_target": (kb.chunk_target if kb and kb.chunk_target else c["chunk_target"]),
-                "chunk_min": c["chunk_min"]}
+        """切块参数：一律走配置中心那份单一事实源（sync/async 必须同口径）。"""
+        return cfg.chunk_params(kb)
 
     # ---- 检索与问答：可见性在检索层钳制（SQL 谓词），命中集就是授权集的子集 ----
-    @app.post("/api/v1/retrieve", responses={**_ERR_BODY, **_ERR_GATE})
+    @app.post("/api/v1/retrieve", response_model=list[HitOut], responses={**_ERR_BODY, **_ERR_GATE})
     def retrieve_api(body: RetrieveIn, user: User = Depends(get_user),
                      session: Session = Depends(get_session)):
         allowed = allowed_kb_ids(session, user)
@@ -1347,7 +1580,7 @@ def create_app(
                         recall_k=c["recall_k"], top_k=body.top_k or c["rerank_top_n"],
                         min_sim=c["min_sim"])
 
-    @app.post("/api/v1/chat",
+    @app.post("/api/v1/chat", response_model=ChatOut,
               responses={**_ERR(404, "会话不存在"), **_ERR(429, "配额已用尽"), **_ERR_BODY, **_ERR_GATE})
     def chat(body: ChatIn, user: User = Depends(get_user),
              session: Session = Depends(get_session)):
@@ -1415,7 +1648,7 @@ def create_app(
             if out is None:
                 answer, usage, citations = c["chat_miss_answer"], {"prompt_tokens": 0, "completion_tokens": 0}, []
             else:
-                answer = out["answer"]
+                answer = clean_text(out["answer"])   # 模型输出也过规范化闸（否则 NUL 直接 500）
                 usage = {"prompt_tokens": out.get("prompt_tokens") or 0,
                          "completion_tokens": out.get("completion_tokens") or 0}
                 citations = [{"n": i, "doc_name": h["doc_name"], "chunk_id": h["id"],
@@ -1434,7 +1667,7 @@ def create_app(
                 "cited_docs": parse_citations(answer, hits), "usage": usage}
 
     # ---- 会话历史：按登录者隔离（admin 也没有特权看别人的会话）----
-    @app.get("/api/v1/conversations", responses={**_ERR_LOGIN_GATE})
+    @app.get("/api/v1/conversations", response_model=list[ConversationOut], responses={**_ERR_LOGIN_GATE})
     def list_conversations(q: Annotated[str | None, Query(max_length=64)] = None,
                            user: User = Depends(get_user),
                            session: Session = Depends(get_session)):
@@ -1458,7 +1691,7 @@ def create_app(
         session.delete(conv)   # messages 走 FK CASCADE；自助数据管理不进审计流
         session.commit()
 
-    @app.get("/api/v1/conversations/{conv_id}/messages",
+    @app.get("/api/v1/conversations/{conv_id}/messages", response_model=list[MessageOut],
              responses={**_ERR(404, "会话不存在"), **_ERR_LOGIN_GATE})
     def list_messages(conv_id: PathId, user: User = Depends(get_user),
                       session: Session = Depends(get_session)):
@@ -1483,7 +1716,7 @@ def create_app(
                 "fallback_rank": m.fallback_rank, "enabled": m.enabled,
                 "api_key_masked": ("****" + plain[-4:]) if plain else ""}
 
-    @app.post("/api/v1/models", status_code=201,
+    @app.post("/api/v1/models", status_code=201, response_model=ModelOut,
               responses={**_ERR(400, "scenario 非法"), **_ERR(503, "未配置 GATEWAY_SECRET"),
                          **_ERR_GATE})
     def create_model(body: ModelIn, request: Request,
@@ -1506,13 +1739,13 @@ def create_app(
         session.commit()
         return _model_json(m)
 
-    @app.get("/api/v1/models", responses={**_ERR_GATE})
+    @app.get("/api/v1/models", response_model=list[ModelOut], responses={**_ERR_GATE})
     def list_models(admin: User = Depends(require_admin_role), session: Session = Depends(get_session)):
         rows = session.query(ModelConfig).order_by(ModelConfig.scenario,
                                                    ModelConfig.fallback_rank, ModelConfig.id)
         return [_model_json(m) for m in rows]
 
-    @app.patch("/api/v1/models/{model_id}",
+    @app.patch("/api/v1/models/{model_id}", response_model=ModelOut,
                responses={**_ERR(400, "scenario 非法"), **_ERR(404, "模型配置不存在"),
                           **_ERR(503, "未配置 GATEWAY_SECRET"), **_ERR_GATE})
     def patch_model(model_id: PathId, body: ModelPatchIn, request: Request,
@@ -1553,7 +1786,7 @@ def create_app(
             session.commit()
 
     # ---- 用量看板简版（§C：成本折算的事实来源）----
-    @app.get("/api/v1/usage/summary", responses={**_ERR_GATE})
+    @app.get("/api/v1/usage/summary", response_model=list[UsageSummaryOut], responses={**_ERR_GATE})
     def usage_summary(admin: User = Depends(require_admin_role),
                       session: Session = Depends(get_session)):
         rows = (session.query(UsageRecord.scenario, UsageRecord.model,
@@ -1599,7 +1832,7 @@ def create_app(
             UsageRecord.created_at >= month_start).scalar()
         return int(total or 0)
 
-    @app.post("/api/v1/api-keys", status_code=201,
+    @app.post("/api/v1/api-keys", status_code=201, response_model=ApiKeyCreatedOut,
               responses={**_ERR(400, "存在不存在的知识库 id"), **_ERR_GATE, **_ERR_BODY})
     def create_api_key(body: ApiKeyIn, request: Request,
                        admin: User = Depends(require_license),
@@ -1621,12 +1854,12 @@ def create_app(
         out["key"] = plain   # 明文只在这一次响应里出现
         return out
 
-    @app.get("/api/v1/api-keys", responses={**_ERR_GATE})
+    @app.get("/api/v1/api-keys", response_model=list[ApiKeyOut], responses={**_ERR_GATE})
     def list_api_keys(admin: User = Depends(require_admin_role),
                       session: Session = Depends(get_session)):
         return [_api_key_json(k) for k in session.query(ApiKey).order_by(ApiKey.id)]
 
-    @app.patch("/api/v1/api-keys/{key_id}",
+    @app.patch("/api/v1/api-keys/{key_id}", response_model=ApiKeyOut,
                responses={**_ERR(400, "存在不存在的知识库 id"), **_ERR(404, "API key 不存在"),
                           **_ERR_GATE, **_ERR_BODY})
     def patch_api_key(key_id: PathId, body: ApiKeyPatchIn, request: Request,
@@ -1670,7 +1903,7 @@ def create_app(
                      detail={"name": name}, ip=_client_ip(request))
         session.commit()
 
-    @app.post("/api/v1/openai/chat/completions",
+    @app.post("/api/v1/openai/chat/completions", response_model=OpenAiChatOut,
               responses={**_ERR(400, "messages 里没有 user 消息"), **_ERR(401, "无效的 API key"),
                          **_ERR(429, "本月配额已用尽")})
     def openai_chat_completions(body: OpenAiChatIn, request: Request,
@@ -1691,7 +1924,7 @@ def create_app(
             answer, usage, citations = c["chat_miss_answer"], {"prompt_tokens": 0, "completion_tokens": 0}, []
         else:
             out = chat_fn(question, hits)
-            answer = out["answer"]
+            answer = clean_text(out["answer"])   # 模型输出也过规范化闸（否则 NUL 直接 500）
             usage = {"prompt_tokens": out.get("prompt_tokens") or 0,
                      "completion_tokens": out.get("completion_tokens") or 0}
             citations = [{"n": i, "doc_name": h["doc_name"], "chunk_id": h["id"],
@@ -1735,11 +1968,11 @@ def create_app(
         return {"brand_name": _setting_get(session, "brand_name", DEFAULT_BRAND_NAME),
                 "logo": _setting_get(session, "logo", None)}
 
-    @app.get("/api/v1/branding")
+    @app.get("/api/v1/branding", response_model=BrandingOut)
     def get_branding(session: Session = Depends(get_session)):
         return _branding_json(session)
 
-    @app.put("/api/v1/branding",
+    @app.put("/api/v1/branding", response_model=BrandingOut,
              responses={**_ERR(400, "logo 仅支持 data:image/* base64（≤400KB）"),
                         **_ERR_GATE, **_ERR_BODY})
     def put_branding(body: BrandingPut, request: Request,
@@ -1833,7 +2066,7 @@ def create_app(
                         top_docs = [h["doc_name"] for h in hits]
                         if hits and chat_fn is not None:
                             out = chat_fn(q.question, hits)
-                            answer = out["answer"]
+                            answer = clean_text(out["answer"])   # 模型输出也过规范化闸（否则 NUL 直接 500）
                             cited_docs = parse_citations(answer, hits)
                             if out.get("model"):
                                 used_models.add(out["model"])

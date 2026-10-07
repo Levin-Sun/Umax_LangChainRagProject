@@ -713,12 +713,52 @@ export interface paths {
 export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
+        /** ApiKeyCreatedOut */
+        ApiKeyCreatedOut: {
+            /** Created At */
+            created_at: string;
+            /** Enabled */
+            enabled: boolean;
+            /** Id */
+            id: number;
+            /** Kb Ids */
+            kb_ids: number[] | null;
+            /** Key */
+            key: string;
+            /** Key Prefix */
+            key_prefix: string;
+            /** Last Used At */
+            last_used_at: string | null;
+            /** Monthly Token Quota */
+            monthly_token_quota: number | null;
+            /** Name */
+            name: string;
+        };
         /** ApiKeyIn */
         ApiKeyIn: {
             /** Kb Ids */
             kb_ids?: number[] | null;
             /** Monthly Token Quota */
             monthly_token_quota?: number | null;
+            /** Name */
+            name: string;
+        };
+        /** ApiKeyOut */
+        ApiKeyOut: {
+            /** Created At */
+            created_at: string;
+            /** Enabled */
+            enabled: boolean;
+            /** Id */
+            id: number;
+            /** Kb Ids */
+            kb_ids: number[] | null;
+            /** Key Prefix */
+            key_prefix: string;
+            /** Last Used At */
+            last_used_at: string | null;
+            /** Monthly Token Quota */
+            monthly_token_quota: number | null;
             /** Name */
             name: string;
         };
@@ -732,6 +772,46 @@ export interface components {
             monthly_token_quota?: number | null;
             /** Name */
             name?: string | null;
+        };
+        /** AuditOut */
+        AuditOut: {
+            /** Action */
+            action: string;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** Detail */
+            detail: {
+                [key: string]: unknown;
+            };
+            /** Id */
+            id: number;
+            /** Ip */
+            ip: string | null;
+            /** Target Id */
+            target_id: number | null;
+            /** Target Type */
+            target_type: string | null;
+            /** User Email */
+            user_email: string | null;
+        };
+        /** AuthMeOut */
+        AuthMeOut: {
+            /** Email */
+            email: string;
+            /** Kb Ids */
+            kb_ids: number[] | null;
+            /** Must Change Password */
+            must_change_password: boolean;
+            /** Name */
+            name: string;
+            /**
+             * Role
+             * @enum {string}
+             */
+            role: "admin" | "member";
         };
         /**
          * BatchUploadItemOut
@@ -753,6 +833,13 @@ export interface components {
         Body_upload_documents_batch_api_v1_kb__kb_id__documents_batch_post: {
             /** Files */
             files: string[];
+        };
+        /** BrandingOut */
+        BrandingOut: {
+            /** Brand Name */
+            brand_name: string;
+            /** Logo */
+            logo: string | null;
         };
         /** BrandingPut */
         BrandingPut: {
@@ -779,6 +866,25 @@ export interface components {
             /** Question */
             question: string;
         };
+        /** ChatOut */
+        ChatOut: {
+            /** Answer */
+            answer: string;
+            /** Citations */
+            citations: components["schemas"]["CitationOut"][];
+            /** Cited Docs */
+            cited_docs: string[];
+            /** Conversation Id */
+            conversation_id: number;
+            usage: components["schemas"]["ChatUsageOut"];
+        };
+        /** ChatUsageOut */
+        ChatUsageOut: {
+            /** Completion Tokens */
+            completion_tokens: number;
+            /** Prompt Tokens */
+            prompt_tokens: number;
+        };
         /** ChunkPreviewOut */
         ChunkPreviewOut: {
             /** Chunk Index */
@@ -793,6 +899,26 @@ export interface components {
             meta: {
                 [key: string]: unknown;
             };
+        };
+        /** CitationOut */
+        CitationOut: {
+            /** Chunk Id */
+            chunk_id: number;
+            /** Doc Name */
+            doc_name: string;
+            /** Excerpt */
+            excerpt: string;
+            /** N */
+            n: number;
+        };
+        /** ConversationOut */
+        ConversationOut: {
+            /** Id */
+            id: number;
+            /** Kb Ids */
+            kb_ids: number[];
+            /** Title */
+            title: string;
         };
         /** DocOut */
         DocOut: {
@@ -1198,6 +1324,47 @@ export interface components {
             /** Detail */
             detail?: components["schemas"]["ValidationError"][];
         };
+        /** HealthOut */
+        HealthOut: {
+            /** Commit */
+            commit: string;
+            /**
+             * Started At
+             * Format: date-time
+             */
+            started_at: string;
+            /** Status */
+            status: string;
+        };
+        /**
+         * HitOut
+         * @description 检索命中的切块（/retrieve 的返回）。rerank_score 只在配置了精排时出现。
+         */
+        HitOut: {
+            /** Bm25 Hit */
+            bm25_hit: boolean;
+            /** Chunk Index */
+            chunk_index: number;
+            /** Content */
+            content: string;
+            /** Doc Name */
+            doc_name: string;
+            /** Id */
+            id: number;
+            /** Kb Id */
+            kb_id: number;
+            /** Rerank Score */
+            rerank_score?: number | null;
+            /** Score */
+            score: number;
+            /** Vec Hit */
+            vec_hit: boolean;
+        };
+        /** ImageUrlOut */
+        ImageUrlOut: {
+            /** Url */
+            url: string;
+        };
         /** KbIn */
         KbIn: {
             /** Description */
@@ -1205,12 +1372,78 @@ export interface components {
             /** Name */
             name: string;
         };
+        /** KbOut */
+        KbOut: {
+            /** Description */
+            description: string | null;
+            /** Id */
+            id: number;
+            /** Name */
+            name: string;
+        };
+        /** LicenseOut */
+        LicenseOut: {
+            /** Customer */
+            customer: string | null;
+            /** Days Left */
+            days_left: number | null;
+            /** Enforced */
+            enforced: boolean;
+            /** Expires At */
+            expires_at: string | null;
+            /** Features */
+            features: {
+                [key: string]: unknown;
+            };
+            /** Issued At */
+            issued_at: string | null;
+            /** License Key */
+            license_key: string | null;
+            /** Machine Fingerprint */
+            machine_fingerprint: string;
+            /** Reason */
+            reason: string | null;
+            /** Valid */
+            valid: boolean;
+        };
         /** LoginIn */
         LoginIn: {
             /** Email */
             email: string;
             /** Password */
             password: string;
+        };
+        /** MessageOut */
+        MessageOut: {
+            /** Citations */
+            citations: components["schemas"]["CitationOut"][] | null;
+            /** Content */
+            content: components["schemas"]["MessagePartOut"][];
+            /** Id */
+            id: number;
+            /**
+             * Role
+             * @enum {string}
+             */
+            role: "user" | "assistant" | "system";
+        };
+        /**
+         * MessagePartOut
+         * @description 多模态消息片段。
+         *
+         *     两个刻意的选择：①**字段全显式声明**（而不是把 image_url 丢给 extra 透传）——
+         *     契约要能自己说清"消息可以带图"；代价是文本片段会带一个 `image_url: null`（前端 falsy 处理，无害）。
+         *     ②**extra=allow**——片段是 JSONB 自由结构，以后加 type（文件、音频）或加字段时
+         *     不能因为模型没声明就被 response_model 悄悄丢掉。
+         */
+        MessagePartOut: {
+            image_url?: components["schemas"]["ImageUrlOut"] | null;
+            /** Text */
+            text?: string | null;
+            /** Type */
+            type: string;
+        } & {
+            [key: string]: unknown;
         };
         /** ModelIn */
         ModelIn: {
@@ -1247,6 +1480,34 @@ export interface components {
             /** Scenario */
             scenario: string;
         };
+        /** ModelOut */
+        ModelOut: {
+            /** Api Key Masked */
+            api_key_masked: string;
+            /** Base Url */
+            base_url: string;
+            /** Capabilities */
+            capabilities: {
+                [key: string]: unknown;
+            };
+            /** Enabled */
+            enabled: boolean;
+            /** Fallback Rank */
+            fallback_rank: number;
+            /** Id */
+            id: number;
+            /** Is Default */
+            is_default: boolean;
+            /** Model Name */
+            model_name: string;
+            /** Provider */
+            provider: string;
+            /**
+             * Scenario
+             * @enum {string}
+             */
+            scenario: "chat" | "embedding" | "rerank" | "vision";
+        };
         /** ModelPatchIn */
         ModelPatchIn: {
             /** Api Key */
@@ -1277,12 +1538,75 @@ export interface components {
             /** Model */
             model?: string | null;
         };
+        /**
+         * OpenAiChatOut
+         * @description OpenAI 兼容响应 + 本产品扩展（citations）：客户拿现成 SDK 就能接，又能溯源。
+         */
+        OpenAiChatOut: {
+            /** Choices */
+            choices: components["schemas"]["OpenAiChoiceOut"][];
+            /** Citations */
+            citations: components["schemas"]["CitationOut"][];
+            /** Created */
+            created: number;
+            /** Id */
+            id: string;
+            /** Model */
+            model: string;
+            /** Object */
+            object: string;
+            usage: components["schemas"]["OpenAiUsageOut"];
+        };
+        /** OpenAiChoiceOut */
+        OpenAiChoiceOut: {
+            /** Finish Reason */
+            finish_reason: string;
+            /** Index */
+            index: number;
+            message: components["schemas"]["OpenAiMessageOut"];
+        };
         /** OpenAiMessageIn */
         OpenAiMessageIn: {
             /** Content */
             content: string;
             /** Role */
             role: string;
+        };
+        /** OpenAiMessageOut */
+        OpenAiMessageOut: {
+            /** Content */
+            content: string;
+            /** Role */
+            role: string;
+        };
+        /** OpenAiUsageOut */
+        OpenAiUsageOut: {
+            /** Completion Tokens */
+            completion_tokens: number;
+            /** Prompt Tokens */
+            prompt_tokens: number;
+            /** Total Tokens */
+            total_tokens: number;
+        };
+        /**
+         * QuotaOut
+         * @description 配额状态（/usage/me）：限额 null=不限。
+         */
+        QuotaOut: {
+            /** Daily Limit */
+            daily_limit: number | null;
+            /** Daily Used */
+            daily_used: number;
+            /** Exceeded */
+            exceeded: boolean;
+            /** Monthly Limit */
+            monthly_limit: number | null;
+            /** Monthly Used */
+            monthly_used: number;
+            /** Near Limit */
+            near_limit: boolean;
+            /** Warn Ratio */
+            warn_ratio: number;
         };
         /** ReindexIn */
         ReindexIn: {
@@ -1358,6 +1682,68 @@ export interface components {
              */
             vision_prompt?: string | null;
         };
+        /**
+         * SettingsSnapshotOut
+         * @description 配置中心快照：生效值 / 默认值 / 被覆盖的键 / 跨字段警告 / 标签与说明。
+         */
+        SettingsSnapshotOut: {
+            /** Defaults */
+            defaults: {
+                [key: string]: string | number | boolean;
+            };
+            /** Help */
+            help: {
+                [key: string]: string;
+            };
+            /** Labels */
+            labels: {
+                [key: string]: string;
+            };
+            /** Overridden */
+            overridden: string[];
+            /** Values */
+            values: {
+                [key: string]: string | number | boolean;
+            };
+            /** Warnings */
+            warnings: string[];
+        };
+        /** UsageSummaryOut */
+        UsageSummaryOut: {
+            /** Calls */
+            calls: number;
+            /** Completion Tokens */
+            completion_tokens: number;
+            /** Model */
+            model: string;
+            /** Prompt Tokens */
+            prompt_tokens: number;
+            /** Scenario */
+            scenario: string;
+        };
+        /** UsageUserOut */
+        UsageUserOut: {
+            /** Daily Limit */
+            daily_limit: number | null;
+            /** Daily Used */
+            daily_used: number;
+            /** Email */
+            email: string;
+            /** Exceeded */
+            exceeded: boolean;
+            /** Id */
+            id: number;
+            /** Monthly Limit */
+            monthly_limit: number | null;
+            /** Monthly Used */
+            monthly_used: number;
+            /** Name */
+            name: string;
+            /** Near Limit */
+            near_limit: boolean;
+            /** Warn Ratio */
+            warn_ratio: number;
+        };
         /** UserIn */
         UserIn: {
             /** Daily Token Limit */
@@ -1378,6 +1764,33 @@ export interface components {
              * @default member
              */
             role: string;
+        };
+        /** UserOut */
+        UserOut: {
+            /** Created At */
+            created_at: string;
+            /** Daily Token Limit */
+            daily_token_limit: number | null;
+            /** Email */
+            email: string;
+            /** Id */
+            id: number;
+            /** Kb Ids */
+            kb_ids: number[] | null;
+            /** Monthly Token Limit */
+            monthly_token_limit: number | null;
+            /** Name */
+            name: string;
+            /**
+             * Role
+             * @enum {string}
+             */
+            role: "admin" | "member";
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "active" | "disabled";
         };
         /** UserPatchIn */
         UserPatchIn: {
@@ -1431,7 +1844,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
+                    "application/json": components["schemas"]["ApiKeyOut"][];
                 };
             };
             /** @description 需要登录 */
@@ -1482,7 +1895,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
+                    "application/json": components["schemas"]["ApiKeyCreatedOut"];
                 };
             };
             /** @description 请求体解析失败 */
@@ -1618,7 +2031,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
+                    "application/json": components["schemas"]["ApiKeyOut"];
                 };
             };
             /** @description 请求体解析失败 */
@@ -1697,7 +2110,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
+                    "application/json": components["schemas"]["AuditOut"][];
                 };
             };
             /** @description 需要登录 */
@@ -1887,7 +2300,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
+                    "application/json": components["schemas"]["AuthMeOut"];
                 };
             };
             /** @description 需要登录 */
@@ -1916,7 +2329,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
+                    "application/json": components["schemas"]["BrandingOut"];
                 };
             };
         };
@@ -1940,7 +2353,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
+                    "application/json": components["schemas"]["BrandingOut"];
                 };
             };
             /** @description 请求体解析失败 */
@@ -2009,7 +2422,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
+                    "application/json": components["schemas"]["ChatOut"];
                 };
             };
             /** @description 请求体解析失败 */
@@ -2094,7 +2507,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
+                    "application/json": components["schemas"]["ConversationOut"][];
                 };
             };
             /** @description 需要登录 */
@@ -2199,7 +2612,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
+                    "application/json": components["schemas"]["MessageOut"][];
                 };
             };
             /** @description 需要登录 */
@@ -2257,7 +2670,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
+                    "application/json": components["schemas"]["DocOut"];
                 };
             };
             /** @description 需要登录 */
@@ -2384,7 +2797,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
+                    "application/json": components["schemas"]["DocOut"];
                 };
             };
             /** @description 请求体解析失败 */
@@ -2518,7 +2931,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
+                    "application/json": components["schemas"]["DocOut"];
                 };
             };
             /** @description 需要登录 */
@@ -3170,7 +3583,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
+                    "application/json": components["schemas"]["HealthOut"];
                 };
             };
         };
@@ -3190,7 +3603,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
+                    "application/json": components["schemas"]["KbOut"][];
                 };
             };
             /** @description 需要登录 */
@@ -3232,7 +3645,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
+                    "application/json": components["schemas"]["KbOut"];
                 };
             };
             /** @description 请求体解析失败 */
@@ -3364,7 +3777,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
+                    "application/json": components["schemas"]["DocOut"][];
                 };
             };
             /** @description 需要登录 */
@@ -3589,7 +4002,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
+                    "application/json": components["schemas"]["LicenseOut"];
                 };
             };
             /** @description 需要登录 */
@@ -3636,7 +4049,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
+                    "application/json": components["schemas"]["ModelOut"][];
                 };
             };
             /** @description 需要登录 */
@@ -3687,7 +4100,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
+                    "application/json": components["schemas"]["ModelOut"];
                 };
             };
             /** @description scenario 非法 */
@@ -3832,7 +4245,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
+                    "application/json": components["schemas"]["ModelOut"];
                 };
             };
             /** @description scenario 非法 */
@@ -3919,7 +4332,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
+                    "application/json": components["schemas"]["OpenAiChatOut"];
                 };
             };
             /** @description messages 里没有 user 消息 */
@@ -4048,7 +4461,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
+                    "application/json": components["schemas"]["HitOut"][];
                 };
             };
             /** @description 请求体解析失败 */
@@ -4113,7 +4526,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
+                    "application/json": components["schemas"]["SettingsSnapshotOut"];
                 };
             };
             /** @description 需要登录 */
@@ -4164,7 +4577,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
+                    "application/json": components["schemas"]["SettingsSnapshotOut"];
                 };
             };
             /** @description 请求体解析失败 */
@@ -4229,7 +4642,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
+                    "application/json": components["schemas"]["QuotaOut"];
                 };
             };
             /** @description 需要登录 */
@@ -4267,7 +4680,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
+                    "application/json": components["schemas"]["UsageSummaryOut"][];
                 };
             };
             /** @description 需要登录 */
@@ -4314,7 +4727,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
+                    "application/json": components["schemas"]["UsageUserOut"][];
                 };
             };
             /** @description 需要登录 */
@@ -4361,7 +4774,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
+                    "application/json": components["schemas"]["UserOut"][];
                 };
             };
             /** @description 需要登录 */
@@ -4412,7 +4825,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
+                    "application/json": components["schemas"]["UserOut"];
                 };
             };
             /** @description 请求体解析失败 */
@@ -4557,7 +4970,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
+                    "application/json": components["schemas"]["UserOut"];
                 };
             };
             /** @description 请求体解析失败 */
@@ -4633,7 +5046,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
+                    "application/json": number[];
                 };
             };
             /** @description 管理员隐式全库，无授权表 */
@@ -4713,7 +5126,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
+                    "application/json": number[];
                 };
             };
             /** @description 请求体解析失败 */

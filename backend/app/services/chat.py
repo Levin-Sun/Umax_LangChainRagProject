@@ -4,6 +4,8 @@ from collections.abc import Callable, Sequence
 
 import httpx
 
+from app.services.text import clean_text
+
 RETRY_BACKOFF = [2, 5, 10]
 
 SYSTEM_PROMPT = """你是企业知识库助手。回答规则：
@@ -51,7 +53,9 @@ class ChatClient:
                 data = resp.json()
                 usage = data.get("usage", {})
                 return {
-                    "text": data["choices"][0]["message"]["content"],
+                    # 在客户端层收口：所有走 ChatClient 的路径（问答/识图/worker 图注）一并覆盖，
+                    # 不必指望"每个调用点都记得清洗"（漏一处就是一次未声明 500）
+                    "text": clean_text(data["choices"][0]["message"]["content"]),
                     "prompt_tokens": usage.get("prompt_tokens", 0),
                     "completion_tokens": usage.get("completion_tokens", 0),
                 }

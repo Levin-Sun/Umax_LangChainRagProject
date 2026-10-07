@@ -1,6 +1,83 @@
 {
   "components": {
     "schemas": {
+      "ApiKeyCreatedOut": {
+        "properties": {
+          "created_at": {
+            "title": "Created At",
+            "type": "string"
+          },
+          "enabled": {
+            "title": "Enabled",
+            "type": "boolean"
+          },
+          "id": {
+            "title": "Id",
+            "type": "integer"
+          },
+          "kb_ids": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "integer"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Kb Ids"
+          },
+          "key": {
+            "title": "Key",
+            "type": "string"
+          },
+          "key_prefix": {
+            "title": "Key Prefix",
+            "type": "string"
+          },
+          "last_used_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Used At"
+          },
+          "monthly_token_quota": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Monthly Token Quota"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "key_prefix",
+          "kb_ids",
+          "monthly_token_quota",
+          "enabled",
+          "last_used_at",
+          "created_at",
+          "key"
+        ],
+        "title": "ApiKeyCreatedOut",
+        "type": "object"
+      },
       "ApiKeyIn": {
         "properties": {
           "kb_ids": {
@@ -40,6 +117,78 @@
           "name"
         ],
         "title": "ApiKeyIn",
+        "type": "object"
+      },
+      "ApiKeyOut": {
+        "properties": {
+          "created_at": {
+            "title": "Created At",
+            "type": "string"
+          },
+          "enabled": {
+            "title": "Enabled",
+            "type": "boolean"
+          },
+          "id": {
+            "title": "Id",
+            "type": "integer"
+          },
+          "kb_ids": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "integer"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Kb Ids"
+          },
+          "key_prefix": {
+            "title": "Key Prefix",
+            "type": "string"
+          },
+          "last_used_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Used At"
+          },
+          "monthly_token_quota": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Monthly Token Quota"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "key_prefix",
+          "kb_ids",
+          "monthly_token_quota",
+          "enabled",
+          "last_used_at",
+          "created_at"
+        ],
+        "title": "ApiKeyOut",
         "type": "object"
       },
       "ApiKeyPatchIn": {
@@ -96,6 +245,131 @@
           }
         },
         "title": "ApiKeyPatchIn",
+        "type": "object"
+      },
+      "AuditOut": {
+        "properties": {
+          "action": {
+            "title": "Action",
+            "type": "string"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "detail": {
+            "additionalProperties": true,
+            "title": "Detail",
+            "type": "object"
+          },
+          "id": {
+            "title": "Id",
+            "type": "integer"
+          },
+          "ip": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ip"
+          },
+          "target_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Target Id"
+          },
+          "target_type": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Target Type"
+          },
+          "user_email": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "User Email"
+          }
+        },
+        "required": [
+          "id",
+          "user_email",
+          "action",
+          "target_type",
+          "target_id",
+          "detail",
+          "ip",
+          "created_at"
+        ],
+        "title": "AuditOut",
+        "type": "object"
+      },
+      "AuthMeOut": {
+        "properties": {
+          "email": {
+            "title": "Email",
+            "type": "string"
+          },
+          "kb_ids": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "integer"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Kb Ids"
+          },
+          "must_change_password": {
+            "title": "Must Change Password",
+            "type": "boolean"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "role": {
+            "enum": [
+              "admin",
+              "member"
+            ],
+            "title": "Role",
+            "type": "string"
+          }
+        },
+        "required": [
+          "email",
+          "name",
+          "role",
+          "kb_ids",
+          "must_change_password"
+        ],
+        "title": "AuthMeOut",
         "type": "object"
       },
       "BatchUploadItemOut": {
@@ -164,6 +438,31 @@
           "files"
         ],
         "title": "Body_upload_documents_batch_api_v1_kb__kb_id__documents_batch_post",
+        "type": "object"
+      },
+      "BrandingOut": {
+        "properties": {
+          "brand_name": {
+            "title": "Brand Name",
+            "type": "string"
+          },
+          "logo": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Logo"
+          }
+        },
+        "required": [
+          "brand_name",
+          "logo"
+        ],
+        "title": "BrandingOut",
         "type": "object"
       },
       "BrandingPut": {
@@ -273,6 +572,62 @@
         "title": "ChatIn",
         "type": "object"
       },
+      "ChatOut": {
+        "properties": {
+          "answer": {
+            "title": "Answer",
+            "type": "string"
+          },
+          "citations": {
+            "items": {
+              "$ref": "#/components/schemas/CitationOut"
+            },
+            "title": "Citations",
+            "type": "array"
+          },
+          "cited_docs": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Cited Docs",
+            "type": "array"
+          },
+          "conversation_id": {
+            "title": "Conversation Id",
+            "type": "integer"
+          },
+          "usage": {
+            "$ref": "#/components/schemas/ChatUsageOut"
+          }
+        },
+        "required": [
+          "conversation_id",
+          "answer",
+          "citations",
+          "cited_docs",
+          "usage"
+        ],
+        "title": "ChatOut",
+        "type": "object"
+      },
+      "ChatUsageOut": {
+        "properties": {
+          "completion_tokens": {
+            "title": "Completion Tokens",
+            "type": "integer"
+          },
+          "prompt_tokens": {
+            "title": "Prompt Tokens",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "prompt_tokens",
+          "completion_tokens"
+        ],
+        "title": "ChatUsageOut",
+        "type": "object"
+      },
       "ChunkPreviewOut": {
         "properties": {
           "chunk_index": {
@@ -305,6 +660,60 @@
           "meta"
         ],
         "title": "ChunkPreviewOut",
+        "type": "object"
+      },
+      "CitationOut": {
+        "properties": {
+          "chunk_id": {
+            "title": "Chunk Id",
+            "type": "integer"
+          },
+          "doc_name": {
+            "title": "Doc Name",
+            "type": "string"
+          },
+          "excerpt": {
+            "title": "Excerpt",
+            "type": "string"
+          },
+          "n": {
+            "title": "N",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "n",
+          "doc_name",
+          "chunk_id",
+          "excerpt"
+        ],
+        "title": "CitationOut",
+        "type": "object"
+      },
+      "ConversationOut": {
+        "properties": {
+          "id": {
+            "title": "Id",
+            "type": "integer"
+          },
+          "kb_ids": {
+            "items": {
+              "type": "integer"
+            },
+            "title": "Kb Ids",
+            "type": "array"
+          },
+          "title": {
+            "title": "Title",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "title",
+          "kb_ids"
+        ],
+        "title": "ConversationOut",
         "type": "object"
       },
       "DocOut": {
@@ -1338,6 +1747,103 @@
         "title": "HTTPValidationError",
         "type": "object"
       },
+      "HealthOut": {
+        "properties": {
+          "commit": {
+            "title": "Commit",
+            "type": "string"
+          },
+          "started_at": {
+            "format": "date-time",
+            "title": "Started At",
+            "type": "string"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "status",
+          "commit",
+          "started_at"
+        ],
+        "title": "HealthOut",
+        "type": "object"
+      },
+      "HitOut": {
+        "description": "检索命中的切块（/retrieve 的返回）。rerank_score 只在配置了精排时出现。",
+        "properties": {
+          "bm25_hit": {
+            "title": "Bm25 Hit",
+            "type": "boolean"
+          },
+          "chunk_index": {
+            "title": "Chunk Index",
+            "type": "integer"
+          },
+          "content": {
+            "title": "Content",
+            "type": "string"
+          },
+          "doc_name": {
+            "title": "Doc Name",
+            "type": "string"
+          },
+          "id": {
+            "title": "Id",
+            "type": "integer"
+          },
+          "kb_id": {
+            "title": "Kb Id",
+            "type": "integer"
+          },
+          "rerank_score": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Rerank Score"
+          },
+          "score": {
+            "title": "Score",
+            "type": "number"
+          },
+          "vec_hit": {
+            "title": "Vec Hit",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "id",
+          "doc_name",
+          "kb_id",
+          "chunk_index",
+          "content",
+          "score",
+          "bm25_hit",
+          "vec_hit"
+        ],
+        "title": "HitOut",
+        "type": "object"
+      },
+      "ImageUrlOut": {
+        "properties": {
+          "url": {
+            "title": "Url",
+            "type": "string"
+          }
+        },
+        "required": [
+          "url"
+        ],
+        "title": "ImageUrlOut",
+        "type": "object"
+      },
       "KbIn": {
         "properties": {
           "description": {
@@ -1363,6 +1869,137 @@
         "title": "KbIn",
         "type": "object"
       },
+      "KbOut": {
+        "properties": {
+          "description": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Description"
+          },
+          "id": {
+            "title": "Id",
+            "type": "integer"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "description"
+        ],
+        "title": "KbOut",
+        "type": "object"
+      },
+      "LicenseOut": {
+        "properties": {
+          "customer": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Customer"
+          },
+          "days_left": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Days Left"
+          },
+          "enforced": {
+            "title": "Enforced",
+            "type": "boolean"
+          },
+          "expires_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Expires At"
+          },
+          "features": {
+            "additionalProperties": true,
+            "title": "Features",
+            "type": "object"
+          },
+          "issued_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Issued At"
+          },
+          "license_key": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "License Key"
+          },
+          "machine_fingerprint": {
+            "title": "Machine Fingerprint",
+            "type": "string"
+          },
+          "reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reason"
+          },
+          "valid": {
+            "title": "Valid",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "enforced",
+          "valid",
+          "reason",
+          "license_key",
+          "customer",
+          "issued_at",
+          "expires_at",
+          "days_left",
+          "features",
+          "machine_fingerprint"
+        ],
+        "title": "LicenseOut",
+        "type": "object"
+      },
       "LoginIn": {
         "properties": {
           "email": {
@@ -1381,6 +2018,88 @@
           "password"
         ],
         "title": "LoginIn",
+        "type": "object"
+      },
+      "MessageOut": {
+        "properties": {
+          "citations": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/CitationOut"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Citations"
+          },
+          "content": {
+            "items": {
+              "$ref": "#/components/schemas/MessagePartOut"
+            },
+            "title": "Content",
+            "type": "array"
+          },
+          "id": {
+            "title": "Id",
+            "type": "integer"
+          },
+          "role": {
+            "enum": [
+              "user",
+              "assistant",
+              "system"
+            ],
+            "title": "Role",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "role",
+          "content",
+          "citations"
+        ],
+        "title": "MessageOut",
+        "type": "object"
+      },
+      "MessagePartOut": {
+        "additionalProperties": true,
+        "description": "多模态消息片段。\n\n两个刻意的选择：①**字段全显式声明**（而不是把 image_url 丢给 extra 透传）——\n契约要能自己说清\"消息可以带图\"；代价是文本片段会带一个 `image_url: null`（前端 falsy 处理，无害）。\n②**extra=allow**——片段是 JSONB 自由结构，以后加 type（文件、音频）或加字段时\n不能因为模型没声明就被 response_model 悄悄丢掉。",
+        "properties": {
+          "image_url": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ImageUrlOut"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "text": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Text"
+          },
+          "type": {
+            "title": "Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "type"
+        ],
+        "title": "MessagePartOut",
         "type": "object"
       },
       "ModelIn": {
@@ -1440,6 +2159,71 @@
           "model_name"
         ],
         "title": "ModelIn",
+        "type": "object"
+      },
+      "ModelOut": {
+        "properties": {
+          "api_key_masked": {
+            "title": "Api Key Masked",
+            "type": "string"
+          },
+          "base_url": {
+            "title": "Base Url",
+            "type": "string"
+          },
+          "capabilities": {
+            "additionalProperties": true,
+            "title": "Capabilities",
+            "type": "object"
+          },
+          "enabled": {
+            "title": "Enabled",
+            "type": "boolean"
+          },
+          "fallback_rank": {
+            "title": "Fallback Rank",
+            "type": "integer"
+          },
+          "id": {
+            "title": "Id",
+            "type": "integer"
+          },
+          "is_default": {
+            "title": "Is Default",
+            "type": "boolean"
+          },
+          "model_name": {
+            "title": "Model Name",
+            "type": "string"
+          },
+          "provider": {
+            "title": "Provider",
+            "type": "string"
+          },
+          "scenario": {
+            "enum": [
+              "chat",
+              "embedding",
+              "rerank",
+              "vision"
+            ],
+            "title": "Scenario",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "scenario",
+          "provider",
+          "base_url",
+          "model_name",
+          "capabilities",
+          "is_default",
+          "fallback_rank",
+          "enabled",
+          "api_key_masked"
+        ],
+        "title": "ModelOut",
         "type": "object"
       },
       "ModelPatchIn": {
@@ -1580,6 +2364,77 @@
         "title": "OpenAiChatIn",
         "type": "object"
       },
+      "OpenAiChatOut": {
+        "description": "OpenAI 兼容响应 + 本产品扩展（citations）：客户拿现成 SDK 就能接，又能溯源。",
+        "properties": {
+          "choices": {
+            "items": {
+              "$ref": "#/components/schemas/OpenAiChoiceOut"
+            },
+            "title": "Choices",
+            "type": "array"
+          },
+          "citations": {
+            "items": {
+              "$ref": "#/components/schemas/CitationOut"
+            },
+            "title": "Citations",
+            "type": "array"
+          },
+          "created": {
+            "title": "Created",
+            "type": "integer"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "model": {
+            "title": "Model",
+            "type": "string"
+          },
+          "object": {
+            "title": "Object",
+            "type": "string"
+          },
+          "usage": {
+            "$ref": "#/components/schemas/OpenAiUsageOut"
+          }
+        },
+        "required": [
+          "id",
+          "object",
+          "created",
+          "model",
+          "choices",
+          "usage",
+          "citations"
+        ],
+        "title": "OpenAiChatOut",
+        "type": "object"
+      },
+      "OpenAiChoiceOut": {
+        "properties": {
+          "finish_reason": {
+            "title": "Finish Reason",
+            "type": "string"
+          },
+          "index": {
+            "title": "Index",
+            "type": "integer"
+          },
+          "message": {
+            "$ref": "#/components/schemas/OpenAiMessageOut"
+          }
+        },
+        "required": [
+          "index",
+          "message",
+          "finish_reason"
+        ],
+        "title": "OpenAiChoiceOut",
+        "type": "object"
+      },
       "OpenAiMessageIn": {
         "properties": {
           "content": {
@@ -1596,6 +2451,105 @@
           "content"
         ],
         "title": "OpenAiMessageIn",
+        "type": "object"
+      },
+      "OpenAiMessageOut": {
+        "properties": {
+          "content": {
+            "title": "Content",
+            "type": "string"
+          },
+          "role": {
+            "title": "Role",
+            "type": "string"
+          }
+        },
+        "required": [
+          "role",
+          "content"
+        ],
+        "title": "OpenAiMessageOut",
+        "type": "object"
+      },
+      "OpenAiUsageOut": {
+        "properties": {
+          "completion_tokens": {
+            "title": "Completion Tokens",
+            "type": "integer"
+          },
+          "prompt_tokens": {
+            "title": "Prompt Tokens",
+            "type": "integer"
+          },
+          "total_tokens": {
+            "title": "Total Tokens",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "prompt_tokens",
+          "completion_tokens",
+          "total_tokens"
+        ],
+        "title": "OpenAiUsageOut",
+        "type": "object"
+      },
+      "QuotaOut": {
+        "description": "配额状态（/usage/me）：限额 null=不限。",
+        "properties": {
+          "daily_limit": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Daily Limit"
+          },
+          "daily_used": {
+            "title": "Daily Used",
+            "type": "integer"
+          },
+          "exceeded": {
+            "title": "Exceeded",
+            "type": "boolean"
+          },
+          "monthly_limit": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Monthly Limit"
+          },
+          "monthly_used": {
+            "title": "Monthly Used",
+            "type": "integer"
+          },
+          "near_limit": {
+            "title": "Near Limit",
+            "type": "boolean"
+          },
+          "warn_ratio": {
+            "title": "Warn Ratio",
+            "type": "number"
+          }
+        },
+        "required": [
+          "daily_used",
+          "daily_limit",
+          "monthly_used",
+          "monthly_limit",
+          "near_limit",
+          "exceeded",
+          "warn_ratio"
+        ],
+        "title": "QuotaOut",
         "type": "object"
       },
       "ReindexIn": {
@@ -1830,6 +2784,194 @@
         "title": "SettingsPutIn",
         "type": "object"
       },
+      "SettingsSnapshotOut": {
+        "description": "配置中心快照：生效值 / 默认值 / 被覆盖的键 / 跨字段警告 / 标签与说明。",
+        "properties": {
+          "defaults": {
+            "additionalProperties": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "boolean"
+                }
+              ]
+            },
+            "title": "Defaults",
+            "type": "object"
+          },
+          "help": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "title": "Help",
+            "type": "object"
+          },
+          "labels": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "title": "Labels",
+            "type": "object"
+          },
+          "overridden": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Overridden",
+            "type": "array"
+          },
+          "values": {
+            "additionalProperties": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "boolean"
+                }
+              ]
+            },
+            "title": "Values",
+            "type": "object"
+          },
+          "warnings": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Warnings",
+            "type": "array"
+          }
+        },
+        "required": [
+          "values",
+          "defaults",
+          "overridden",
+          "warnings",
+          "labels",
+          "help"
+        ],
+        "title": "SettingsSnapshotOut",
+        "type": "object"
+      },
+      "UsageSummaryOut": {
+        "properties": {
+          "calls": {
+            "title": "Calls",
+            "type": "integer"
+          },
+          "completion_tokens": {
+            "title": "Completion Tokens",
+            "type": "integer"
+          },
+          "model": {
+            "title": "Model",
+            "type": "string"
+          },
+          "prompt_tokens": {
+            "title": "Prompt Tokens",
+            "type": "integer"
+          },
+          "scenario": {
+            "title": "Scenario",
+            "type": "string"
+          }
+        },
+        "required": [
+          "scenario",
+          "model",
+          "calls",
+          "prompt_tokens",
+          "completion_tokens"
+        ],
+        "title": "UsageSummaryOut",
+        "type": "object"
+      },
+      "UsageUserOut": {
+        "properties": {
+          "daily_limit": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Daily Limit"
+          },
+          "daily_used": {
+            "title": "Daily Used",
+            "type": "integer"
+          },
+          "email": {
+            "title": "Email",
+            "type": "string"
+          },
+          "exceeded": {
+            "title": "Exceeded",
+            "type": "boolean"
+          },
+          "id": {
+            "title": "Id",
+            "type": "integer"
+          },
+          "monthly_limit": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Monthly Limit"
+          },
+          "monthly_used": {
+            "title": "Monthly Used",
+            "type": "integer"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "near_limit": {
+            "title": "Near Limit",
+            "type": "boolean"
+          },
+          "warn_ratio": {
+            "title": "Warn Ratio",
+            "type": "number"
+          }
+        },
+        "required": [
+          "daily_used",
+          "daily_limit",
+          "monthly_used",
+          "monthly_limit",
+          "near_limit",
+          "exceeded",
+          "warn_ratio",
+          "id",
+          "email",
+          "name"
+        ],
+        "title": "UsageUserOut",
+        "type": "object"
+      },
       "UserIn": {
         "properties": {
           "daily_token_limit": {
@@ -1888,6 +3030,91 @@
           "password"
         ],
         "title": "UserIn",
+        "type": "object"
+      },
+      "UserOut": {
+        "properties": {
+          "created_at": {
+            "title": "Created At",
+            "type": "string"
+          },
+          "daily_token_limit": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Daily Token Limit"
+          },
+          "email": {
+            "title": "Email",
+            "type": "string"
+          },
+          "id": {
+            "title": "Id",
+            "type": "integer"
+          },
+          "kb_ids": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "integer"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Kb Ids"
+          },
+          "monthly_token_limit": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Monthly Token Limit"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "role": {
+            "enum": [
+              "admin",
+              "member"
+            ],
+            "title": "Role",
+            "type": "string"
+          },
+          "status": {
+            "enum": [
+              "active",
+              "disabled"
+            ],
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "email",
+          "name",
+          "role",
+          "status",
+          "created_at",
+          "kb_ids",
+          "daily_token_limit",
+          "monthly_token_limit"
+        ],
+        "title": "UserOut",
         "type": "object"
       },
       "UserPatchIn": {
@@ -2026,7 +3253,13 @@
           "200": {
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/ApiKeyOut"
+                  },
+                  "title": "Response List Api Keys Api V1 Api Keys Get",
+                  "type": "array"
+                }
               }
             },
             "description": "Successful Response"
@@ -2080,7 +3313,9 @@
           "201": {
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/ApiKeyCreatedOut"
+                }
               }
             },
             "description": "Successful Response"
@@ -2241,7 +3476,9 @@
           "200": {
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/ApiKeyOut"
+                }
               }
             },
             "description": "Successful Response"
@@ -2373,7 +3610,13 @@
           "200": {
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/AuditOut"
+                  },
+                  "title": "Response List Audit Api V1 Audit Get",
+                  "type": "array"
+                }
               }
             },
             "description": "Successful Response"
@@ -2562,7 +3805,9 @@
           "200": {
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/AuthMeOut"
+                }
               }
             },
             "description": "Successful Response"
@@ -2588,7 +3833,9 @@
           "200": {
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/BrandingOut"
+                }
               }
             },
             "description": "Successful Response"
@@ -2612,7 +3859,9 @@
           "200": {
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/BrandingOut"
+                }
               }
             },
             "description": "Successful Response"
@@ -2688,7 +3937,9 @@
           "200": {
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/ChatOut"
+                }
               }
             },
             "description": "Successful Response"
@@ -2793,7 +4044,13 @@
           "200": {
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/ConversationOut"
+                  },
+                  "title": "Response List Conversations Api V1 Conversations Get",
+                  "type": "array"
+                }
               }
             },
             "description": "Successful Response"
@@ -2916,7 +4173,13 @@
           "200": {
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/MessageOut"
+                  },
+                  "title": "Response List Messages Api V1 Conversations  Conv Id  Messages Get",
+                  "type": "array"
+                }
               }
             },
             "description": "Successful Response"
@@ -3058,7 +4321,9 @@
           "200": {
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/DocOut"
+                }
               }
             },
             "description": "Successful Response"
@@ -3135,7 +4400,9 @@
           "200": {
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/DocOut"
+                }
               }
             },
             "description": "Successful Response"
@@ -3299,7 +4566,9 @@
           "202": {
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/DocOut"
+                }
               }
             },
             "description": "Successful Response"
@@ -4053,7 +5322,9 @@
           "200": {
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/HealthOut"
+                }
               }
             },
             "description": "Successful Response"
@@ -4069,7 +5340,13 @@
           "200": {
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/KbOut"
+                  },
+                  "title": "Response List Kb Api V1 Kb Get",
+                  "type": "array"
+                }
               }
             },
             "description": "Successful Response"
@@ -4113,7 +5390,9 @@
           "201": {
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/KbOut"
+                }
               }
             },
             "description": "Successful Response"
@@ -4267,7 +5546,13 @@
           "200": {
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/DocOut"
+                  },
+                  "title": "Response List Documents Api V1 Kb  Kb Id  Documents Get",
+                  "type": "array"
+                }
               }
             },
             "description": "Successful Response"
@@ -4538,7 +5823,9 @@
           "200": {
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/LicenseOut"
+                }
               }
             },
             "description": "Successful Response"
@@ -4584,7 +5871,13 @@
           "200": {
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/ModelOut"
+                  },
+                  "title": "Response List Models Api V1 Models Get",
+                  "type": "array"
+                }
               }
             },
             "description": "Successful Response"
@@ -4638,7 +5931,9 @@
           "201": {
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/ModelOut"
+                }
               }
             },
             "description": "Successful Response"
@@ -4809,7 +6104,9 @@
           "200": {
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/ModelOut"
+                }
               }
             },
             "description": "Successful Response"
@@ -4905,7 +6202,9 @@
           "200": {
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/OpenAiChatOut"
+                }
               }
             },
             "description": "Successful Response"
@@ -5050,7 +6349,13 @@
           "200": {
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/HitOut"
+                  },
+                  "title": "Response Retrieve Api Api V1 Retrieve Post",
+                  "type": "array"
+                }
               }
             },
             "description": "Successful Response"
@@ -5116,7 +6421,9 @@
           "200": {
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/SettingsSnapshotOut"
+                }
               }
             },
             "description": "Successful Response"
@@ -5170,7 +6477,9 @@
           "200": {
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/SettingsSnapshotOut"
+                }
               }
             },
             "description": "Successful Response"
@@ -5236,7 +6545,9 @@
           "200": {
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/QuotaOut"
+                }
               }
             },
             "description": "Successful Response"
@@ -5272,7 +6583,13 @@
           "200": {
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/UsageSummaryOut"
+                  },
+                  "title": "Response Usage Summary Api V1 Usage Summary Get",
+                  "type": "array"
+                }
               }
             },
             "description": "Successful Response"
@@ -5319,7 +6636,13 @@
           "200": {
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/UsageUserOut"
+                  },
+                  "title": "Response Usage Users Api V1 Usage Users Get",
+                  "type": "array"
+                }
               }
             },
             "description": "Successful Response"
@@ -5365,7 +6688,13 @@
           "200": {
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/UserOut"
+                  },
+                  "title": "Response List Users Api V1 Users Get",
+                  "type": "array"
+                }
               }
             },
             "description": "Successful Response"
@@ -5419,7 +6748,9 @@
           "201": {
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/UserOut"
+                }
               }
             },
             "description": "Successful Response"
@@ -5590,7 +6921,9 @@
           "200": {
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/UserOut"
+                }
               }
             },
             "description": "Successful Response"
@@ -5679,7 +7012,13 @@
           "200": {
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "items": {
+                    "type": "integer"
+                  },
+                  "title": "Response Get Grants Api V1 Users  User Id  Grants Get",
+                  "type": "array"
+                }
               }
             },
             "description": "Successful Response"
@@ -5776,7 +7115,13 @@
           "200": {
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "items": {
+                    "type": "integer"
+                  },
+                  "title": "Response Put Grants Api V1 Users  User Id  Grants Put",
+                  "type": "array"
+                }
               }
             },
             "description": "Successful Response"

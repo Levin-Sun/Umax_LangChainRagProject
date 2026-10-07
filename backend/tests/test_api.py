@@ -124,7 +124,8 @@ def test_chat_returns_answer_citations_and_persists_history(app_client, chat_cal
     # 会话历史：user 消息为结构化 content parts，assistant 带 citations
     msgs = app_client.get(f"/api/v1/conversations/{conv_id}/messages").json()
     assert [m["role"] for m in msgs] == ["user", "assistant"]
-    assert msgs[0]["content"][0] == {"type": "text", "text": q}
+    part = msgs[0]["content"][0]
+    assert part["type"] == "text" and part["text"] == q    # 文本片段的可读字段（显式声明的可选键会带 null）
     assert msgs[1]["citations"][0]["chunk_id"] > 0
     assert app_client.get("/api/v1/conversations").json()[0]["id"] == conv_id
 

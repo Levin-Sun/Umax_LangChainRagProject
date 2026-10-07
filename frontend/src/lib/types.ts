@@ -9,8 +9,11 @@ export interface ChunkOut { id: number; chunk_index: number; content: string; ha
 export interface Citation { n: number; doc_name: string; chunk_id: number; excerpt: string }
 export interface ChatOut { conversation_id: number; answer: string; citations: Citation[]; cited_docs: string[]; usage: { prompt_tokens: number; completion_tokens: number } }
 export interface ConversationOut { id: number; title: string; kb_ids: number[] }
-export interface MessageOut { id: number; role: "user" | "assistant"; content: { type: string; text?: string; image_url?: { url: string } }[]; citations: Citation[] | null }
-export interface ModelOut { id: number; scenario: string; provider: string; base_url: string; model_name: string; capabilities: Record<string, unknown>; is_default: boolean; fallback_rank: number; enabled: boolean; api_key_masked: string }
+// 消息片段：与契约 MessagePartOut 逐字对齐（契约把它声明成"显式字段 + extra 放行"的容器）。
+// 索引签名保留未来新增的片段类型（文件、音频）——契约侧也是这么放行的。
+export interface MessagePart { type: string; text?: string | null; image_url?: { url: string } | null; [key: string]: unknown }
+export interface MessageOut { id: number; role: "user" | "assistant" | "system"; content: MessagePart[]; citations: Citation[] | null }
+export interface ModelOut { id: number; scenario: "chat" | "embedding" | "rerank" | "vision"; provider: string; base_url: string; model_name: string; capabilities: Record<string, unknown>; is_default: boolean; fallback_rank: number; enabled: boolean; api_key_masked: string }
 export interface UsageOut { scenario: string; model: string; calls: number; prompt_tokens: number; completion_tokens: number }
 // 登录态唯一真相源（GET /auth/me）：kb_ids null=admin 隐式全库，数组=member 库级授权；
 // must_change_password=true 时全站被 428 门闸拦下，前端弹强改密框（首登/管理员重置口令后）
@@ -18,7 +21,7 @@ export interface AuthMe { email: string; name: string; role: "admin" | "member";
 // 配额状态（GET /usage/me 与 /usage/users 同型）：NULL 限额=不限
 export interface QuotaOut { daily_used: number; daily_limit: number | null; monthly_used: number; monthly_limit: number | null; near_limit: boolean; exceeded: boolean; warn_ratio: number }
 export interface UsageUserOut extends QuotaOut { id: number; email: string; name: string }
-export interface UserOut { id: number; email: string; name: string; role: string; status: string; created_at: string; kb_ids: number[] | null; daily_token_limit: number | null; monthly_token_limit: number | null }
+export interface UserOut { id: number; email: string; name: string; role: "admin" | "member"; status: "active" | "disabled"; created_at: string; kb_ids: number[] | null; daily_token_limit: number | null; monthly_token_limit: number | null }
 // 开放 API key（列表形态）：明文 key 只在创建响应出现一次，列表只有打码前缀
 export interface ApiKeyOut { id: number; name: string; key_prefix: string; kb_ids: number[] | null; monthly_token_quota: number | null; enabled: boolean; last_used_at: string | null; created_at: string }
 // 创建响应 = 列表形态 + 一次性明文 key（此后任何接口都不再返回明文）
@@ -29,7 +32,7 @@ export interface BrandingOut { brand_name: string; logo: string | null }
 export interface LicenseOut { enforced: boolean; valid: boolean; reason: string | null; license_key: string | null; customer: string | null; issued_at: string | null; expires_at: string | null; days_left: number | null; features: Record<string, unknown>; machine_fingerprint: string }
 // 配置中心（/settings）：values=生效值、defaults=默认值、overridden=被后台改过的键
 export interface SettingsSnapshot { values: Record<string, string | number | boolean>; defaults: Record<string, string | number | boolean>; overridden: string[]; warnings: string[]; labels: Record<string, string>; help: Record<string, string> }
-export interface AuditOut { id: number; user_email: string; action: string; target_type: string | null; target_id: number | null; detail: Record<string, unknown>; ip: string | null; created_at: string }
+export interface AuditOut { id: number; user_email: string | null; action: string; target_type: string | null; target_id: number | null; detail: Record<string, unknown>; ip: string | null; created_at: string }
 // 评测（/admin/eval）：金标准题 + 一次运行的分数/明细/报告。
 // metrics/checks 在后端是 JSONB，但形状已写进 schema（EvalMetricsOut/EvalChecksOut），
 // 所以这里按真类型声明而不是 Record<string, unknown>——"指针随便点"的错在编译期就没了。
@@ -37,13 +40,13 @@ export interface AuditOut { id: number; user_email: string; action: string; targ
 export type EvalRunStatus = "running" | "done" | "failed";
 export interface EvalQuestionOut { id: number; question: string; expect_all: string[]; expect_any: string[]; cites: string[]; category: string; note: string | null; enabled: boolean; created_at: string }
 export interface EvalCategoryScore { category: string; total: number; passed: number }
-export interface EvalMetrics { total: number; passed: number; pass_rate: number; with_cites: number; hit: number; hit_rate: number; mrr: number; avg_latency_ms: number; categories: EvalCategoryScore[] }
+export interface EvalMetrics { total: number; passed: number; pass_rate: number; with_cites: number; hit: number; hit_rate: number; mrr: number; avg_latency_ms: number; categories: EvalCategoryScore[]; judge?: EvalJudgeStats }
 // retrieval=null：该题没设金标准文档（不适用，不是失败）
-export interface EvalChecks { kw_all: boolean; kw_any: boolean; citation: boolean; retrieval: boolean | null; passed: boolean; rank: number }
+export interface EvalChecks { kw_all: boolean; kw_any: boolean; citation: boolean; retrieval?: boolean | null; passed: boolean; rank: number }
 // 裁判（LLM 裁判，Ragas 侧）：软指标，永不并入通过率——裁判模型会漂移，硬指标必须可复算。
 // judged=判过的题数，scored=判词能解析的题数；faithful/relevance 为 null=判词没解析出来（不是 0 分）
-export interface EvalJudgeStats { judged: number; scored: number; faithful: number; relevance: number; faithful_rate: number; relevance_rate: number; model: string | null }
-export interface EvalJudgeVerdict { faithful: number | null; relevance: number | null; reason: string; raw: string | null; model: string | null }
-export interface EvalItemOut { id: number; question_id: number | null; question: string; category: string; note: string | null; expect_all: string[]; expect_any: string[]; cites: string[]; answer: string | null; cited_docs: string[]; top_docs: string[]; checks: EvalChecks; judge: EvalJudgeVerdict | null; passed: boolean; rank: number; latency_ms: number | null; error: string | null }
-export interface EvalRunOut { id: number; status: EvalRunStatus; total: number; passed: number; metrics: EvalMetrics & { judge: EvalJudgeStats }; kb_ids: number[] | null; judge: boolean; chat_model: string | null; embedding_model: string | null; error: string | null; created_by: string | null; started_at: string; finished_at: string | null }
+export interface EvalJudgeStats { judged: number; scored: number; faithful: number; relevance: number; faithful_rate: number; relevance_rate: number; model?: string | null }
+export interface EvalJudgeVerdict { faithful?: number | null; relevance?: number | null; reason: string; raw?: string | null; model?: string | null }
+export interface EvalItemOut { id: number; question_id: number | null; question: string; category: string; note: string | null; expect_all: string[]; expect_any: string[]; cites: string[]; answer: string | null; cited_docs: string[]; top_docs: string[]; checks: EvalChecks; judge?: EvalJudgeVerdict | null; passed: boolean; rank: number; latency_ms: number | null; error: string | null }
+export interface EvalRunOut { id: number; status: EvalRunStatus; total: number; passed: number; metrics: EvalMetrics; kb_ids: number[] | null; judge: boolean; chat_model: string | null; embedding_model: string | null; error: string | null; created_by: string | null; started_at: string; finished_at: string | null }
 export interface EvalRunDetailOut extends EvalRunOut { items: EvalItemOut[] }

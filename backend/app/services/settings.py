@@ -104,6 +104,18 @@ class SettingsStore:
                 "labels": {k: v.label for k, v in self.spec.items()},
                 "help": {k: v.help for k, v in self.spec.items()}}
 
+    def chunk_params(self, kb) -> dict:
+        """切块参数：**建库时锁定的值优先**（§3.3「建库时锁定切分参数」），否则用当前生效值。
+
+        这里是切块参数的**唯一事实源**：同步端点与 ARQ worker 都必须走它。
+        真机踩过（代码评审发现）：worker 曾直接用 `.env` 的 `chunk_target`，于是
+        QUEUE_BACKEND 从 sync 换成 arq 后，同一篇文档切块数就变了（实测 1 块 vs 3 块），
+        "建库时锁定切分参数"这个承诺在异步档静默失效——同一语义有两条实现，迟早漂移。
+        """
+        c = self.effective()
+        return {"chunk_target": (kb.chunk_target if kb and kb.chunk_target else c["chunk_target"]),
+                "chunk_min": c["chunk_min"]}
+
     def put(self, session: Session, changes: dict, by: str) -> list[str]:
         """写入覆盖；value=None 表示抹掉覆盖回到默认。返回真正发生变化的键。
 

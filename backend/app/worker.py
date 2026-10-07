@@ -3,26 +3,42 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import Session
 
 from app.core.config import get_settings
-from app.models import Document
+from app.models import Document, KnowledgeBase
 from app.services.ingest import ingest_document
 
 
 def run_import(*, document_id: int, engine=None, embedder=None, mineru=None,
-               vision_fn=None, caption_images: bool = True) -> dict:
-    """执行单个文档的导入流水线（worker 与同步模式共用）。"""
+               vision_fn=None, caption_images: bool = True, settings_store=None) -> dict:
+    """执行单个文档的导入流水线（ARQ worker 与同步模式共用）。
+
+    切块参数**必须走配置中心**（SettingsStore.chunk_params）而不是 `.env`：
+    建库锁定值优先、其次配置中心生效值——与同步端点同口径。曾经这里直接用
+    `s.chunk_target`，导致两种部署模式切块结果不同（评审发现的真机问题）。
+    """
     s = get_settings()
     own_session = engine is None
     if own_session:
         engine = create_engine(s.sqlalchemy_url())
+    store = settings_store
+    if store is None:                       # 未注入（如 CLI/一次性调用）：按引擎现建
+        from app.services.settings import SettingsStore
+        store = SettingsStore(engine, s)
     with Session(engine) as session:
         doc = session.get(Document, document_id)
         if doc is None:
             return {"document_id": document_id, "status": "failed",
                     "error": f"文档 {document_id} 不存在"}
-        raw = open(doc.storage_path, "rb").read()
+        kb = session.get(KnowledgeBase, doc.kb_id)
+        try:                                # 原文件读不出来要有失败态，不能让文档卡在 pending
+            with open(doc.storage_path, "rb") as fh:
+                raw = fh.read()
+        except OSError as exc:
+            doc.status, doc.error = "failed", f"原文件不可读：{exc}"
+            session.commit()
+            return {"document_id": doc.id, "status": doc.status, "error": doc.error}
         doc = ingest_document(session, doc, raw, embedder=embedder, mineru=mineru,
                               vision_fn=vision_fn, caption_images=caption_images,
-                              chunk_target=s.chunk_target, chunk_min=s.chunk_min)
+                              **store.chunk_params(kb))
         return {"document_id": doc.id, "status": doc.status, "error": doc.error}
 
 
@@ -40,23 +56,25 @@ async def _startup(ctx: dict) -> None:
                                       dimensions=s.embedding_dim)
     ctx["mineru"] = MinerUClient(s.mineru_base_url) if s.mineru_base_url else None
     # 视觉能力与配置中心同口径：ARQ 档也要给文档图注（否则异步入库静默丢图）
+    from app.services.settings import SettingsStore
+
+    store = SettingsStore(ctx["engine"], s)      # 配置中心：切块参数与图注开关共用同一实例
+    ctx["settings_store"] = store
     ctx["vision_fn"] = None
-    ctx["caption_images"] = True
+    ctx["caption_images"] = bool(store.effective()["doc_image_caption"])
     if s.gateway_secret:
         from app.services.gateway import ModelGateway
-        from app.services.settings import SettingsStore
 
-        store = SettingsStore(ctx["engine"], s)
         ctx["vision_fn"] = ModelGateway(ctx["engine"], secret=s.gateway_secret).make_vision_fn(
             vision_prompt=lambda: store.effective()["vision_prompt"])
-        ctx["caption_images"] = bool(store.effective()["doc_image_caption"])
 
 
 async def import_document(ctx: dict, document_id: int) -> dict:
     return run_import(document_id=document_id, engine=ctx["engine"],
                       embedder=ctx.get("embedder"), mineru=ctx.get("mineru"),
                       vision_fn=ctx.get("vision_fn"),
-                      caption_images=ctx.get("caption_images", True))
+                      caption_images=ctx.get("caption_images", True),
+                      settings_store=ctx.get("settings_store"))
 
 
 class WorkerSettings:

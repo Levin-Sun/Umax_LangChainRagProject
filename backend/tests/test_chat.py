@@ -169,7 +169,8 @@ def test_chat_with_images_stores_multimodal_parts(engine, db, tmp_path):
     conv = r.json()["conversation_id"]
     msgs = c.get(f"/api/v1/conversations/{conv}/messages").json()
     parts = msgs[0]["content"]
-    assert parts[0] == {"type": "text", "text": "这张图里是什么"}
+    assert parts[0]["type"] == "text" and parts[0]["text"] == "这张图里是什么"
+    assert parts[0]["image_url"] is None          # 显式声明的可选键：文本片段没有图，如实为 null
     assert parts[1]["type"] == "image_url" and parts[1]["image_url"]["url"] == PNG_1PX
 
 

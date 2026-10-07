@@ -11,6 +11,8 @@ import json
 import re
 from collections.abc import Callable
 
+from app.services.text import clean_text
+
 JUDGE_PROMPT = """你是严格的评测裁判，只依据【资料】判断【回答】，不使用资料之外的知识。
 
 按两项各判 0 或 1：
@@ -56,11 +58,11 @@ def parse_verdict(text: str) -> dict:
             if isinstance(data, dict):
                 return {"faithful": _score(data.get("faithful")),
                         "relevance": _score(data.get("relevance")),
-                        "reason": str(data.get("reason") or "")[:500], "raw": None}
+                        "reason": clean_text(str(data.get("reason") or ""))[:500], "raw": None}
         except json.JSONDecodeError:
             pass
     return {"faithful": None, "relevance": None,
-            "reason": "裁判输出无法解析", "raw": raw[:300]}
+            "reason": "裁判输出无法解析", "raw": clean_text(raw[:300])}
 
 
 def make_judge_fn(complete: Callable[[list[dict]], dict]) -> Callable[[str, str, list[dict]], dict]:

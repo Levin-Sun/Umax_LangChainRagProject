@@ -332,3 +332,91 @@ def test_rerank_keeps_unscored_candidates_and_carries_kb_id(engine, db):
     assert out[0]["rerank_score"] == 0.5 and out[1]["rerank_score"] is None
     # make_rerank_fn 自己记账：检索层没有"提问者"这个上下文，成本按链路记（同 embedding 口径）
     assert [r.kb_id for r in _usage_rows(engine, "rerank")] == [9]
+
+
+# ---- HTTP 客户端复用（评审发现：每次调用新建客户端 = 每次重新 TLS 握手，实测 +193ms/次）----
+def _counting(monkeypatch, attr_name):
+    """把 gateway 模块里的客户端类换成记账子类：能数出"到底建了几个客户端"。"""
+    import app.services.gateway as gw_mod
+
+    created = []
+    real = getattr(gw_mod, attr_name)
+
+    class Counting(real):      # type: ignore[misc, valid-type]
+        def __init__(self, **kw):
+            super().__init__(**kw)
+            created.append(kw)
+
+    monkeypatch.setattr(gw_mod, attr_name, Counting)
+    return created
+
+
+def test_gateway_reuses_one_client_per_provider(engine, db, monkeypatch):
+    created = _counting(monkeypatch, "ChatClient")
+    _seed(engine, "chat", "m1")
+    gw = ModelGateway(engine, secret=SECRET, transport=httpx.MockTransport(_chat_handler()),
+                      sleep=lambda s: None)
+    for _ in range(3):
+        gw.chat([{"role": "user", "content": "hi"}])
+    assert len(created) == 1, f"3 次调用建了 {len(created)} 个 HTTP 客户端 → 连接池无法复用"
+
+
+def test_client_cache_follows_config_changes(engine, db, monkeypatch):
+    """缓存不能破坏"改表即生效"：改了 base_url / 模型名 / key 必须换新客户端。"""
+    created = _counting(monkeypatch, "ChatClient")
+    _seed(engine, "chat", "m1")
+    gw = ModelGateway(engine, secret=SECRET, transport=httpx.MockTransport(_chat_handler()),
+                      sleep=lambda s: None)
+    gw.chat([{"role": "user", "content": "hi"}])
+    assert len(created) == 1
+
+    with Session(engine) as s:          # 轮换 key（后台"改表即生效"的典型动作）
+        row = s.query(ModelConfig).filter_by(scenario="chat").one()
+        row.encrypted_api_key = encrypt_secret("sk-rotated", SECRET)
+        s.commit()
+    gw.chat([{"role": "user", "content": "hi"}])
+    assert len(created) == 2, "轮换 key 后仍在用旧客户端 → 新 key 不生效"
+
+    with Session(engine) as s:          # 只改 fallback_rank（与连接无关）：不该换客户端
+        row = s.query(ModelConfig).filter_by(scenario="chat").one()
+        row.fallback_rank = 1
+        s.commit()
+    gw.chat([{"role": "user", "content": "hi"}])
+    assert len(created) == 2, "改了与连接无关的字段却重建了客户端"
+
+
+def test_client_cache_is_bounded(engine, db, monkeypatch):
+    """管理员反复轮换 key 不该让旧客户端无限堆积（每个都握着一个连接池）。"""
+    from app.services.gateway import CLIENT_CACHE_MAX
+
+    created = _counting(monkeypatch, "ChatClient")
+    _seed(engine, "chat", "m1")
+    gw = ModelGateway(engine, secret=SECRET, transport=httpx.MockTransport(_chat_handler()),
+                      sleep=lambda s: None)
+    for i in range(CLIENT_CACHE_MAX + 3):
+        with Session(engine) as s:
+            row = s.query(ModelConfig).filter_by(scenario="chat").one()
+            row.encrypted_api_key = encrypt_secret(f"sk-{i}", SECRET)
+            s.commit()
+        gw.chat([{"role": "user", "content": "hi"}])
+    assert len(gw._clients) <= CLIENT_CACHE_MAX
+    assert len(created) > CLIENT_CACHE_MAX      # 确实经历了淘汰重建，而不是一直命中同一个
+
+
+def test_embedding_and_rerank_also_reuse_clients(engine, db, monkeypatch):
+    """三条模型通路（chat/embedding/rerank）都要复用——只修一条等于只省 1/3 的手握时间。"""
+    http_created = _counting(monkeypatch, "RerankClient")
+    _seed(engine, "embedding", "e1")
+    _seed(engine, "rerank", "r1")
+    gw = ModelGateway(engine, secret=SECRET,
+                      transport=httpx.MockTransport(lambda req: httpx.Response(
+                          200, json=({"data": [{"index": 0, "embedding": [1.0]}],
+                                      "usage": {"prompt_tokens": 1}}
+                                     if "embeddings" in str(req.url) else
+                                     {"output": {"results": [{"index": 0,
+                                                              "relevance_score": 0.5}]},
+                                      "usage": {"total_tokens": 1}}))),
+                      sleep=lambda s: None)
+    gw.embed(["a"]); gw.embed(["b"])
+    gw.rerank("q", [{"id": 1, "content": "x"}]); gw.rerank("q", [{"id": 1, "content": "x"}])
+    assert len(http_created) == 1, f"rerank 建了 {len(http_created)} 个客户端"

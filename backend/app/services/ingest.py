@@ -92,4 +92,5 @@ def ingest_document(
 
 
 def read_stored(doc: Document) -> bytes:
-    return open(doc.storage_path, "rb").read()
+    with open(doc.storage_path, "rb") as fh:   # with 收口：句柄不靠引用计数回收
+        return fh.read()
