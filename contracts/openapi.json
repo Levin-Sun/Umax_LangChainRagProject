@@ -309,6 +309,11 @@
       },
       "DocOut": {
         "properties": {
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
           "error": {
             "anyOf": [
               {
@@ -360,7 +365,8 @@
           "name",
           "status",
           "error",
-          "size_bytes"
+          "size_bytes",
+          "created_at"
         ],
         "title": "DocOut",
         "type": "object"
@@ -2019,6 +2025,79 @@
       }
     },
     "/api/v1/documents/{doc_id}": {
+      "delete": {
+        "description": "删文档：切块级联清、落盘原文件一并删（别把客户磁盘当垃圾场）。\n\n不可逆（要恢复得重新上传重建索引），故前端有二次确认；前端/接口的\n消息引用是历史快照，不随文档删除而变（当时的回答就该保持当时的出处）。",
+        "operationId": "delete_document_api_v1_documents__doc_id__delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "doc_id",
+            "required": true,
+            "schema": {
+              "maximum": 2147483647,
+              "minimum": -2147483648,
+              "title": "Doc Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            },
+            "description": "需要登录"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            },
+            "description": "需要管理员权限"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            },
+            "description": "文档不存在"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          },
+          "428": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            },
+            "description": "首次登录必须修改初始口令"
+          }
+        },
+        "summary": "Delete Document"
+      },
       "get": {
         "operationId": "get_document_api_v1_documents__doc_id__get",
         "parameters": [

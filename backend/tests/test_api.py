@@ -187,3 +187,69 @@ def test_health_reports_build_commit_and_start(engine, db, tmp_path):
     assert body["status"] == "ok"
     assert body["commit"] == BUILD_COMMIT and body["commit"] != ""
     assert body["started_at"]
+
+
+# ---- 文档上传时间 + 删除（体验反馈：列表看不到时间、删不掉文档）----
+def test_documents_expose_upload_time(app_client, engine):
+    from sqlalchemy.orm import Session
+    from app.models import KnowledgeBase
+    with Session(engine) as s:
+        kb = KnowledgeBase(tenant_id="default", name="时间库")
+        s.add(kb)
+        s.commit()
+        kb_id = kb.id
+    doc = app_client.post(f"/api/v1/kb/{kb_id}/documents",
+                          files={"file": ("t.txt", b"content", "text/plain")}).json()
+    assert doc["created_at"], "上传响应要带时间"
+    listed = app_client.get(f"/api/v1/kb/{kb_id}/documents").json()
+    assert listed[0]["created_at"] == doc["created_at"]      # 列表同样可见
+    assert app_client.get(f"/api/v1/documents/{doc['id']}").json()["created_at"]
+
+
+def test_delete_document_cascades_cleans_file_and_audits(app_client, engine):
+    from pathlib import Path
+    from sqlalchemy.orm import Session
+    from app.models import AuditLog, Chunk, Document, KnowledgeBase
+    with Session(engine) as s:
+        kb = KnowledgeBase(tenant_id="default", name="删档库")
+        s.add(kb)
+        s.commit()
+        kb_id = kb.id
+    doc = app_client.post(f"/api/v1/kb/{kb_id}/documents",
+                          files={"file": ("gone.txt", "售后规则说明。".encode() * 20,
+                                          "text/plain")}).json()
+    assert app_client.get(f"/api/v1/documents/{doc['id']}/chunks").json(), "先确认有切块"
+    with Session(engine) as s:
+        path = s.get(Document, doc["id"]).storage_path
+    assert Path(path).exists()
+    assert app_client.delete(f"/api/v1/documents/{doc['id']}").status_code == 204
+    # 幂等：再删 404
+    assert app_client.delete(f"/api/v1/documents/{doc['id']}").status_code == 404
+    with Session(engine) as s:
+        assert s.get(Document, doc["id"]) is None
+        assert s.query(Chunk).filter_by(document_id=doc["id"]).count() == 0   # 切块级联清
+        events = [a.action for a in s.query(AuditLog).filter_by(action="document_deleted")]
+        assert len(events) == 1
+    assert not Path(path).exists(), "落盘原文件也应清掉（别把磁盘当垃圾场）"
+    assert app_client.get(f"/api/v1/kb/{kb_id}/documents").json() == []
+
+
+def test_delete_document_requires_admin(engine, db, tmp_path, app_client):
+    from sqlalchemy.orm import Session
+    from app.models import KnowledgeBase
+    with Session(engine) as s:
+        kb = KnowledgeBase(tenant_id="default", name="权限库")
+        s.add(kb)
+        s.commit()
+        kb_id = kb.id
+    doc = app_client.post(f"/api/v1/kb/{kb_id}/documents",
+                          files={"file": ("d.txt", b"x", "text/plain")}).json()
+    seed_user(engine, "m@x.com", "Passw0rd-1", role="member")
+    member = TestClient(create_app(engine=engine, secret="s", embedder=None,
+                                   chat_fn=None, upload_dir=str(tmp_path)))
+    login(member, "m@x.com", "Passw0rd-1")
+    assert member.delete(f"/api/v1/documents/{doc['id']}").status_code == 403
+    anon = TestClient(create_app(engine=engine, secret="s", embedder=None,
+                                 chat_fn=None, upload_dir=str(tmp_path)))
+    assert anon.delete(f"/api/v1/documents/{doc['id']}").status_code == 401
+    assert app_client.delete("/api/v1/documents/99999").status_code == 404

@@ -222,7 +222,14 @@ export interface paths {
         get: operations["get_document_api_v1_documents__doc_id__get"];
         put?: never;
         post?: never;
-        delete?: never;
+        /**
+         * Delete Document
+         * @description 删文档：切块级联清、落盘原文件一并删（别把客户磁盘当垃圾场）。
+         *
+         *     不可逆（要恢复得重新上传重建索引），故前端有二次确认；前端/接口的
+         *     消息引用是历史快照，不随文档删除而变（当时的回答就该保持当时的出处）。
+         */
+        delete: operations["delete_document_api_v1_documents__doc_id__delete"];
         options?: never;
         head?: never;
         /** Patch Document */
@@ -638,6 +645,11 @@ export interface components {
         };
         /** DocOut */
         DocOut: {
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
             /** Error */
             error: string | null;
             /** Id */
@@ -1731,6 +1743,71 @@ export interface operations {
             };
             /** @description 需要登录 */
             401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOut"];
+                };
+            };
+            /** @description 文档不存在 */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+            /** @description 首次登录必须修改初始口令 */
+            428: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOut"];
+                };
+            };
+        };
+    };
+    delete_document_api_v1_documents__doc_id__delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                doc_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description 需要登录 */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOut"];
+                };
+            };
+            /** @description 需要管理员权限 */
+            403: {
                 headers: {
                     [name: string]: unknown;
                 };

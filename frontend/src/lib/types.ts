@@ -1,6 +1,6 @@
 export type DocStatus = "pending" | "parsing" | "ready" | "failed";
 export interface KbOut { id: number; name: string; description: string | null }
-export interface DocOut { id: number; kb_id: number; name: string; status: DocStatus; error: string | null; size_bytes: number | null }
+export interface DocOut { id: number; kb_id: number; name: string; status: DocStatus; error: string | null; size_bytes: number | null; created_at: string }
 // 批量上传逐项结果（部分成功：坏文件只在自己这行有 error）
 export interface BatchUploadItem { name: string; document: DocOut | null; error: string | null }
 export interface ChunkOut { id: number; chunk_index: number; content: string; has_embedding: boolean; meta: Record<string, unknown> }

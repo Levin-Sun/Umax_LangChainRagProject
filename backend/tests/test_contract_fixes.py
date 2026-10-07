@@ -138,8 +138,9 @@ def test_allow_header_is_full_method_union(client):
     assert r.status_code == 405
     assert set(r.headers["allow"].split(", ")) == {"DELETE", "PATCH"}
     # /documents/{id} 由 GET+PATCH 拼成
+    # 文档路径方法集随"文档删除"端点新增 DELETE（同路径由多个单方法路由拼成，中间件须给全集）
     assert set(client.options("/api/v1/documents/1").headers["allow"].split(", ")) \
-        == {"GET", "PATCH"}
+        == {"GET", "PATCH", "DELETE"}
 
 
 # ---- 修复⑧收口：multipart filename 是唯一不经 pydantic 验证链的入口字符串 ----

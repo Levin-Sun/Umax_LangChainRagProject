@@ -179,6 +179,7 @@ class DocOut(BaseModel):
     status: DocStatus
     error: str | None
     size_bytes: int | None
+    created_at: datetime        # 上传时间（UTC；列表按此展示，客户要能看出"什么时候传的"）
 
 
 class BatchUploadItemOut(BaseModel):
@@ -419,7 +420,8 @@ class _AllowHeaderMiddleware:
 
 def _doc_json(d: Document) -> dict:
     return {"id": d.id, "kb_id": d.kb_id, "name": d.name, "status": d.status,
-            "error": d.error, "size_bytes": d.size_bytes}
+            "error": d.error, "size_bytes": d.size_bytes,
+            "created_at": d.created_at}
 
 
 def create_app(
@@ -893,6 +895,33 @@ def create_app(
                               caption_images=cfg.effective()["doc_image_caption"],
                               **_chunk_params(session, kb))
         return _doc_json(doc)
+
+    @app.delete("/api/v1/documents/{doc_id}", status_code=204,
+                responses={**_ERR(404, "文档不存在"), **_ERR_GATE})
+    def delete_document(doc_id: PathId, request: Request,
+                        admin: User = Depends(require_license),
+                        session: Session = Depends(get_session)):
+        """删文档：切块级联清、落盘原文件一并删（别把客户磁盘当垃圾场）。
+
+        不可逆（要恢复得重新上传重建索引），故前端有二次确认；前端/接口的
+        消息引用是历史快照，不随文档删除而变（当时的回答就该保持当时的出处）。
+        """
+        doc = session.get(Document, doc_id)
+        if not doc:
+            raise HTTPException(404, "文档不存在")
+        name, kb_id, storage_path = doc.name, doc.kb_id, doc.storage_path
+        session.delete(doc)          # chunks 走 FK CASCADE
+        audit_record(session, "document_deleted", user_email=admin.email,
+                     target_type="document", target_id=doc_id,
+                     detail={"kb_id": kb_id, "name": name}, ip=_client_ip(request))
+        session.commit()
+        if storage_path:
+            try:
+                Path(storage_path).unlink(missing_ok=True)
+            except OSError as exc:   # 文件删不掉不该让接口失败：DB 已一致，残留文件无害
+                import logging
+
+                logging.getLogger("umax").warning("原文件清理失败 %s：%s", storage_path, exc)
 
     def _visible_doc(session: Session, user: User, doc_id: int) -> Document:
         """按库级授权取文档：不可见（不存在/在未授权库）统一 404 同文案，探测不出差异。"""

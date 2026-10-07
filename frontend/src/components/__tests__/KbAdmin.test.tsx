@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from "@testing-library/react";
+import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { act } from "react";
 import { describe, expect, it, vi } from "vitest";
@@ -7,7 +7,7 @@ import { P } from "@/lib/paths";
 import { fail, fakeApi, ok } from "@/lib/testkit";
 import type { DocOut } from "@/lib/types";
 
-const pending: DocOut = { id: 1, kb_id: 1, name: "ops.txt", status: "pending", error: null, size_bytes: 5 };
+const pending: DocOut = { id: 1, kb_id: 1, name: "ops.txt", status: "pending", error: null, size_bytes: 5, created_at: "2026-10-07T10:00:00+00:00" };
 const ready: DocOut = { ...pending, status: "ready" };
 
 describe("KbAdmin 轮询", () => {
@@ -82,7 +82,7 @@ it("多选文件 → 走批量端点，坏文件逐行报错", async () => {
     if (u === P.kbDocsBatch) {
       // 服务端逐项结果：一个成功、一个失败（部分成功语义）
       return ok([
-        { name: "好的.txt", document: { id: 1, kb_id: 1, name: "好的.txt", status: "ready", error: null, size_bytes: 10 }, error: null },
+        { name: "好的.txt", document: { id: 1, kb_id: 1, name: "好的.txt", status: "ready", error: null, size_bytes: 10, created_at: "2026-10-07T10:00:00+00:00" }, error: null },
         { name: "坏掉.txt", document: null, error: "暂不支持的文件类型：坏掉.txt" },
       ]);
     }
@@ -90,7 +90,7 @@ it("多选文件 → 走批量端点，坏文件逐行报错", async () => {
   });
   render(<KbAdmin api={fakeApi({
     GET: (u) => (u === P.kb ? ok([{ id: 1, name: "库A", description: null }])
-      : ok([{ id: 1, kb_id: 1, name: "好的.txt", status: "ready", error: null, size_bytes: 10 }])),
+      : ok([{ id: 1, kb_id: 1, name: "好的.txt", status: "ready", error: null, size_bytes: 10, created_at: "2026-10-07T10:00:00+00:00" }])),
     POST,
   })} />);
   await screen.findByText("库A");
@@ -106,7 +106,7 @@ it("多选文件 → 走批量端点，坏文件逐行报错", async () => {
 });
 
 it("单文件仍走单文件端点（不批量）", async () => {
-  const POST = vi.fn(() => ok({ id: 9, kb_id: 1, name: "单个.txt", status: "ready", error: null, size_bytes: 3 }));
+  const POST = vi.fn(() => ok({ id: 9, kb_id: 1, name: "单个.txt", status: "ready", error: null, size_bytes: 3, created_at: "2026-10-07T10:00:00+00:00" }));
   render(<KbAdmin api={fakeApi({
     GET: (u) => (u === P.kb ? ok([{ id: 1, name: "库A", description: null }]) : ok([])),
     POST,
@@ -129,11 +129,45 @@ it("分块抽屉标出图片描述来源", async () => {
   ];
   render(<KbAdmin api={fakeApi({
     GET: (u) => (u === P.kb ? ok([{ id: 1, name: "图库", description: null }])
-      : u === P.kbDocs ? ok([{ id: 1, kb_id: 1, name: "流程.docx", status: "ready", error: null, size_bytes: 100 }])
+      : u === P.kbDocs ? ok([{ id: 1, kb_id: 1, name: "流程.docx", status: "ready", error: null, size_bytes: 100, created_at: "2026-10-07T10:00:00+00:00" }])
       : u === P.docChunks ? ok(chunks) : undefined),
   })} />);
   await screen.findByText("图库");
   await userEvent.click(screen.getByText("图库"));
   await userEvent.click(await screen.findByRole("button", { name: "看切块" }));
   expect(await screen.findByText(/图片描述 · word\/media\/image1.png/)).toBeInTheDocument();
+});
+
+// ---- 文档列表：上传时间列 + 删除（二次确认） ----
+it("文档表显示上传时间（本地时区到分钟）", async () => {
+  render(<KbAdmin api={fakeApi({
+    GET: (u) => (u === P.kb ? ok([{ id: 1, name: "库A", description: null }]) : ok([ready])),
+  })} />);
+  await screen.findByText("库A");
+  await userEvent.click(screen.getByText("库A"));
+  const row = await screen.findByRole("row", { name: /ops\.txt/ });
+  // 2026-10-07T10:00Z 在 UTC+8 是 18:00；断言含"2026"与"10"（精确时刻随运行环境时区）
+  expect(within(row).getByText(/2026/)).toBeInTheDocument();
+});
+
+it("删除文档：先确认再发 DELETE，取消则不发", async () => {
+  const DELETE = vi.fn(() => ok(undefined));
+  render(<KbAdmin api={fakeApi({
+    GET: (u) => (u === P.kb ? ok([{ id: 1, name: "库A", description: null }]) : ok([ready])),
+    DELETE,
+  })} />);
+  await screen.findByText("库A");
+  await userEvent.click(screen.getByText("库A"));
+  const row = await screen.findByRole("row", { name: /ops\.txt/ });
+  await userEvent.click(within(row).getByRole("button", { name: "删除" }));
+  const dialog = await screen.findByRole("dialog", { name: /删除文档 ops\.txt/ });
+  await userEvent.click(within(dialog).getByRole("button", { name: "取消" }));
+  expect(DELETE).not.toHaveBeenCalled();
+  // 再点一次并确认 → 真的删
+  await userEvent.click(within(row).getByRole("button", { name: "删除" }));
+  const d2 = await screen.findByRole("dialog", { name: /删除文档 ops\.txt/ });
+  await userEvent.click(within(d2).getByRole("button", { name: "确认删除" }));
+  await waitFor(() => expect(DELETE).toHaveBeenCalledWith(P.doc, expect.objectContaining({
+    params: { path: { doc_id: 1 } },
+  })));
 });

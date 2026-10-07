@@ -5,10 +5,14 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import AdminBanner from "@/components/AdminBanner";
-import { call, uploadDocument, uploadDocuments, type Client } from "@/lib/api";
+import { call, callVoid, uploadDocument, uploadDocuments, type Client } from "@/lib/api";
 import { P } from "@/lib/paths";
 import { useAsync, usePolling } from "@/lib/hooks";
 import type { BatchUploadItem, ChunkOut, DocOut, KbOut } from "@/lib/types";
+
+// 上传时间按本地时区展示到分钟：客户看的是"什么时候传的"，秒级精度没有意义
+const fmtTime = (iso: string) => new Date(iso).toLocaleString(undefined, {
+  year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" });
 
 const STATUS_LABEL: Record<string, string> = {
   pending: "排队中", parsing: "解析中", ready: "就绪", failed: "失败",
@@ -20,6 +24,7 @@ export default function KbAdmin({ api }: { api: Client }) {
   const [newName, setNewName] = useState("");
   const [busy, setBusy] = useState(false);
   const [batchErrors, setBatchErrors] = useState<string[]>([]);
+  const [deleteFor, setDeleteFor] = useState<DocOut | null>(null);
   const [actionErr, setActionErr] = useState<unknown>(null);
   const [chunks, setChunks] = useState<{ doc: DocOut; rows: ChunkOut[] } | null>(null);
   const kbs = useAsync(() => call(api.GET(P.kb)) as Promise<KbOut[]>);
@@ -60,6 +65,16 @@ export default function KbAdmin({ api }: { api: Client }) {
       setActionErr(e);
     } finally {
       setBusy(false);
+    }
+  }
+
+  async function del(d: DocOut) {
+    setDeleteFor(null);
+    try {
+      await callVoid(api.DELETE(P.doc, { params: { path: { doc_id: d.id } } }));
+      docs.reload();
+    } catch (e) {
+      setActionErr(e);
     }
   }
 
@@ -130,7 +145,8 @@ export default function KbAdmin({ api }: { api: Client }) {
             )}
             <table className="w-full text-body text-ink-2">
               <thead><tr className="border-b border-border text-left text-h3 font-medium text-ink-2">
-                <th className="py-2 font-medium">文档</th><th className="font-medium">状态</th><th className="font-medium">大小</th><th /></tr></thead>
+                <th className="py-2 font-medium">文档</th><th className="font-medium">状态</th>
+                <th className="font-medium">大小</th><th className="font-medium">上传时间</th><th /></tr></thead>
               <tbody>
                 {(docs.data ?? []).map((d) => (
                   <tr key={d.id} className="border-b border-border last:border-0">
@@ -138,10 +154,13 @@ export default function KbAdmin({ api }: { api: Client }) {
                     <td><Badge variant={d.status === "failed" ? "destructive" : "secondary"} className="rounded-full font-normal">
                       {STATUS_LABEL[d.status] ?? d.status}</Badge>
                       {d.error && <p className="mt-0.5 max-w-60 truncate text-caption text-destructive" title={d.error}>{d.error}</p>}</td>
-                    <td className="font-medium">{d.size_bytes} B</td>
+                    <td className="font-medium">{d.size_bytes ?? 0} B</td>
+                    <td className="text-ink-3">{fmtTime(d.created_at)}</td>
                     <td className="space-x-1 text-right">
                       {d.status === "failed" && <Button size="sm" variant="outline" className="h-7 rounded-lg" onClick={() => reprocess(d)}>重试入库</Button>}
                       <Button size="sm" variant="ghost" className="h-7 rounded-lg text-ink-1" onClick={() => viewChunks(d)}>看切块</Button>
+                      <Button size="sm" variant="ghost" className="h-7 rounded-lg text-destructive hover:text-destructive"
+                              onClick={() => setDeleteFor(d)}>删除</Button>
                     </td>
                   </tr>
                 ))}
@@ -152,6 +171,25 @@ export default function KbAdmin({ api }: { api: Client }) {
           </div>
         )}
       </section>
+      {deleteFor && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 px-4"
+             onClick={() => setDeleteFor(null)}>
+          <div role="dialog" aria-label={`删除文档 ${deleteFor.name}`}
+               onClick={(e) => e.stopPropagation()}
+               className="w-full max-w-sm space-y-3 rounded-xl border border-border bg-card px-6 py-5 shadow-lg">
+            <h3 className="text-h2 font-semibold text-ink-1">删除文档</h3>
+            <p className="text-body text-ink-2">
+              确定删除「{deleteFor.name}」？该文档的切块与索引会一并清除，重新使用需再次上传。
+            </p>
+            <div className="flex gap-2">
+              <Button size="sm" className="h-8 rounded-lg bg-destructive text-card hover:bg-destructive/90"
+                      onClick={() => void del(deleteFor)}>确认删除</Button>
+              <Button size="sm" variant="ghost" className="h-8 rounded-lg text-ink-3"
+                      onClick={() => setDeleteFor(null)}>取消</Button>
+            </div>
+          </div>
+        </div>
+      )}
       {chunks && (
         <aside className="w-[380px] shrink-0 space-y-3 overflow-y-auto border-l border-border/80 p-4">
           <div className="flex items-center justify-between">
