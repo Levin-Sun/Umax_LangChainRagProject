@@ -212,7 +212,8 @@ def test_production_wiring_reports_all_scenarios(engine, db, tmp_path, monkeypat
         s.commit()
     app = build_production_app(upload_dir=str(tmp_path), engine=engine)
     # judge=True：配了 GATEWAY_SECRET 就有裁判通路（裁判走的就是 chat 模型那条路）
+    # rerank=True 同理：网关在位就装上精排适配器（表里有没有 rerank 模型是运行时读表的事）
     assert app.state.wired == {"chat": True, "embedder": True, "vision": True,
                                "mineru": False, "queue": False, "judge": True,
-                               "license_enforced": True}
+                               "rerank": True, "license_enforced": True}
     get_settings.cache_clear()   # 双保险：conftest 的 autouse teardown 也会清（断言失败也清得到）

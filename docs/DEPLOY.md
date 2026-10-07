@@ -39,7 +39,13 @@ docker compose up -d --build
 
 1. 打开 `http://<服务器IP>:3000` → 登录页，用 `.env` 里的 `ADMIN_EMAIL/ADMIN_PASSWORD` 登录
 2. **首登强制改密**：系统弹「首次登录，请修改初始口令」，改完才能进任何页面（后端 428 门闸兜底，绕过界面也进不去）
-3. `/admin/models` 登记模型：chat / embedding / rerank（vision 可选）各一条，填厂商、地址、key、模型名
+3. `/admin/models` 登记模型：chat / embedding（vision 可选）各一条，填厂商、地址、key、模型名。
+   **rerank（可选）**：登记后检索会在"BM25+向量 RRF 融合"之后再精排一道，明显更贴题；
+   它走百炼**原生**端点（接口地址填 `https://dashscope.aliyuncs.com/api/v1`，模型名如
+   `qwen3.7-text-rerank`）。不登记就直接用融合结果，问答与评测都不受影响——**要不要开由数据决定**：
+   到 `/admin/eval` 跑一轮对比（登记前后各跑一次，看 MRR 与通过率），代价约 +250ms/次。
+   注：把 key 填在 `.env`（而不是后台登记）时，精排默认开启，想关掉就把 `.env` 里的
+   `RERANK_MODEL` 置空
 4. `/admin/kb` 建知识库 → 上传第一批文档 → 状态轮询到「就绪」
 5. `/admin/apikeys` 签发 API key（可选）：给客户的钉钉/企微/内部系统用——OpenAI SDK 把 `base_url` 设为
    `http://<服务器IP>:8000/api/v1/openai`、key 填签发明文即可调 `/chat/completions`（回答自带 citations）

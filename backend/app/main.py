@@ -535,6 +535,50 @@ def with_gateway_fallback(gw_fn: Callable | None,
     return composed
 
 
+def with_rerank_fallback(gw_fn: Callable | None, direct_fn: Callable | None) -> Callable | None:
+    """组合两路精排（网关优先、.env 原生端点兜底）。
+
+    与 chat 的 `with_gateway_fallback` 形状相似但**语义必须不同**：chat 在"无供应商"时返回 None，
+    含义是"没有答案"；而精排**返回 None 会把检索整条打断**（retrieve 会拿 None 去切片）。
+    真机踩过：复用 chat 那个组合器后，网关表里没登记 rerank 时 /retrieve 直接 500。
+    所以精排的"NoProviderError"语义是"这一路不可用"，交给另一路或原样返回候选。
+    """
+    from app.services.gateway import NoProviderError
+
+    if gw_fn is None:
+        return direct_fn
+    if direct_fn is None:
+        return gw_fn
+
+    def composed(query: str, hits: list[dict]) -> list[dict]:
+        try:
+            return gw_fn(query, hits)
+        except NoProviderError:
+            return direct_fn(query, hits)
+
+    return composed
+
+
+def with_rerank_degrade(rerank_fn: Callable | None) -> Callable | None:
+    """重排失败降级为**未重排的顺序**，只记 warning。
+
+    与 chat 的口径刻意不同：chat 挂了就没有答案，必须上抛让端点走未命中兜底；
+    而重排只是检索链路里"锦上添花"的一步，它挂了还答得出来——为此把整个问答弄失败不合理。
+    这类失败（上游抖动/模型被停用）不影响数据正确性，记 warning 足够，不该惊动用户。
+    """
+    if rerank_fn is None:
+        return None
+
+    def wrapped(query: str, hits: list[dict]) -> list[dict]:
+        try:
+            return rerank_fn(query, hits)
+        except Exception as exc:
+            logging.getLogger("umax").warning("重排失败，改用未重排顺序：%s", exc)
+            return hits
+
+    return wrapped
+
+
 class FallbackEmbedder:
     """组合 embedder（网关优先、.env 百炼兜底）：网关表空（NoProviderError）退直连；
     两侧都无 → 返回 [None]*n——ingest 语义即"不向量化 BM25-only 入库"，
@@ -610,6 +654,8 @@ def create_app(
     # 让"后台跑完再看结果"在单测里是确定性的——不靠 sleep 赌时序
     judge_fn: Callable[[str, str, list[dict]], dict] | None = None,
     # LLM 裁判（§阶段2 Ragas 侧）：(question, answer, hits) -> 判词；None=未配置裁判通路（请求评测带 judge 即 400）
+    rerank_fn: Callable[[str, list[dict]], list[dict]] | None = None,
+    # 精排（§3.2）：(query, 候选) -> 重排后的候选；None=未配置 rerank 模型（检索就用 RRF 融合顺序）
 ) -> FastAPI:
     app = FastAPI(title="Umax RAG", version="0.1.0")
     s = get_settings()
@@ -626,6 +672,8 @@ def create_app(
         threading.Thread(target=fn, daemon=True).start()
 
     spawn_fn = spawn or _spawn_default
+    # 精排：装上"失败即降级"的外壳，四处检索调用共用同一份（口径只有一处）
+    rerank = with_rerank_degrade(rerank_fn)
 
     # ==================== RBAC（spec 2026-09-23）：账号+DB 会话+库级授权 ====================
     SESSION_COOKIE, SESSION_TTL_DAYS = "umax_session", 7
@@ -1295,7 +1343,7 @@ def create_app(
         _guard_kb_ids(allowed, body.kb_ids)
         c = cfg.effective()
         return retrieve(session, body.query, embedder=embedder, kb_ids=body.kb_ids,
-                        allowed_kb_ids=allowed,
+                        allowed_kb_ids=allowed, rerank=rerank,
                         recall_k=c["recall_k"], top_k=body.top_k or c["rerank_top_n"],
                         min_sim=c["min_sim"])
 
@@ -1336,7 +1384,7 @@ def create_app(
         if captions:
             query += "\n\n【随问图片描述】\n" + "\n".join(captions)
         hits = retrieve(session, query, embedder=embedder, kb_ids=body.kb_ids,
-                        allowed_kb_ids=allowed,
+                        allowed_kb_ids=allowed, rerank=rerank,
                         recall_k=c["recall_k"], top_k=c["rerank_top_n"], min_sim=c["min_sim"])
         # 终审收口①：给了 id 就必须"存在且归调用者"——不存在与跨用户同文案（同 list_messages），
         # 否则"不存在→新建回 200 / 别人的→404"成了会话存在性探测口（spec §0：不可区分）。
@@ -1637,7 +1685,7 @@ def create_app(
         allowed = set(k.kb_ids) if k.kb_ids is not None else None
         c = cfg.effective()
         hits = retrieve(session, question, embedder=embedder, kb_ids=None,
-                        allowed_kb_ids=allowed, recall_k=c["recall_k"],
+                        allowed_kb_ids=allowed, rerank=rerank, recall_k=c["recall_k"],
                         top_k=c["rerank_top_n"], min_sim=c["min_sim"])
         if not hits or chat_fn is None:
             answer, usage, citations = c["chat_miss_answer"], {"prompt_tokens": 0, "completion_tokens": 0}, []
@@ -1779,7 +1827,7 @@ def create_app(
                     err: str | None = None
                     try:
                         hits = retrieve(session, q.question, embedder=embedder,
-                                        kb_ids=run.kb_ids, allowed_kb_ids=None,
+                                        kb_ids=run.kb_ids, allowed_kb_ids=None, rerank=rerank,
                                         recall_k=c["recall_k"], top_k=c["rerank_top_n"],
                                         min_sim=c["min_sim"])
                         top_docs = [h["doc_name"] for h in hits]
@@ -2073,6 +2121,7 @@ def build_production_app(upload_dir: str = "uploads",
     from app.services.chat import ChatClient, make_chat_fn
     from app.services.embeddings import BailianEmbedder
     from app.services.parsers import MinerUClient
+    from app.services.rerank import RerankClient, reorder
 
     s = get_settings()
     if engine is None:
@@ -2125,6 +2174,7 @@ def build_production_app(upload_dir: str = "uploads",
     cfg_store = SettingsStore(engine, s)          # 配置中心：端点与生成层共用同一实例
     prompt_of = lambda key: (lambda: cfg_store.effective()[key])  # noqa: E731  每次调用现取
     bailian_client = None
+    bailian_rerank = None
     if s.dashscope_api_key:
         # .env 百炼直连（阶段 0 链路）：作为网关表未配置时的开发/冒烟兜底
         bailian_client = ChatClient(api_key=s.dashscope_api_key,
@@ -2135,6 +2185,25 @@ def build_production_app(upload_dir: str = "uploads",
                                            base_url=s.dashscope_compat_base,
                                            model=s.embedding_model,
                                            dimensions=s.embedding_dim)
+        if s.rerank_model:   # 重排只在原生端点（兼容端点没有 /rerank，实测返回空）
+            direct_rerank = RerankClient(api_key=s.dashscope_api_key,
+                                         base_url=s.dashscope_native_base,
+                                         model=s.rerank_model)
+
+            def bailian_rerank(query: str, hits: list[dict]) -> list[dict]:
+                """与网关侧同形的适配器。**记账口径也一致**（scenario=rerank、归检索链路）：
+                重排是花钱的一步，无论走网关还是 .env 直连都必须进台账，否则"成本闸门"漏一边。
+                """
+                out = direct_rerank.rerank(query, [h.get("content", "") for h in hits],
+                                           top_n=len(hits))
+                with Session(engine) as ses:
+                    ses.add(UsageRecord(tenant_id="default", user_email="system@local",
+                                        kb_id=(hits[0].get("kb_id") if hits else None),
+                                        scenario="rerank", model=s.rerank_model,
+                                        prompt_tokens=out["prompt_tokens"],
+                                        completion_tokens=0))
+                    ses.commit()
+                return reorder(hits, out["results"])
     gw = None
     if s.gateway_secret:
         from app.services.gateway import ModelGateway
@@ -2168,6 +2237,12 @@ def build_production_app(upload_dir: str = "uploads",
         return bailian_client.complete(messages)
 
     judge_fn = make_judge_fn(_judge_complete) if (gw is not None or bailian_client is not None) else None
+
+    # 精排（§3.2）：配了 rerank 模型才生效；.env 侧走**原生端点**（重排没有兼容格式）
+    # 表里没有 rerank 模型 + 没有 .env 直连 → 两路皆空：装配一个恒等函数，
+    # 让"没配重排"这件事在检索路径上表现为"原样返回候选"（而不是 None 把检索打断）
+    rerank_fn = with_rerank_fallback(gw.make_rerank_fn() if gw is not None else None,
+                                     bailian_rerank)
     mineru = MinerUClient(s.mineru_base_url) if s.mineru_base_url else None
     # 装配可见性（售后排查"后台配了模型为什么没生效"的第一手依据；测试也据此守护漏传）
     # 历史教训：vision_fn 曾在网关分支里算出来却没传进 create_app，视觉能力静默空转
@@ -2185,10 +2260,11 @@ def build_production_app(upload_dir: str = "uploads",
                      upload_dir=upload_dir, mineru=mineru, queue=queue,
                      vision_fn=vision_fn, license_public_key=s.license_public_key,
                      license_file=str(s.license_file), settings_store=cfg_store,
-                     judge_fn=judge_fn)
+                     judge_fn=judge_fn, rerank_fn=rerank_fn)
     app.state.wired = {"chat": chat_fn is not None, "embedder": embedder is not None,
                        "vision": vision_fn is not None, "mineru": mineru is not None,
                        "queue": queue is not None, "judge": judge_fn is not None,
+                       "rerank": rerank_fn is not None,
                        "license_enforced": bool(s.license_public_key)}
     return app
 

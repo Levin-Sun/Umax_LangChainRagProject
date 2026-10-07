@@ -37,8 +37,10 @@ def build_spec(settings=None) -> dict[str, Spec]:
                               help="传图提问时把图片转文字描述的指令。"),
         "recall_k": Spec("int", "召回条数", 1, 50,
                          help="混合检索两路各自召回上限（BM25 与向量各取前 N）。"),
-        "rerank_top_n": Spec("int", "精排保留条数", 1, 20,
-                             help="重排精选后进入提示词的条数，直接影响引用数量与成本。"),
+        "rerank_top_n": Spec("int", "最终保留条数", 1, 20,
+                             help="进入提示词的条数，直接影响引用数量与成本。"
+                                  "配了 rerank 模型时=精排后保留的条数；没有 rerank 模型时"
+                                  "=RRF 融合后的截断条数（两者都不改召回上限 recall_k）。"),
         "min_sim": Spec("float", "向量最低相似度", 0.0, 1.0,
                         help="低于该余弦相似度的向量召回被丢弃（未命中判据之一）。"),
         "doc_image_caption": Spec("bool", "文档图片转文字入库",

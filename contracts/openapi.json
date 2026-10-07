@@ -1810,7 +1810,7 @@
                 "type": "null"
               }
             ],
-            "description": "精排保留条数",
+            "description": "最终保留条数",
             "title": "Rerank Top N"
           },
           "vision_prompt": {

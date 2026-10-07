@@ -7,9 +7,9 @@ import httpx
 import pytest
 from sqlalchemy.orm import Session
 
-from app.models import ModelConfig, UsageRecord
+from app.models import KnowledgeBase, ModelConfig, UsageRecord
 from app.services.crypto import encrypt_secret
-from app.services.gateway import GatewayError, ModelGateway
+from app.services.gateway import GatewayError, ModelGateway, NoProviderError
 
 SECRET = "gateway-master"
 
@@ -254,3 +254,81 @@ def test_vision_without_provider_raises_no_provider(engine, db):
                       sleep=lambda s: None)
     with pytest.raises(NoProviderError):
         gw.vision("data:image/png;base64,AAAA")
+
+
+
+def _seed_kb(engine, kb_id):
+    """usage_records.kb_id 是有 FK 的：台账要记"哪个库花的钱"，就得先真有那个库。"""
+    with Session(engine) as s:
+        s.add(KnowledgeBase(id=kb_id, tenant_id="default", name=f"库{kb_id}"))
+        s.commit()
+
+# ---- rerank 场景（§3.2 精排）：与 chat/embedding 同款的路由/降级/记账，但走原生端点 ----
+def _rerank_handler(fail_models=()):
+    def handler(request):
+        body = json.loads(request.content)
+        if body["model"] in fail_models:
+            return httpx.Response(500, json={"error": "upstream boom"})
+        docs = body["input"]["documents"]
+        # 模拟真实重排语义：与问题相关的文档得分高（"生鲜"那篇）
+        return httpx.Response(200, json={
+            "output": {"results": [{"index": i, "relevance_score": 0.9 if "生鲜" in doc else 0.1}
+                                   for i, doc in enumerate(docs)]},
+            "usage": {"prompt_tokens": 42, "total_tokens": 42}})
+    return handler
+
+
+def test_rerank_reorders_candidates_and_logs_usage(engine, db):
+    _seed(engine, "rerank", "r-primary", base_url="http://api.test/api/v1")
+    _seed_kb(engine, 3)
+    gw = ModelGateway(engine, secret=SECRET, transport=httpx.MockTransport(_rerank_handler()),
+                      sleep=lambda s: None)
+    cands = [{"id": 1, "kb_id": 3, "content": "打包胶带要多宽", "doc_name": "a"},
+             {"id": 2, "kb_id": 3, "content": "生鲜不支持七天无理由退货", "doc_name": "b"}]
+    out = gw.rerank("生鲜能退吗", cands, kb_id=3)
+    assert [h["id"] for h in out] == [2, 1]            # 相关的排到最前
+    assert out[0]["rerank_score"] == 0.9 and out[1]["rerank_score"] == 0.1
+    rows = _usage_rows(engine, "rerank")               # 重排也要进台账（它是花钱的一步）
+    assert len(rows) == 1 and rows[0].model == "r-primary" and rows[0].prompt_tokens == 42
+    assert rows[0].kb_id == 3
+
+
+def test_rerank_falls_back_to_next_provider(engine, db):
+    _seed(engine, "rerank", "r-broken", rank=0)
+    _seed(engine, "rerank", "r-rescue", rank=1)
+    gw = ModelGateway(engine, secret=SECRET,
+                      transport=httpx.MockTransport(_rerank_handler(fail_models={"r-broken"})),
+                      sleep=lambda s: None)
+    out = gw.rerank("生鲜能退吗", [{"id": 1, "content": "无关"}], log=False)
+    assert len(out) == 1
+    assert _usage_rows(engine, "rerank") == []          # log=False：只返回不记账（调用方自己记）
+
+
+def test_rerank_distinguishes_no_provider_from_all_dead(engine, db):
+    gw = ModelGateway(engine, secret=SECRET, transport=httpx.MockTransport(_rerank_handler()),
+                      sleep=lambda s: None)
+    with pytest.raises(NoProviderError):               # 表里没有 → 调用方据此回退 .env 直连
+        gw.rerank("q", [{"id": 1, "content": "x"}])
+    _seed(engine, "rerank", "r-dead")
+    gw2 = ModelGateway(engine, secret=SECRET,
+                       transport=httpx.MockTransport(_rerank_handler(fail_models={"r-dead"})),
+                       sleep=lambda s: None)
+    with pytest.raises(GatewayError):                  # 配了但全挂 → 不悄悄降级，让配置错误现形
+        gw2.rerank("q", [{"id": 1, "content": "x"}])
+
+
+def test_rerank_keeps_unscored_candidates_and_carries_kb_id(engine, db):
+    """上游只给部分候选打分时，没打分的排在后面但**不能丢**（丢候选=悄悄降低召回）。"""
+    _seed(engine, "rerank", "r-partial")
+    _seed_kb(engine, 9)
+    def partial(request):
+        return httpx.Response(200, json={"output": {"results": [
+            {"index": 1, "relevance_score": 0.5}]}, "usage": {"total_tokens": 5}})
+    gw = ModelGateway(engine, secret=SECRET, transport=httpx.MockTransport(partial),
+                      sleep=lambda s: None)
+    hits = [{"id": 1, "kb_id": 9, "content": "a"}, {"id": 2, "kb_id": 9, "content": "b"}]
+    out = gw.make_rerank_fn()("q", hits)
+    assert [h["id"] for h in out] == [2, 1]
+    assert out[0]["rerank_score"] == 0.5 and out[1]["rerank_score"] is None
+    # make_rerank_fn 自己记账：检索层没有"提问者"这个上下文，成本按链路记（同 embedding 口径）
+    assert [r.kb_id for r in _usage_rows(engine, "rerank")] == [9]

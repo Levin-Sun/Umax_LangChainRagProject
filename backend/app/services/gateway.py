@@ -10,6 +10,7 @@ from sqlalchemy.orm import Session
 from app.models import ModelConfig, UsageRecord
 from app.services.chat import SYSTEM_PROMPT, ChatClient, build_user_prompt
 from app.services.crypto import decrypt_secret
+from app.services.rerank import RerankClient, reorder
 
 EMBED_BATCH = 10
 
@@ -112,6 +113,45 @@ class ModelGateway:
 
     def make_vision_fn(self, *, vision_prompt=None) -> Callable[[str], dict]:
         return lambda image_url: self.vision(image_url, prompt=vision_prompt)
+
+    def rerank(self, query: str, hits: list[dict], *, top_n: int | None = None,
+               user_email: str = "system@local", kb_id: int | None = None,
+               log: bool = True) -> list[dict]:
+        """精排（§3.2 混合检索后的重排环节）：把候选块按与问题的相关性重排。
+
+        记账口径与 embedding 相同（归 system@local / 记命中块所属库）：重排是**检索链路的一环**，
+        与"谁提的问题"无关——硬要归到提问者头上只会让台账失真（检索链路的成本按链路记）。
+        返回的每项带 rerank_score（未被打分的为 None），排查"为什么这条被排到后面"时是唯一线索。
+        """
+        providers = self.providers("rerank")
+        if not providers:
+            raise NoProviderError("没有已启用的 rerank 模型配置（model_configs 表为空？）")
+        contents = [h.get("content", "") for h in hits]
+        for p in providers:   # fallback 链：本家失败切下一家
+            client = RerankClient(api_key=p.api_key, base_url=p.base_url, model=p.model_name,
+                                  transport=self._transport, sleep=self._sleep,
+                                  timeout=self._timeout)
+            t0 = time.monotonic()
+            try:
+                out = client.rerank(query, contents, top_n=top_n or len(contents))
+            except Exception:
+                continue
+            if log:
+                self._log(user_email, kb_id, "rerank", p.model_name, out["prompt_tokens"], 0,
+                          int((time.monotonic() - t0) * 1000))
+            return reorder(hits, out["results"])
+        raise GatewayError("全部 rerank 模型均调用失败")
+
+    def make_rerank_fn(self, *, top_n: int | None = None) -> Callable[[str, list[dict]], list[dict]]:
+        """适配 retrieval.rerank 协议：(query, 候选) -> 重排后的候选。
+
+        与 chat 的记账约定刻意不同：chat 交给问答端点按登录者记（那里知道是谁在问），
+        而检索层没有"提问者"这个上下文——所以这里自己记（归检索链路，同 embedding 口径）。
+        """
+        def rerank_fn(query: str, candidates: list[dict]) -> list[dict]:
+            return self.rerank(query, candidates, top_n=top_n,
+                               kb_id=(candidates[0].get("kb_id") if candidates else None))
+        return rerank_fn
 
     def make_chat_fn(self, *, system_prompt=None) -> Callable[[str, list[dict]], dict]:
         """适配 chat_fn 协议：网关内部不记账（log=False），台账统一由问答端点按登录者记一次。

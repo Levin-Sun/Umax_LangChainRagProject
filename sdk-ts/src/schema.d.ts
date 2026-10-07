@@ -1349,7 +1349,7 @@ export interface components {
             recall_k?: number | null;
             /**
              * Rerank Top N
-             * @description 精排保留条数
+             * @description 最终保留条数
              */
             rerank_top_n?: number | null;
             /**
