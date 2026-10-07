@@ -35,6 +35,7 @@
 - ✅ **UI 设计规范落地（2026-09-23）**：全站统一 Inter（中文回落系统）+ Consolas 等宽；五级字阶 `text-h1/h2/h3/body/caption`（24/32、18/24、16/22、14/20+0.2px 字距、12/18）在 `@theme` 注册锁死，组件层禁默认字号/手动行高/700+ 字重（`styleGuard.test.ts` 静态扫描守护）；文字固定三层级 `--ink-1/2/3`（浅色=#1D2129/#4E5969/#86909C，深/护按层级配等价三色）；卡片内边距 20/24、模块间距 24、表单标签 H3、表头 16/500、数字列 500、引用标记 12px 辅色等宽、长文本列限宽不铺满
 - ✅ **阶段 0 完成（2026-09-19）**：金标准 20 题，纯 BM25 基线 20/20，混合检索 20/20（百炼 API 与本地 bge 双 provider 各验一轮）；执行记录与交接说明见[产品需求与开发方案.md](./产品需求与开发方案.md)第六章
 - 链路：切块 → pgvector → BM25+向量 RRF → 重排 → qwen3.7-flash 带引用生成；嵌入/重排支持百炼 API 与本地双 provider，可 `.env` 切换
+- 🩺 **版本印记（2026-10-07）**：`GET /api/v1/health` 增 `commit` 与 `started_at`——排查「改了不生效」的第一手信息（本项目已三次因"进程跑旧代码"造成困惑：前端 `.next` 缓存被构建覆盖、后端 dev 进程未重启）。容器部署可用 `BUILD_COMMIT` 注入版本号
 - 用法（本机开发）：`docker compose up -d postgres`（只起 PG，全套容器交付见 [docs/DEPLOY.md](./docs/DEPLOY.md)）→ 回归 `cd backend && pytest`；起服务 `python -m app.main`；stage0 验证脚本已归档至 `archive/stage0/`（勿再对真库跑其 ingest）
 - 当前配置：百炼已放行全部模型，`EMBED_PROVIDER=bailian`（qwen3.7-text-embedding 1024 维 + qwen3.7-text-rerank），已重新入库；chat 间歇性 403 已内置重试
 - 下一步：配置中心与用户级配额已落地；剩余欠账——**Docker 交付冒烟**（需 Docker 机器，把「代码完整」变「能交付」的关键一步）、**真实模型 key 端到端验证**（本机无 key，问答一直走兜底）、评测体系正式化（Ragas）、MinerU 扫描件、图表入库、批量上传、部门级权限；阶段 1 收尾仅剩**评测集语料扩容**（文档量上百后重跑 `archive/stage0/compare_retrieval.py` 验证向量增益）；Docker 交付打包需在有 Docker 的机器上做一次交付冒烟（compose 构建+初始化向导全链）。审计查询页「下一页」末页置灰受契约无 total 所限，作为已知限制保留（详见需求文档 §6.5-10）

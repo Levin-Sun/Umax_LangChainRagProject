@@ -173,3 +173,17 @@ def test_list_documents_per_kb(app_client):
     assert rows[0]["kb_id"] == kb_id and rows[0]["status"] == "ready"
     assert app_client.get(f"/api/v1/kb/{kb2}/documents").json() == []
     assert app_client.get("/api/v1/kb/99999/documents").status_code == 404
+
+
+def test_health_reports_build_commit_and_start(engine, db, tmp_path):
+    """版本印记（/health）：排查"改了不生效"的第一手信息——先确认进程跑的是哪份代码。"""
+    from fastapi.testclient import TestClient
+
+    from app.main import BUILD_COMMIT, create_app
+
+    c = TestClient(create_app(engine=engine, secret="h", embedder=None,
+                              chat_fn=None, upload_dir=str(tmp_path)))
+    body = c.get("/api/v1/health").json()
+    assert body["status"] == "ok"
+    assert body["commit"] == BUILD_COMMIT and body["commit"] != ""
+    assert body["started_at"]

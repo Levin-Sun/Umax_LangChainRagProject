@@ -81,6 +81,25 @@ ReqId = Annotated[int, BeforeValidator(_json_int32),           # body id：JSON 
             Field(json_schema_extra={"minimum": INT32_MIN, "maximum": INT32_MAX})]  # schema 侧标准键
 
 
+def _build_commit() -> str:
+    """当前代码版本：容器部署可用 BUILD_COMMIT 注入（镜像内无 .git），开发态直接问 git。"""
+    import os
+    import subprocess
+
+    env = (os.environ.get("BUILD_COMMIT") or "").strip()
+    if env:
+        return env[:40]
+    try:
+        return subprocess.run(["git", "rev-parse", "--short", "HEAD"],
+                              cwd=Path(__file__).resolve().parents[2],
+                              capture_output=True, text=True, timeout=3).stdout.strip() or "unknown"
+    except Exception:
+        return "unknown"
+
+
+BUILD_COMMIT = _build_commit()
+
+
 def _json_nonneg(v):
     # 用户配额专用：JSON integer 且 ≥0（负数不是"超级配额"而是非法输入）——边界写进 schema
     v = _json_int32(v)
@@ -687,10 +706,13 @@ def create_app(
                  "target_type": r.target_type, "target_id": r.target_id, "detail": r.detail,
                  "ip": r.ip, "created_at": r.created_at.isoformat()} for r in rows]
 
+    started_at = _now().isoformat()
+
     @app.get("/api/v1/health")
     def health(session: Session = Depends(get_session)):
         session.execute(sa_text("SELECT 1"))
-        return {"status": "ok"}
+        # commit/started_at：排查"改了不生效"的第一手信息——先确认进程跑的是哪份代码
+        return {"status": "ok", "commit": BUILD_COMMIT, "started_at": started_at}
 
     # ---- 知识库 ----
     def _guard_kb_ids(allowed: set[int] | None, kb_ids: list[int] | None) -> None:

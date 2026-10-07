@@ -80,7 +80,10 @@ docker compose up -d --build
 
 ## 健康自检（减少售后的第一道闸）
 
-- 后端：`curl http://<IP>:8000/api/v1/health` → `{"status":"ok"}`
+- 后端：`curl http://<IP>:8000/api/v1/health` → `{"status":"ok","commit":"a3b97c6","started_at":"..."}`
+  —— `commit` 是当前运行的代码版本，`started_at` 是进程启动时刻。
+  **遇到「改了配置/功能不生效」先看这两个字段**：若 commit 不是你期望的版本，说明跑的是旧代码（改完记得重启后端）；
+  若 started_at 早于你的改动时间，同理。（容器部署可用 `BUILD_COMMIT` 环境变量注入镜像版本号。）
 - 前端：`curl -I http://<IP>:3000` → 200
 - 组件异常先看 `docker compose ps` 哪个容器 unhealthy，再 `docker compose logs <服务名>`
 
