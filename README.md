@@ -62,3 +62,24 @@
 可选拦截 breaking change：安装 [oasdiff](https://github.com/oasdiff/oasdiff) 后执行 `oasdiff breaking <上个提交的 contracts/openapi.json> contracts/openapi.json`（个人项目一期以 git diff 评审 spec 变更为主，不强制装二进制）。
 
 已知取舍：`scenario` 字段在 spec 中以 `pattern` 约束，TS SDK 里呈现为 `string` 而非字面量联合类型——刻意为之，SDK v1 时再收紧。
+
+## 本地验证（别把 dev 实例弄挂）
+
+**`next build` 与 `next dev` 默认共用 `.next`**：dev 实例还开着的时候跑一次 `npm run build`，
+会把 dev 的产物目录覆盖掉，页面立刻 500（`_buildManifest.js.tmp` ENOENT）——这个坑踩过两次。
+
+规矩：**验证用独立产物目录**，dev 实例照常跑。
+
+```bash
+# 后端：用独立库 + 独立端口起一份，不碰正在用的实例与其数据
+PG_DB=umaxrag_verify UVICORN_PORT=8008 ../.venv/bin/python -m app.main
+
+# 前端：dev 也走独立产物目录并指向验证后端
+cd frontend
+BACKEND_ORIGIN=http://127.0.0.1:8008 NEXT_DIST_DIR=.next-ui npm run dev -- --port 3001
+npm run build:verify          # 构建闸也不碰 .next（.next-* 已进 .gitignore）
+```
+
+没有模型 key 时想验证「网关 → 密钥解密 → 调用 → 台账 → 评测」整条链路：
+`python backend/scripts/stub_model_server.py --port 8099` 起桩模型，在后台「模型」页登记即可
+（桩只验检索与链路，不验语言能力；拿到真 key 换 base_url/key 就是真模型）。
