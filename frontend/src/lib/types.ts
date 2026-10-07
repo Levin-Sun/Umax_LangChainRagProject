@@ -3,7 +3,7 @@ export interface KbOut { id: number; name: string; description: string | null }
 export interface DocOut { id: number; kb_id: number; name: string; status: DocStatus; error: string | null; size_bytes: number | null }
 // 批量上传逐项结果（部分成功：坏文件只在自己这行有 error）
 export interface BatchUploadItem { name: string; document: DocOut | null; error: string | null }
-export interface ChunkOut { id: number; chunk_index: number; content: string; has_embedding: boolean }
+export interface ChunkOut { id: number; chunk_index: number; content: string; has_embedding: boolean; meta: Record<string, unknown> }
 export interface Citation { n: number; doc_name: string; chunk_id: number; excerpt: string }
 export interface ChatOut { conversation_id: number; answer: string; citations: Citation[]; cited_docs: string[]; usage: { prompt_tokens: number; completion_tokens: number } }
 export interface ConversationOut { id: number; title: string; kb_ids: number[] }
@@ -26,5 +26,5 @@ export interface BrandingOut { brand_name: string; logo: string | null }
 // 授权状态（/license，admin 面）：enforced=false 表示未启用校验（开发模式）
 export interface LicenseOut { enforced: boolean; valid: boolean; reason: string | null; license_key: string | null; customer: string | null; issued_at: string | null; expires_at: string | null; days_left: number | null; features: Record<string, unknown>; machine_fingerprint: string }
 // 配置中心（/settings）：values=生效值、defaults=默认值、overridden=被后台改过的键
-export interface SettingsSnapshot { values: Record<string, string | number>; defaults: Record<string, string | number>; overridden: string[]; warnings: string[]; labels: Record<string, string>; help: Record<string, string> }
+export interface SettingsSnapshot { values: Record<string, string | number | boolean>; defaults: Record<string, string | number | boolean>; overridden: string[]; warnings: string[]; labels: Record<string, string>; help: Record<string, string> }
 export interface AuditOut { id: number; user_email: string; action: string; target_type: string | null; target_id: number | null; detail: Record<string, unknown>; ip: string | null; created_at: string }

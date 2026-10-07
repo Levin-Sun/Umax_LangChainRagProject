@@ -273,6 +273,40 @@
         "title": "ChatIn",
         "type": "object"
       },
+      "ChunkPreviewOut": {
+        "properties": {
+          "chunk_index": {
+            "title": "Chunk Index",
+            "type": "integer"
+          },
+          "content": {
+            "title": "Content",
+            "type": "string"
+          },
+          "has_embedding": {
+            "title": "Has Embedding",
+            "type": "boolean"
+          },
+          "id": {
+            "title": "Id",
+            "type": "integer"
+          },
+          "meta": {
+            "additionalProperties": true,
+            "title": "Meta",
+            "type": "object"
+          }
+        },
+        "required": [
+          "id",
+          "chunk_index",
+          "content",
+          "has_embedding",
+          "meta"
+        ],
+        "title": "ChunkPreviewOut",
+        "type": "object"
+      },
       "DocOut": {
         "properties": {
           "error": {
@@ -763,6 +797,18 @@
             ],
             "description": "切块目标长度",
             "title": "Chunk Target"
+          },
+          "doc_image_caption": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "文档图片转文字入库",
+            "title": "Doc Image Caption"
           },
           "min_sim": {
             "anyOf": [
@@ -2158,7 +2204,13 @@
           "200": {
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/ChunkPreviewOut"
+                  },
+                  "title": "Response Preview Chunks Api V1 Documents  Doc Id  Chunks Get",
+                  "type": "array"
+                }
               }
             },
             "description": "Successful Response"

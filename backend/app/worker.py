@@ -7,7 +7,8 @@ from app.models import Document
 from app.services.ingest import ingest_document
 
 
-def run_import(*, document_id: int, engine=None, embedder=None, mineru=None) -> dict:
+def run_import(*, document_id: int, engine=None, embedder=None, mineru=None,
+               vision_fn=None, caption_images: bool = True) -> dict:
     """执行单个文档的导入流水线（worker 与同步模式共用）。"""
     s = get_settings()
     own_session = engine is None
@@ -20,6 +21,7 @@ def run_import(*, document_id: int, engine=None, embedder=None, mineru=None) -> 
                     "error": f"文档 {document_id} 不存在"}
         raw = open(doc.storage_path, "rb").read()
         doc = ingest_document(session, doc, raw, embedder=embedder, mineru=mineru,
+                              vision_fn=vision_fn, caption_images=caption_images,
                               chunk_target=s.chunk_target, chunk_min=s.chunk_min)
         return {"document_id": doc.id, "status": doc.status, "error": doc.error}
 
@@ -37,11 +39,24 @@ async def _startup(ctx: dict) -> None:
                                       model=s.embedding_model,
                                       dimensions=s.embedding_dim)
     ctx["mineru"] = MinerUClient(s.mineru_base_url) if s.mineru_base_url else None
+    # 视觉能力与配置中心同口径：ARQ 档也要给文档图注（否则异步入库静默丢图）
+    ctx["vision_fn"] = None
+    ctx["caption_images"] = True
+    if s.gateway_secret:
+        from app.services.gateway import ModelGateway
+        from app.services.settings import SettingsStore
+
+        store = SettingsStore(ctx["engine"], s)
+        ctx["vision_fn"] = ModelGateway(ctx["engine"], secret=s.gateway_secret).make_vision_fn(
+            vision_prompt=lambda: store.effective()["vision_prompt"])
+        ctx["caption_images"] = bool(store.effective()["doc_image_caption"])
 
 
 async def import_document(ctx: dict, document_id: int) -> dict:
     return run_import(document_id=document_id, engine=ctx["engine"],
-                      embedder=ctx.get("embedder"), mineru=ctx.get("mineru"))
+                      embedder=ctx.get("embedder"), mineru=ctx.get("mineru"),
+                      vision_fn=ctx.get("vision_fn"),
+                      caption_images=ctx.get("caption_images", True))
 
 
 class WorkerSettings:

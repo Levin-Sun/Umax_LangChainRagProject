@@ -621,6 +621,21 @@ export interface components {
             /** Question */
             question: string;
         };
+        /** ChunkPreviewOut */
+        ChunkPreviewOut: {
+            /** Chunk Index */
+            chunk_index: number;
+            /** Content */
+            content: string;
+            /** Has Embedding */
+            has_embedding: boolean;
+            /** Id */
+            id: number;
+            /** Meta */
+            meta: {
+                [key: string]: unknown;
+            };
+        };
         /** DocOut */
         DocOut: {
             /** Error */
@@ -781,6 +796,11 @@ export interface components {
              * @description 切块目标长度
              */
             chunk_target?: number | null;
+            /**
+             * Doc Image Caption
+             * @description 文档图片转文字入库
+             */
+            doc_image_caption?: boolean | null;
             /**
              * Min Sim
              * @description 向量最低相似度
@@ -1844,7 +1864,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
+                    "application/json": components["schemas"]["ChunkPreviewOut"][];
                 };
             };
             /** @description 需要登录 */

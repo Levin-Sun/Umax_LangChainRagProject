@@ -188,6 +188,14 @@ class BatchUploadItemOut(BaseModel):
     error: str | None
 
 
+class ChunkPreviewOut(BaseModel):
+    id: int
+    chunk_index: int
+    content: str
+    has_embedding: bool
+    meta: dict           # §A 分块预览是"为什么没答对"的第一工具：标出图片描述等来源
+
+
 class KbIn(BaseModel):
     name: Utf8Str = Field(max_length=128)          # 修复⑨：varchar 列宽入约（PG String(128)）
     description: Utf8Str | None = None
@@ -852,6 +860,8 @@ def create_app(
         done: dict[int, dict] = {}
         for doc, raw in stored:
             doc = ingest_document(session, doc, raw, embedder=embedder, mineru=mineru,
+                                  vision_fn=vision_fn,
+                                  caption_images=cfg.effective()["doc_image_caption"],
                                   **_chunk_params(session, kb))
             done[doc.id] = _doc_json(doc)
         return [{**item,
@@ -879,6 +889,8 @@ def create_app(
             return _doc_json(doc)  # pending，worker 接手
         raw = read_stored(doc)
         doc = ingest_document(session, doc, raw, embedder=embedder, mineru=mineru,
+                              vision_fn=vision_fn,
+                              caption_images=cfg.effective()["doc_image_caption"],
                               **_chunk_params(session, kb))
         return _doc_json(doc)
 
@@ -896,13 +908,13 @@ def create_app(
                      session: Session = Depends(get_session)):
         return _doc_json(_visible_doc(session, user, doc_id))
 
-    @app.get("/api/v1/documents/{doc_id}/chunks",
+    @app.get("/api/v1/documents/{doc_id}/chunks", response_model=list[ChunkPreviewOut],
              responses={**_ERR(404, "文档不存在"), **_ERR_LOGIN_GATE})
     def preview_chunks(doc_id: PathId, user: User = Depends(get_user),
                        session: Session = Depends(get_session)):
         _visible_doc(session, user, doc_id)
         return [{"id": c.id, "chunk_index": c.chunk_index, "content": c.content,
-                 "has_embedding": c.embedding is not None}
+                 "has_embedding": c.embedding is not None, "meta": c.meta or {}}
                 for c in session.query(Chunk).filter_by(document_id=doc_id)
                 .order_by(Chunk.chunk_index)]
 
@@ -941,7 +953,8 @@ def create_app(
             queue.enqueue_import(doc.id)
             return _doc_json(doc)
         doc = ingest_document(session, doc, read_stored(doc), embedder=embedder,
-                              mineru=mineru,
+                              mineru=mineru, vision_fn=vision_fn,
+                              caption_images=cfg.effective()["doc_image_caption"],
                               **_chunk_params(session, session.get(KnowledgeBase, doc.kb_id)))
         return _doc_json(doc)
 
@@ -952,7 +965,7 @@ def create_app(
 
     _fields: dict = {}
     for _key, _sp in cfg.spec.items():
-        _t = float if _sp.kind == "float" else (int if _sp.kind == "int" else str)
+        _t = {"float": float, "int": int, "bool": bool}.get(_sp.kind, str)
         _kw: dict = {"default": None, "description": _sp.label}
         if _sp.max_length is not None:
             _kw["max_length"] = _sp.max_length

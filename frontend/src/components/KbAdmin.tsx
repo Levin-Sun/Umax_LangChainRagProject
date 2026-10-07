@@ -158,9 +158,14 @@ export default function KbAdmin({ api }: { api: Client }) {
             <h3 className="text-h3 font-medium text-ink-2">{chunks.doc.name}：{chunks.rows.length} 块</h3>
             <Button size="sm" variant="ghost" className="h-7 px-2 text-ink-3" onClick={() => setChunks(null)}>关闭</Button>
           </div>
+          <p className="text-caption text-ink-3">
+            带「图片描述」标记的块来自文档内嵌图表/照片（视觉模型转文字后入库）。
+          </p>
           {chunks.rows.map((c) => (
             <pre key={c.id} className="whitespace-pre-wrap rounded-lg border border-border bg-card p-3 font-mono text-caption text-ink-2">
-              #{c.chunk_index}{c.has_embedding ? "" : "（无向量）"} {"\n"}{c.content.slice(0, 200)}
+              #{c.chunk_index}{c.has_embedding ? "" : "（无向量）"}
+              {c.meta?.source === "image" ? `（图片描述 · ${String(c.meta.image_origin ?? "")}）` : ""}
+              {"\n"}{c.content.slice(0, 200)}
             </pre>
           ))}
         </aside>

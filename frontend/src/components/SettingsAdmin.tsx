@@ -11,11 +11,12 @@ import { P } from "@/lib/paths";
 import { useAsync } from "@/lib/hooks";
 import type { SettingsSnapshot } from "@/lib/types";
 
-type Val = string | number;
+type Val = string | number | boolean;
 const TEXT_KEYS = ["chat_system_prompt", "chat_miss_answer", "vision_prompt"];
 // 表单顺序与控件形态：文本键给 textarea，数值键给 number 输入（min_sim 用小数步长）
 const ROWS: [string, string][] = [
   ["chat_system_prompt", "多行"], ["chat_miss_answer", "单行"], ["vision_prompt", "多行"],
+  ["doc_image_caption", "开关"],
   ["recall_k", "数字"], ["rerank_top_n", "数字"], ["min_sim", "数字"],
   ["chunk_target", "数字"], ["chunk_min", "数字"],
 ];
@@ -85,6 +86,7 @@ export default function SettingsAdmin({ api }: { api: Client }) {
       ))}
       {ROWS.map(([k, kind]) => {
         const isText = TEXT_KEYS.includes(k);
+        const isBool = kind === "开关";
         return (
           <div key={k} className="space-y-2 rounded-xl border border-border bg-card px-6 py-4 shadow-sm">
             <div className="flex items-center gap-2">
@@ -97,7 +99,14 @@ export default function SettingsAdmin({ api }: { api: Client }) {
                         disabled={busy} onClick={() => void restore(k)}>恢复默认</Button>
               )}
             </div>
-            {isText ? (
+            {isBool ? (
+              <label className="flex items-center gap-2 text-body text-ink-2">
+                <input type="checkbox" aria-label={d?.labels[k] ?? k} disabled={busy}
+                       checked={val(k) === true}
+                       onChange={(e) => set(k, e.target.checked)} />
+                {val(k) === true ? "已开启" : "已关闭"}
+              </label>
+            ) : isText ? (
               <textarea id={k} aria-label={d?.labels[k] ?? k} rows={kind === "多行" ? 4 : 2}
                         className="block w-full resize-y rounded-lg border border-border bg-transparent px-3 py-2 text-body text-ink-1 outline-none focus:border-ring"
                         value={String(val(k))} disabled={busy}

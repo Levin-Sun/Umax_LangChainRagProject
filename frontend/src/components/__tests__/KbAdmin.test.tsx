@@ -119,3 +119,21 @@ it("单文件仍走单文件端点（不批量）", async () => {
   await waitFor(() => expect(POST).toHaveBeenCalledWith(P.kbDocs,
     expect.objectContaining({ params: { path: { kb_id: 1 } } })));
 });
+
+// ---- 图表入库（§A）：分块预览标出来源，管理员能看到"这块是图片描述" ----
+it("分块抽屉标出图片描述来源", async () => {
+  const chunks = [
+    { id: 1, chunk_index: 0, content: "售后规则：生鲜不支持七天无理由退货", has_embedding: true, meta: {} },
+    { id: 2, chunk_index: 1, content: "【图片内容】退款流程图：含 7 个自然日时限",
+      has_embedding: true, meta: { source: "image", image_origin: "word/media/image1.png" } },
+  ];
+  render(<KbAdmin api={fakeApi({
+    GET: (u) => (u === P.kb ? ok([{ id: 1, name: "图库", description: null }])
+      : u === P.kbDocs ? ok([{ id: 1, kb_id: 1, name: "流程.docx", status: "ready", error: null, size_bytes: 100 }])
+      : u === P.docChunks ? ok(chunks) : undefined),
+  })} />);
+  await screen.findByText("图库");
+  await userEvent.click(screen.getByText("图库"));
+  await userEvent.click(await screen.findByRole("button", { name: "看切块" }));
+  expect(await screen.findByText(/图片描述 · word\/media\/image1.png/)).toBeInTheDocument();
+});

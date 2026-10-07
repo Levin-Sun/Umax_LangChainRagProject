@@ -43,6 +43,9 @@ class Settings(BaseSettings):
     license_public_key: str = ""
     license_file: Path = Path(__file__).resolve().parents[3] / "license.json"
 
+    # 图表入库：文档内嵌图片是否交视觉模型转描述进索引（配置中心可关）
+    doc_image_caption: bool = True
+
     # 用户配额预警阈值：用量达限额该比例即在自助视图标 near_limit（配置中心可改）
     quota_warn_ratio: float = 0.8
 

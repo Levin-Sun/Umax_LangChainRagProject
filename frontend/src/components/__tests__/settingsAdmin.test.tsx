@@ -55,3 +55,22 @@ describe("配置中心", () => {
     expect(await screen.findByText(/chunk_min（400）大于 chunk_target/)).toBeInTheDocument();
   });
 });
+
+// ---- 图表入库开关（§A）：bool 键渲染为勾选框，改动走 PUT boolean ----
+it("布尔键渲染勾选框，切换后 PUT 带 boolean", async () => {
+  const PUT = vi.fn(() => ok(snap));
+  const withBool = {
+    ...snap,
+    values: { ...snap.values, doc_image_caption: true },
+    defaults: { ...snap.defaults, doc_image_caption: true },
+    labels: { ...snap.labels, doc_image_caption: "文档图片转文字入库" },
+    help: { ...snap.help, doc_image_caption: "开启后文档内嵌图表由视觉模型转描述进索引" },
+  };
+  render(<SettingsAdmin api={fakeApi({ GET: (u) => (u === P.settings ? ok(withBool) : ok([])), PUT })} />);
+  const box = await screen.findByLabelText("文档图片转文字入库");
+  expect(box).toBeChecked();
+  await userEvent.click(box);
+  await userEvent.click(screen.getByRole("button", { name: "保存" }));
+  await waitFor(() => expect(PUT).toHaveBeenCalledWith(P.settings,
+    { body: { doc_image_caption: false } }));
+});

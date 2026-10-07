@@ -172,5 +172,5 @@ def test_spec_covers_prompts_and_params():
     spec = build_spec()
     assert set(spec) == {"chat_system_prompt", "chat_miss_answer", "vision_prompt",
                          "recall_k", "rerank_top_n", "min_sim", "quota_warn_ratio",
-                         "chunk_target", "chunk_min"}
+                         "doc_image_caption", "chunk_target", "chunk_min"}
     assert spec["recall_k"].kind == "int" and spec["min_sim"].kind == "float"

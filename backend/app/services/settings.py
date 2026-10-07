@@ -15,7 +15,7 @@ DEFAULT_MISS_ANSWER = "资料里没有相关内容，无法回答。"
 
 @dataclass(frozen=True)
 class Spec:
-    kind: str                 # text / int / float
+    kind: str                 # text / int / float / bool
     label: str                # 后台表单标签（中文）
     minimum: float | None = None
     maximum: float | None = None
@@ -41,6 +41,9 @@ def build_spec(settings=None) -> dict[str, Spec]:
                              help="重排精选后进入提示词的条数，直接影响引用数量与成本。"),
         "min_sim": Spec("float", "向量最低相似度", 0.0, 1.0,
                         help="低于该余弦相似度的向量召回被丢弃（未命中判据之一）。"),
+        "doc_image_caption": Spec("bool", "文档图片转文字入库",
+                                  help="开启后，文档内嵌的图表/照片由视觉模型转成文字描述一起进索引；"
+                                       "关闭则只索引正文（需已配置视觉模型才有效果）。"),
         "quota_warn_ratio": Spec("float", "配额预警阈值", 0.05, 1.0,
                                  help="用户用量达到限额该比例时，界面出预警提示（0.8=80%）。"),
         "chunk_target": Spec("int", "切块目标长度", 100, 2000,
@@ -62,6 +65,7 @@ class SettingsStore:
             "chat_system_prompt": SYSTEM_PROMPT,
             "chat_miss_answer": DEFAULT_MISS_ANSWER,
             "vision_prompt": VISION_PROMPT,
+            "doc_image_caption": s.doc_image_caption,
             "quota_warn_ratio": s.quota_warn_ratio,
             "recall_k": s.recall_k,
             "rerank_top_n": s.rerank_top_n,
