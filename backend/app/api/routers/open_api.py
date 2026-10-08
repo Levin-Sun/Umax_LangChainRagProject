@@ -3,6 +3,14 @@
 # 兼容端点不走会话（客户系统没有浏览器 cookie），401/429/400 声明在该端点自己名下；
 # 契约守卫为它开 Bearer 例外面（见 test_contract_declared）。两条通路共用
 # Runtime.bearer_key / month_used_tokens，配额口径不会一边改一边漏。
+#
+# **key 的语义（评审点名"没有文档说明"的那层，现在写在这里与交付手册里）**：
+# key 是**服务凭据**，代表一个调用方系统，不是某个人的登录态——所以
+# ①创建者被停用/删除后 key 照常可用（`api_keys.created_by` 只做溯源，不参与鉴权）；
+# ②吊销只有三条路：停用（`enabled=false`）、删除 key、或改小作用域 kb_ids 使召回为空；
+# ③用量记在 `apikey:{id}` 名下，与登录用户的配额**分开算**（`monthly_token_quota` 是它自己的闸门）。
+# 这三点是刻意的（把 key 当"机器账号"是可辩护的口径），写下来是为了不让它变成
+# "读代码才能猜到的隐式行为"——客户接进去之前就该知道。
 from uuid import uuid4
 
 from fastapi import APIRouter, Depends, HTTPException, Request

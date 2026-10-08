@@ -35,5 +35,8 @@ step "类型检查（含手写类型 vs 契约生成类型的耦合断言）"
 step "前端构建（走独立产物目录，不碰 dev 的 .next）"
 (cd "$ROOT/frontend" && run npm run build:verify)
 
+# 刻意**不**在这里跑性能基线（backend/scripts/bench.py）：共享机器/CI runner 上的耗时是噪声，
+# 误红比漏报更糟。它是给人用的棘轮（--check 与 docs/perf-baseline.json 比，超 1.5× 退出 1），
+# 口径与结论见 docs/PERF.md。
 if [ "$fail" -ne 0 ]; then printf '\n有门禁未通过 ❌\n'; exit 1; fi
 printf '\n全部门禁通过 ✅\n'

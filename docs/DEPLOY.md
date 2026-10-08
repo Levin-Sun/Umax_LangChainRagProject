@@ -107,6 +107,20 @@ docker compose up -d --build
 命令（`git pull && up -d --build`）已经把结构升级带上了，**不需要单独跑迁移命令**。
 表里那行 `alembic_version` 就是「当前库的结构版本」，排查时先看它。
 
+## 开放 API 的 key 语义（客户接进去之前要知道的三件事）
+
+开放 API（`POST /api/v1/openai/chat/completions` + `/api/v1/api-keys`）的 key 是
+**服务凭据**——代表一个调用方系统，不是某个人的登录态：
+
+- **创建者被停用/删除，key 照常可用**（`created_by` 只做溯源、不参与鉴权）。要停一个系统的
+  访问，请停用或删除**那枚 key**，而不是创建者的账号。
+- **吊销只有三条路**：把 key 停用（`enabled=false`，PATCH 即时生效）、删除 key、或改小它的
+  作用域 `kb_ids` 让召回为空。
+- **用量与配额独立**：key 的花费记在 `apikey:{id}` 名下，与登录用户的配额分开算；
+  超出该 key 的 `monthly_token_quota` 时返回 429。要"整系统限额"就设这个字段。
+
+（名单与历史在「管理后台 → API」。key 明文只在创建响应里出现一次，库里只存 SHA-256。）
+
 ## 健康自检（减少售后的第一道闸）
 
 - 后端：`curl http://<IP>:8000/api/v1/health` → `{"status":"ok","commit":"a3b97c6","started_at":"..."}`

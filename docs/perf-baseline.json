@@ -1,0 +1,61 @@
+{
+  "generated_at": "2026-10-08T18:19:25+00:00",
+  "python": "3.14.7",
+  "platform": "darwin/arm64",
+  "repeat": 3,
+  "embedder": "fake-1024d（无网络）",
+  "note": "绝对值仅本机可比；跨机器看随语料规模的曲线与各项占比",
+  "retrieval": {
+    "500": {
+      "chunks": 500,
+      "end_to_end_ms": 44.6,
+      "end_to_end_p95_ms": 47.05,
+      "load_chunks_ms": 0.83,
+      "bm25_ms": 32.37,
+      "bm25_p95_ms": 33.84,
+      "vector_ms": 6.63,
+      "vector_p95_ms": 8.68,
+      "tokenize_index_ms": 31.54,
+      "hits": 5
+    },
+    "2000": {
+      "chunks": 2000,
+      "end_to_end_ms": 153.69,
+      "end_to_end_p95_ms": 156.31,
+      "load_chunks_ms": 4.07,
+      "bm25_ms": 122.34,
+      "bm25_p95_ms": 127.68,
+      "vector_ms": 15.03,
+      "vector_p95_ms": 15.68,
+      "tokenize_index_ms": 118.27,
+      "hits": 5
+    },
+    "8000": {
+      "chunks": 8000,
+      "end_to_end_ms": 580.02,
+      "end_to_end_p95_ms": 622.72,
+      "load_chunks_ms": 12.53,
+      "bm25_ms": 509.77,
+      "bm25_p95_ms": 515.03,
+      "vector_ms": 34.85,
+      "vector_p95_ms": 38.3,
+      "tokenize_index_ms": 497.24,
+      "hits": 5
+    }
+  },
+  "concurrency": {
+    "workers": 8,
+    "requests": 32,
+    "wall_s": 4.108,
+    "throughput_qps": 7.79,
+    "p50_ms": 969.24,
+    "p95_ms": 1207.06,
+    "max_ms": 1299.74
+  },
+  "ingest": {
+    "input_kb": 21,
+    "chunks": 30,
+    "ms": 30.81,
+    "p95_ms": 31.38
+  }
+}
