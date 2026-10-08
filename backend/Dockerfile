@@ -11,6 +11,10 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 COPY app ./app
 COPY scripts ./scripts
+# 迁移必须进镜像：启动时 run_migrations 要读 alembic.ini + migrations/versions/——
+# 少拷一个就是"容器起不来"，而本机没 Docker、构建期发现不了（靠 tests/test_migrations.py 的守卫钉住）
+COPY alembic.ini ./
+COPY migrations ./migrations
 
 EXPOSE 8000
 # 服务入口（uvicorn 绑定地址经 UVICORN_HOST 配，compose 置 0.0.0.0）；

@@ -2,6 +2,7 @@
 fastapi>=0.115
 uvicorn[standard]>=0.30
 sqlalchemy>=2.0.36
+alembic>=1.13  # 建表/升级的唯一入口（替代 create_all + 手写幂等 ALTER，见 migrations/）
 psycopg[binary]>=3.2
 pgvector>=0.3.5
 pydantic-settings>=2.4

@@ -13,6 +13,7 @@
 from collections.abc import Callable
 from pathlib import Path
 
+import logging
 import threading
 
 from fastapi import FastAPI
@@ -45,6 +46,50 @@ def ensure_vector_extension(engine: Engine) -> None:
     """
     with engine.begin() as con:
         con.execute(sa_text("CREATE EXTENSION IF NOT EXISTS vector"))
+
+
+MIGRATIONS_DIR = Path(__file__).resolve().parents[1] / "migrations"
+
+
+def _alembic_config(engine: Engine):
+    """按需构造 Alembic 配置（不读 alembic.ini 里的 URL：连接串只有应用配置一个来源）。"""
+    from alembic.config import Config
+
+    cfg = Config(str(MIGRATIONS_DIR.parent / "alembic.ini"))
+    # script_location 给绝对路径：从仓库根 / backend / CI 哪启动都找得到
+    cfg.set_main_option("script_location", str(MIGRATIONS_DIR))
+    # 连接串直接用**手上这个 engine**：迁移与应用必须打在同一个库上，
+    # 从环境变量再读一遍就会出现"迁移打到 A 库、应用连 B 库"这种没法排查的分叉。
+    # hide_password=False 是必须的——密文留给 SQLAlchemy 自己用，它只活在这个内存对象里。
+    cfg.set_main_option("sqlalchemy.url", engine.url.render_as_string(hide_password=False))
+    return cfg
+
+
+def run_migrations(engine: Engine) -> None:
+    """建表/升级的唯一入口（Alembic 接管，替代 create_all + 手写幂等 ALTER）。
+
+    两种库、两种走法：
+    - **全新库**（没有任何表）：`upgrade head`，一次把 18 张表建齐；
+    - **既有库**（create_all 时代建的，没有 `alembic_version` 表）：它的结构已经等于基线
+      （当时的幂等 ALTER 就是干这个的），所以先 `stamp head` 盖章接管，**不重跑 DDL**——
+      重跑必然"表已存在"失败。这一步只在引入 Alembic 的当口有意义，此后不再出现。
+
+    判定只看 `alembic_version` 在不在，所以幂等：启动多少次都是同一结果。
+    此后所有结构变更都必须是**新增一条 revision**（见 migrations/versions/），
+    不再往这里堆 ALTER。
+    """
+    from alembic import command
+    from sqlalchemy import inspect
+
+    ensure_vector_extension(engine)   # 必须先于迁移：chunks.embedding 是 VECTOR 列
+    cfg = _alembic_config(engine)
+    tables = set(inspect(engine).get_table_names())
+    if tables and "alembic_version" not in tables:
+        logging.getLogger("umax").warning(
+            "检测到 Alembic 接管前建的库（%d 张表、无 alembic_version）：按基线盖章接管，"
+            "不重跑建表 DDL", len(tables))
+        command.stamp(cfg, "head")
+    command.upgrade(cfg, "head")
 
 
 def create_app(
@@ -120,7 +165,6 @@ def build_production_app(upload_dir: str = "uploads",
     否则退回 .env 里的百炼直连（阶段 0 链路，冒烟可跑）。"""
     from sqlalchemy import create_engine
 
-    from app.db.base import Base
     from app.services.chat import ChatClient, make_chat_fn
     from app.services.embeddings import BailianEmbedder
     from app.services.parsers import MinerUClient
@@ -129,25 +173,10 @@ def build_production_app(upload_dir: str = "uploads",
     s = get_settings()
     if engine is None:
         engine = create_engine(s.sqlalchemy_url(), pool_pre_ping=True)
-        import app.models  # noqa: F401  一键部署：启动即建表（正式迁移方案后续以 Alembic 接管）
-        ensure_vector_extension(engine)   # 必须先于建表：VECTOR 列需要扩展存在（真机踩过）
-        Base.metadata.create_all(engine)
-    # 老库一键升级的过渡 pragmatics（无 Alembic）：create_all 不给已存在的表加列，
-    # users.name/status 是任务 2 新增列——幂等 ADD COLUMN IF NOT EXISTS 补齐（fresh 库同样通过）
-    with engine.begin() as con:
-        con.execute(sa_text("ALTER TABLE users ADD COLUMN IF NOT EXISTS "
-                            "name VARCHAR(128) NOT NULL DEFAULT ''"))
-        con.execute(sa_text("ALTER TABLE users ADD COLUMN IF NOT EXISTS "
-                            "status VARCHAR(16) NOT NULL DEFAULT 'active'"))
-        con.execute(sa_text("ALTER TABLE users ADD COLUMN IF NOT EXISTS "
-                            "must_change_password BOOLEAN NOT NULL DEFAULT FALSE"))
-        con.execute(sa_text("ALTER TABLE users ADD COLUMN IF NOT EXISTS daily_token_limit INTEGER"))
-        con.execute(sa_text("ALTER TABLE users ADD COLUMN IF NOT EXISTS monthly_token_limit INTEGER"))
-        # 评测的裁判字段（§阶段2 Ragas 侧）：表是上一轮刚建的，加列同样走幂等 pragmatics——
-        # 客户库里的历史运行不会因为加列而丢分（judge 为空即"未启用裁判"）
-        con.execute(sa_text("ALTER TABLE eval_runs ADD COLUMN IF NOT EXISTS judge BOOLEAN "
-                            "NOT NULL DEFAULT FALSE"))
-        con.execute(sa_text("ALTER TABLE eval_item_results ADD COLUMN IF NOT EXISTS judge JSONB"))
+    # 建表/升级唯一入口：Alembic（替代此前的 create_all + 累积的幂等 ALTER——
+    # 那套东西每加一列就要多一条 ALTER，且"客户库现在到底缺哪列"没人能一眼回答）。
+    # 注入 engine 的场景（测试）同样走它：既有测试库会被按基线盖章，幂等。
+    run_migrations(engine)
     # 播种初始管理员（spec §2）：users 空表时按 ADMIN_EMAIL/ADMIN_PASSWORD 落一条 role=admin，
     # 口令 hash 后入库（明文永不落库）。测试装配 create_app 不播种，走 conftest.seed_user——
     # 故这里只在 build_production_app 里做，且放在 engine 判定之后（注入 engine 也要播种）。
@@ -157,7 +186,6 @@ def build_production_app(upload_dir: str = "uploads",
                          hashed_password=hash_password(s.admin_password), role="admin",
                          must_change_password=True))   # 初始口令是模板口令，首登强改密（初始化向导第一屏）
             ses.commit()
-            import logging
             logging.getLogger("umax").warning(
                 "已播种初始管理员 %s（ADMIN_EMAIL/ADMIN_PASSWORD）——首次登录强制修改口令", s.admin_email)
         # 金标准集播种（§阶段2）：空表时灌入随应用打包的预置集（与 stage0 同源 20 题）。
@@ -168,7 +196,6 @@ def build_production_app(upload_dir: str = "uploads",
             if gold:
                 ses.add_all([EvalQuestion(tenant_id="default", **row) for row in gold])
                 ses.commit()
-                import logging
                 logging.getLogger("umax").info(
                     "已播种 %d 条预置金标准题（可在评测页删改）", len(gold))
     chat_fn = embedder = vision_fn = None
@@ -259,14 +286,10 @@ def build_production_app(upload_dir: str = "uploads",
     # 那些 pending 正是排队等 worker 的任务，worker 是另一个进程，重启 backend 不影响它。
     rec = recover_interrupted_jobs(engine, has_external_worker=queue is not None)
     if rec["jobs"] or rec["documents"]:
-        import logging
-
         logging.getLogger("umax").warning(
             "启动收尾：%d 个后台作业标记为中断，%d 篇文档从「排队中」改为失败（可点重建/重试继续）",
             rec["jobs"], rec["documents"])
     if not s.admin_email or not s.admin_password:
-        import logging
-
         logging.getLogger("umax").warning(
             "ADMIN_EMAIL/ADMIN_PASSWORD 未配置：将按默认账号播种初始管理员，部署后必须登录改密")
     app = create_app(engine=engine, embedder=embedder, chat_fn=chat_fn,

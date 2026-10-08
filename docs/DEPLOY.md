@@ -99,6 +99,13 @@ docker compose up -d --build
 | 升级版本 | `git pull && docker compose up -d --build` |
 | 备份 | 停写后备份 `data/pg/`（全库含向量）与 `data/uploads/`（原始文件） |
 | 数据不清盘重建容器 | 数据都在 `data/` 目录挂载里，`docker compose down` 不删数据 |
+| 看数据库结构版本 | `docker compose exec postgres psql -U rag -d umaxrag -c "select version_num from alembic_version"` |
+| 手动升级结构（正常不用做） | `docker compose exec backend alembic -c alembic.ini upgrade head` |
+
+**数据库结构由 Alembic 管理**（`backend/migrations/`），后端每次启动自动执行一次
+`upgrade head`——全新库一次建齐，既有库只做增量，重复启动是空转。所以「升级版本」那条
+命令（`git pull && up -d --build`）已经把结构升级带上了，**不需要单独跑迁移命令**。
+表里那行 `alembic_version` 就是「当前库的结构版本」，排查时先看它。
 
 ## 健康自检（减少售后的第一道闸）
 
@@ -117,3 +124,9 @@ docker compose up -d --build
 - pgvector 扩展由后端启动时自动 `CREATE EXTENSION IF NOT EXISTS vector` 建好（建表需要它，
   真机踩过：全新数据库没这一步会直接死在 `chunks.embedding VECTOR(1024)` 上）。
   客户若用托管 PG 且 DBA 已预装扩展，这一步是空转，不影响
+- 从「`create_all` 时代」升上来的库（容器里有表但没有 `alembic_version`）会在启动时
+  被**按基线盖章接管、不重跑建表 DDL**，日志里会有一条 WARNING 说明这件事；
+  这只会发生一次，此后都走正常增量迁移
+- 结构变更只走「新增一条 revision」（`backend/migrations/versions/`），
+  测试 `tests/test_migrations.py` 会用 Alembic 自己的比较器断言
+  「迁移结果 == app/models」——改了模型忘加 revision 会红
