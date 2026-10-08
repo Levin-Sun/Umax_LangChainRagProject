@@ -4,14 +4,26 @@
 
 ## 前置条件
 
-- 客户机器：Linux（x86_64/arm64）或 macOS，4 核 8G 起步，Docker + Docker Compose v2 已安装
-- 磁盘 ≥ 20G（镜像 + 文档 + 向量数据）
+- 客户机器：Linux（x86_64/arm64）或 macOS，4 核 8G 起步，磁盘 ≥ 20G（镜像 + 文档 + 向量数据）
+- **全新机器先确认两样东西装好了**（缺哪样就先装哪样）：
+
+  ```bash
+  git --version            # 没装：macOS 装 Xcode 命令行工具或 brew install git；Linux apt/dnf install git
+  docker --version         # 没装：装 Docker Desktop（macOS/Windows）或 docker-ce（Linux）
+  docker compose version   # 要 v2；若是 docker-compose（带横杠，v1）请升级
+  ```
+
+  三条都能打印版本号，再往下走。Docker Desktop 装完要**先启动它**（菜单栏出现图标、状态 running），
+  否则后面会报 `Cannot connect to the Docker daemon`。
 
 ## 第 1 步：取代码与配置
 
 ```bash
-git clone <模板仓库地址> umax && cd umax
-cp .env.example .env
+# 第一次取代码用 clone（"把项目从网上复制到这台机器"）；
+# 已经取过的机器上用 git pull 更新到最新（二者别混：全新机器上 git pull 会报"不是 git 仓库"）
+git clone https://github.com/Levin-Sun/Umax_LangChainRagProject.git umax
+cd umax                  # 进入刚下载下来的项目目录，后面所有命令都在这一层执行
+cp .env.example .env     # 把配置模板复制成真正生效的配置文件（.env 是隐藏文件，ls 看不到，用 ls -a）
 ```
 
 编辑 `.env`，必填两项：
