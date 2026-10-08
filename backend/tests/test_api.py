@@ -180,7 +180,9 @@ def test_health_reports_build_commit_and_start(engine, db, tmp_path):
     """版本印记（/health）：排查"改了不生效"的第一手信息——先确认进程跑的是哪份代码。"""
     from fastapi.testclient import TestClient
 
-    from app.main import BUILD_COMMIT, create_app
+    from app.core.version import BUILD_COMMIT
+
+    from app.main import create_app
 
     c = TestClient(create_app(engine=engine, secret="h", embedder=None,
                               chat_fn=None, upload_dir=str(tmp_path)))

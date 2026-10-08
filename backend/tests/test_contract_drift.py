@@ -2,7 +2,8 @@
 import json
 from pathlib import Path
 
-from app.main import SCENARIO_PATTERN, create_app
+from app.api.schemas import SCENARIO_PATTERN
+from app.main import create_app
 
 SPEC = Path(__file__).resolve().parents[2] / "contracts" / "openapi.json"
 

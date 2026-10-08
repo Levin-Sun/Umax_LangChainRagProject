@@ -8,7 +8,8 @@ import pytest
 from fastapi.testclient import TestClient
 
 from app.core.config import get_settings
-from app.main import INT32_MAX, INT32_MIN, create_app
+from app.api.schemas import INT32_MAX, INT32_MIN
+from app.main import create_app
 from app.models import Document, KnowledgeBase, ModelConfig
 from tests.conftest import login, seed_user
 from tests.test_models_api import FakeEmbedder

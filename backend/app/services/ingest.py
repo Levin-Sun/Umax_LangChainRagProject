@@ -1,7 +1,5 @@
 # 入库流水线：解析（注册表路由，扫描件→MinerU）→切块→向量化→写 chunks
 # 调度：queue 参数为空时 API 同步调用；配 ARQ 后由 worker 的 run_import 调用
-from collections.abc import Callable
-
 from sqlalchemy import delete, select
 from sqlalchemy.orm import Session
 

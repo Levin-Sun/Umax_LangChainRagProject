@@ -8,7 +8,7 @@ import httpx
 from sqlalchemy.orm import Session
 
 from app.models import ModelConfig, UsageRecord
-from app.services.chat import SYSTEM_PROMPT, ChatClient, build_user_prompt
+from app.services.chat import ChatClient, build_user_prompt
 from app.services.crypto import decrypt_secret
 from app.services.rerank import RerankClient, reorder
 

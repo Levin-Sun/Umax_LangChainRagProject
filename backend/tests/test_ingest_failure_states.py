@@ -58,16 +58,17 @@ def test_worker_missing_file_marks_failed(engine, db, tmp_path):
 
 def test_batch_upload_isolates_an_unreadable_file(engine, db, tmp_path, monkeypatch):
     """批量上传的部分成功语义不能被"读文件失败"打破：一个坏文件不该让整批 500。"""
-    import app.main as main_mod
+    # 补丁打在端点的实际取值处：read_or_fail 在 documents router 模块里查 read_stored
+    from app.api.routers import documents as docs_mod
 
-    real_read = main_mod.read_stored
+    real_read = docs_mod.read_stored
 
     def flaky_read(doc):
         if "bad" in doc.name:
             raise OSError("磁盘 I/O 错误（模拟）")
         return real_read(doc)
 
-    monkeypatch.setattr(main_mod, "read_stored", flaky_read)
+    monkeypatch.setattr(docs_mod, "read_stored", flaky_read)
     c = _client(engine, tmp_path)
     kb = c.post("/api/v1/kb", json={"name": "库"}).json()
     r = c.post(f"/api/v1/kb/{kb['id']}/documents/batch",

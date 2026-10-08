@@ -1,7 +1,6 @@
 # 解析器注册表（§3.2-③"解析服务独立成模块可替换"）
 # txt/md 直读；Office 三件套结构化抽取；PDF 文字层抽取，扫描件路由 MinerU
 import io
-from collections.abc import Callable
 
 import httpx
 

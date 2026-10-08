@@ -223,7 +223,7 @@ def test_rerank_absent_is_a_passthrough_not_none(engine, db, tmp_path):
     （chat 的语义是"没有答案"），而 retrieve() 会拿这个返回值切片 → /retrieve 直接 500。
     精排缺配置的正确表现是"没有这一步"，不是"没有结果"。
     """
-    from app.main import with_rerank_fallback, with_rerank_degrade
+    from app.services.compose import with_rerank_fallback, with_rerank_degrade
     from app.services.gateway import GatewayError, NoProviderError
 
     hits = [{"id": 1, "content": "a"}, {"id": 2, "content": "b"}]

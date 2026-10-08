@@ -166,7 +166,7 @@ def test_embed_falls_back_and_makes_embedder_adapter(engine, db):
 # 组合语义：NoProviderError（表里没有启用模型）→ 回退 .env 百炼直连；
 # 其他 GatewayError（配了但全挂）→ 原样上抛，由问答端点转未命中兜底。
 def test_chat_fallback_composition_prefers_gateway(engine, db):
-    from app.main import with_gateway_fallback
+    from app.services.compose import with_gateway_fallback
     from app.services.gateway import GatewayError
 
     gw = vi_gw = lambda q, hits: {"answer": "来自网关", "prompt_tokens": 1, "completion_tokens": 1}
@@ -175,7 +175,7 @@ def test_chat_fallback_composition_prefers_gateway(engine, db):
 
 
 def test_chat_fallback_composition_falls_back_when_no_provider(engine, db):
-    from app.main import with_gateway_fallback
+    from app.services.compose import with_gateway_fallback
     from app.services.gateway import NoProviderError
 
     def gw(q, hits):
@@ -187,7 +187,7 @@ def test_chat_fallback_composition_falls_back_when_no_provider(engine, db):
 
 def test_chat_fallback_composition_reraises_provider_failure(engine, db):
     import pytest as _pytest
-    from app.main import with_gateway_fallback
+    from app.services.compose import with_gateway_fallback
     from app.services.gateway import GatewayError
 
     def gw(q, hits):
@@ -198,7 +198,7 @@ def test_chat_fallback_composition_reraises_provider_failure(engine, db):
 
 
 def test_embedder_fallback_composition(engine, db):
-    from app.main import FallbackEmbedder
+    from app.services.compose import FallbackEmbedder
     from app.services.gateway import NoProviderError
 
     class Gw:
