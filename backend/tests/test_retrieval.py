@@ -28,6 +28,16 @@ class FakeEmbedder:
         return out
 
 
+class NoneEmbedder:
+    """没登记 embedding 模型的降级态：按 FallbackEmbedder 的真实语义回 [None]*n。
+
+    （见 app/services/compose.py：网关表空且无 .env 直连时就是这条；不是测试造的假象。）
+    """
+
+    def embed(self, texts: list[str]):
+        return [None] * len(texts)
+
+
 def _seed(db: Session, *, kb_name="kb1", docs: dict[str, list[str]], embedder=None):
     kb = KnowledgeBase(tenant_id="default", name=kb_name)
     db.add(kb)
@@ -74,6 +84,27 @@ def test_kb_filter_scopes_results(db: Session, embedder):
     _seed(db, kb_name="库二", docs={"out.pdf": ["目标内容 独有关键词丙丙"]}, embedder=embedder)
     hits = retrieve(db, "独有关键词丙丙", embedder=embedder, kb_ids=[kb1.id], top_k=10)
     assert {h["doc_name"] for h in hits} == {"in.pdf"}
+
+
+def test_none_query_vector_degrades_to_bm25_only(db: Session, embedder):
+    """未登记 embedding 模型（qvec=None）时必须退成 BM25-only，而不是把 None 当向量去迭代。
+
+    真机踩中（新机器交付自检第 9 步）：`/api/v1/retrieve` 回 500——
+    `TypeError: 'NoneType' object is not iterable`（_vector_ranking 去 join qvec）。
+    入库侧早就写了这个降级态（None → 不存向量，chunks.embedding IS NULL），检索侧漏了，
+    于是「只建 BM25」的部署一检索就崩。用例按真实语义喂 NoneEmbedder，不是造出来的边界。
+    """
+    kb = _seed(db, docs={"a.pdf": ["降级态 独有关键词庚庚"]}, embedder=None)
+    hits = retrieve(db, "独有关键词庚庚", embedder=NoneEmbedder(), kb_ids=[kb.id], top_k=5)
+    assert hits and hits[0]["doc_name"] == "a.pdf"
+    assert hits[0]["bm25_hit"] is True
+    assert hits[0]["vec_hit"] is False, "没有查询向量时不该谎报向量命中"
+
+    # 库里有向量也一样：两路只剩 BM25 一路，不能因为「库里有向量」就崩在向量那条路上
+    kb2 = _seed(db, kb_name="有向量的库", docs={"b.pdf": ["降级态 独有关键词庚庚"]},
+                embedder=embedder)
+    hits2 = retrieve(db, "独有关键词庚庚", embedder=NoneEmbedder(), kb_ids=[kb2.id], top_k=5)
+    assert hits2 and hits2[0]["vec_hit"] is False
 
 
 # ---- 授权钳制（任务 6：可见性边界就在这一层，不在展示层）----

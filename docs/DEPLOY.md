@@ -126,9 +126,11 @@ docker compose up -d --build
 **一键重建索引与后台作业**，最后打印回答原文供人眼确认。
 
 ```bash
-# 容器里跑（依赖都在镜像里，最省事）
-docker compose exec backend python scripts/smoke_delivery.py --new-password '你的新口令' \
+# 容器里跑（依赖都在镜像里，最省事）。**已经改过密就必须显式给 --password**：
+# 不给的话脚本会拿 .env 里的初始口令去登录，改过之后那串已经失效了（会停在「登录失败 401」）
+docker compose exec backend python scripts/smoke_delivery.py --password '你的口令' \
     --frontend-url http://frontend:3000
+# 账号还卡在「首登强改密」门禁上时，改成 --new-password '你的新口令' 顺手改掉
 
 # 或从宿主机打已发布端口
 python scripts/smoke_delivery.py --base-url http://<IP>:8000 \

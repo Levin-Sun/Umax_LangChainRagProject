@@ -57,9 +57,12 @@ DOC_BODY = f"""售后处理规范（交付自检样本）
 """ * 3 + f"\n（本文件由交付自检脚本生成，标记 {MARK}）\n"
 
 FAILS: list[str] = []
+LAST_STEP = ""          # 最近一次 title() 的文案：异常兜底时用来告诉人"崩在哪一步"
 
 
 def title(msg: str) -> None:
+    global LAST_STEP
+    LAST_STEP = msg
     print(f"\n\033[1m{msg}\033[0m" if sys.stdout.isatty() else f"\n{msg}")
 
 
@@ -295,8 +298,15 @@ def main() -> int:
 
         # ---- 9. 检索 ----
         title("[9/12] 混合检索")
-        hits = c.post("/api/v1/retrieve",
-                      json={"query": f"{MARK} 怎么规定的", "kb_ids": [kb_id], "top_k": 5}).json()
+        rr = c.post("/api/v1/retrieve",
+                    json={"query": f"{MARK} 怎么规定的", "kb_ids": [kb_id], "top_k": 5})
+        if rr.status_code != 200:
+            # 后端未处理异常时 Starlette 回**纯文本**，直接 .json() 会崩在栈里、后面几项全没跑
+            # （真机踩中：没登记 embedding 模型时拿 None 当向量算 → 500）
+            bad(f"检索失败：{rr.status_code} {rr.text[:160]}",
+                "500 且响应是纯文本＝后端未处理异常，堆栈看 docker compose logs backend --tail 100")
+            return 1
+        hits = rr.json()
         if not hits:
             bad("检索 0 命中：问答必然走未命中兜底", "看上面切块内容是否含标记词")
             return 1
@@ -384,6 +394,13 @@ def main() -> int:
         elif kb_id:
             info(f"自检知识库 #{kb_id} 保留（可到界面里看效果；删除用 --cleanup 或界面上删）")
 
+    except Exception as exc:
+        # 兜底：脚本不能拿 traceback 结束——它在客户机器上跑，崩在栈里等于把「错在哪一步」
+        # 也一起丢了（真机踩中：/retrieve 的 500 让脚本死在第 9 步，人不知道后面几项为什么没跑）。
+        import traceback
+        bad(f"自检在「{LAST_STEP or '启动阶段'}」中断：{type(exc).__name__}: {exc}",
+            "后面几项因此没跑到——先修这一处；后端堆栈：docker compose logs backend --tail 100")
+        traceback.print_exc()
     finally:
         c.close()
 

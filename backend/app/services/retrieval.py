@@ -81,7 +81,12 @@ def retrieve(
     vec_ids: list[int] = []
     if embedder is not None:
         qvec = embedder.embed([query])[0]
-        vec_ids = _vector_ranking(session, qvec, kb_ids, recall_k, min_sim)
+        # 降级态：没登记 embedding 模型时 FallbackEmbedder 按 ingest 语义回 [None]（入库那边就是
+        # "不存向量、只建 BM25"）。检索侧必须同口径地退成只走 BM25——真机把 None 当向量 join 崩过：
+        # TypeError: 'NoneType' object is not iterable（新机器交付自检第 9 步 /retrieve 500）。
+        # 只放行 None，不吞异常：供应商全挂时网关抛 GatewayError，照旧上抛（与入库侧 status=failed 同口径）。
+        if qvec is not None:
+            vec_ids = _vector_ranking(session, qvec, kb_ids, recall_k, min_sim)
 
     fused = rrf_fuse([bm25_ids, vec_ids], k=rrf_k)
     order = sorted(fused, key=lambda i: -fused[i])[:recall_k]
