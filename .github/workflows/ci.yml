@@ -1,0 +1,94 @@
+# 门禁自动化。三个 job 对应三处事实源，也是"文档里一直写着、命令也一直对，
+# 但没有东西强制它发生"的那部分——漏跑一条不会有人知道：
+#   backend  = 服务行为 + 契约（用例 + 覆盖率棘轮 + 契约 fuzz + spec 新鲜度）
+#   frontend = 界面行为 + 类型（用例 + typecheck：含"手写类型 vs 生成类型"的双向可赋值断言）
+#   sdk      = 生成物新鲜度（改了 spec 没重生成 SDK 即红）
+# 本地等价物是 scripts/run_gates.sh（同一批检查，给"还没跑 CI / 推之前先自查"的场景兜底）；
+# 性能基线（backend/scripts/bench.py）刻意不在这里跑，理由见 docs/PERF.md。
+#
+# 落位曲折（留个记录，省得以后又被"搬回去"）：这个文件一度只能放 scripts/ci.yml——
+# 当时推送用的 PAT 没有 workflow scope，GitHub 硬性拒绝该类凭据创建/修改 CI 文件。
+# 凭据补上 scope 后已归位到 .github/workflows/，scripts/ 下那份同步删除，
+# **同一份配置只留一处**（两份必然漂移）。
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  backend:
+    runs-on: ubuntu-latest
+    services:
+      # 真 PG + pgvector：集成测试不 mock 数据库（项目既有决策），所以 CI 也得是真库
+      postgres:
+        image: pgvector/pgvector:pg16
+        env:
+          POSTGRES_USER: rag
+          POSTGRES_PASSWORD: rag_dev_2026
+          POSTGRES_DB: umaxrag
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U rag -d umaxrag"
+          --health-interval 5s --health-timeout 3s --health-retries 30
+    env:
+      PG_HOST: 127.0.0.1
+      PG_PORT: "5432"
+      PG_USER: rag
+      PG_PASSWORD: rag_dev_2026
+      PG_DB: umaxrag
+      GATEWAY_SECRET: ci-secret-not-for-production
+      ADMIN_EMAIL: admin@umax.local
+      ADMIN_PASSWORD: ci-admin-pass-1
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"        # 本地开发用 3.14；CI 用 3.13 更保守（代码要求 3.11+）
+          cache: pip
+      - run: pip install -r backend/requirements.txt
+      - name: 后端用例 + 覆盖率（含 RBAC/审计/权限/评测/重建/并发等全部回归）
+        working-directory: backend
+        run: python -m pytest -q --cov=app --cov-report=term-missing --cov-fail-under=93
+      - name: 契约 fuzz（schemathesis：声明与实现必须一致）
+        working-directory: backend
+        run: python -m pytest -m contract -q
+      - name: 契约新鲜度（改了端点没重导 spec 即红）
+        run: |
+          python backend/scripts/export_openapi.py
+          git diff --exit-code contracts/openapi.json
+
+  frontend:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - run: npm ci                       # sdk-ts 是 file: 依赖，会被一起装上
+        working-directory: sdk-ts
+      - run: npm ci
+        working-directory: frontend
+      - name: 前端用例
+        working-directory: frontend
+        run: npm test
+      - name: 类型检查（含"手写类型 vs 契约生成类型"的耦合断言）
+        working-directory: frontend
+        run: npm run typecheck
+      - name: 构建
+        working-directory: frontend
+        run: npm run build
+
+  sdk:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - run: npm ci
+        working-directory: sdk-ts
+      # npm test = gen → git diff --exit-code schema.d.ts → tsc：spec 变了没重生成 SDK 即红
+      - run: npm test
+        working-directory: sdk-ts
