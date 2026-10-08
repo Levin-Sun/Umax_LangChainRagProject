@@ -25,9 +25,25 @@ cp .env.example .env
 
 ## 第 2 步：一条命令起全套
 
+**先站对地方**——下面的命令必须在**仓库根目录**执行，也就是**能看到 `docker-compose.yml` 的那一层**
+（第 1 步 `cd umax` 之后你就在那儿）。先自检一眼：
+
+```bash
+pwd          # 当前目录
+ls           # 列表里必须能看到 docker-compose.yml 和 .env
+```
+
+`ls` 里看不到 `docker-compose.yml`，就是站错地方了（常见：进到了 `backend/` 这种子目录、
+停在了仓库的上一级、或者解压下载的包里多套了一层目录）。`cd` 到对的那层再执行。
+
 ```bash
 docker compose up -d --build
 ```
+
+> **报错对照**：`未提供配置文件：未找到`（英文原文 `no configuration file provided: not found`）
+> **不是**配置写错了，而是 **Compose 在你当前目录里没找到 `docker-compose.yml`**——一律先按
+> 上面那两行 `pwd`/`ls` 核对目录。顺带确认第 1 步的 `cp .env.example .env` 也做在同一层，
+> 否则容器会带着空的管理员口令和空主密钥起来（能启动，但登录/加密会失败）。
 
 - 异步入库档（文档量大时）：`.env` 里 `QUEUE_BACKEND=arq`，然后
   `docker compose --profile arq up -d --build`（多起 redis + worker）
