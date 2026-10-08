@@ -1844,6 +1844,122 @@
         "title": "ImageUrlOut",
         "type": "object"
       },
+      "JobOut": {
+        "description": "后台作业（评审补齐）：与文档状态机分工——作业说\"谁为什么发起\"，文档说\"跑到哪了\"。",
+        "properties": {
+          "created_by": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Created By"
+          },
+          "done": {
+            "title": "Done",
+            "type": "integer"
+          },
+          "error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error"
+          },
+          "failed": {
+            "title": "Failed",
+            "type": "integer"
+          },
+          "finished_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Finished At"
+          },
+          "id": {
+            "title": "Id",
+            "type": "integer"
+          },
+          "kind": {
+            "title": "Kind",
+            "type": "string"
+          },
+          "scope": {
+            "$ref": "#/components/schemas/JobScopeOut"
+          },
+          "started_at": {
+            "format": "date-time",
+            "title": "Started At",
+            "type": "string"
+          },
+          "status": {
+            "enum": [
+              "queued",
+              "running",
+              "done",
+              "failed",
+              "interrupted"
+            ],
+            "title": "Status",
+            "type": "string"
+          },
+          "total": {
+            "title": "Total",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "id",
+          "kind",
+          "status",
+          "scope",
+          "total",
+          "done",
+          "failed",
+          "error",
+          "created_by",
+          "started_at",
+          "finished_at"
+        ],
+        "title": "JobOut",
+        "type": "object"
+      },
+      "JobScopeOut": {
+        "properties": {
+          "kb_ids": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "integer"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Kb Ids"
+          }
+        },
+        "required": [
+          "kb_ids"
+        ],
+        "title": "JobScopeOut",
+        "type": "object"
+      },
       "KbIn": {
         "properties": {
           "description": {
@@ -2580,6 +2696,10 @@
             "title": "Documents",
             "type": "integer"
           },
+          "job_id": {
+            "title": "Job Id",
+            "type": "integer"
+          },
           "kb_ids": {
             "anyOf": [
               {
@@ -2597,7 +2717,8 @@
         },
         "required": [
           "documents",
-          "kb_ids"
+          "kb_ids",
+          "job_id"
         ],
         "title": "ReindexOut",
         "type": "object"
@@ -5331,6 +5452,81 @@
           }
         },
         "summary": "Health"
+      }
+    },
+    "/api/v1/jobs": {
+      "get": {
+        "description": "后台作业列表（最近在前）。**与文档列表分工**：这里回答\"谁为什么发起、最后成不成\"，\n文档列表回答\"每一篇跑到哪了\"——两套进度必然漂移，所以只留一套真进度。",
+        "operationId": "list_jobs_api_v1_jobs_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 20,
+              "title": "Limit",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/JobOut"
+                  },
+                  "title": "Response List Jobs Api V1 Jobs Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            },
+            "description": "需要登录"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            },
+            "description": "需要管理员权限"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          },
+          "428": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            },
+            "description": "首次登录必须修改初始口令"
+          }
+        },
+        "summary": "List Jobs"
       }
     },
     "/api/v1/kb": {

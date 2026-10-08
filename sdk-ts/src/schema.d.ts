@@ -388,6 +388,27 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/jobs": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Jobs
+         * @description 后台作业列表（最近在前）。**与文档列表分工**：这里回答"谁为什么发起、最后成不成"，
+         *     文档列表回答"每一篇跑到哪了"——两套进度必然漂移，所以只留一套真进度。
+         */
+        get: operations["list_jobs_api_v1_jobs_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/kb": {
         parameters: {
             query?: never;
@@ -1365,6 +1386,44 @@ export interface components {
             /** Url */
             url: string;
         };
+        /**
+         * JobOut
+         * @description 后台作业（评审补齐）：与文档状态机分工——作业说"谁为什么发起"，文档说"跑到哪了"。
+         */
+        JobOut: {
+            /** Created By */
+            created_by: string | null;
+            /** Done */
+            done: number;
+            /** Error */
+            error: string | null;
+            /** Failed */
+            failed: number;
+            /** Finished At */
+            finished_at: string | null;
+            /** Id */
+            id: number;
+            /** Kind */
+            kind: string;
+            scope: components["schemas"]["JobScopeOut"];
+            /**
+             * Started At
+             * Format: date-time
+             */
+            started_at: string;
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "queued" | "running" | "done" | "failed" | "interrupted";
+            /** Total */
+            total: number;
+        };
+        /** JobScopeOut */
+        JobScopeOut: {
+            /** Kb Ids */
+            kb_ids: number[] | null;
+        };
         /** KbIn */
         KbIn: {
             /** Description */
@@ -1617,6 +1676,8 @@ export interface components {
         ReindexOut: {
             /** Documents */
             documents: number;
+            /** Job Id */
+            job_id: number;
             /** Kb Ids */
             kb_ids: number[] | null;
         };
@@ -3584,6 +3645,64 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["HealthOut"];
+                };
+            };
+        };
+    };
+    list_jobs_api_v1_jobs_get: {
+        parameters: {
+            query?: {
+                limit?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["JobOut"][];
+                };
+            };
+            /** @description 需要登录 */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOut"];
+                };
+            };
+            /** @description 需要管理员权限 */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+            /** @description 首次登录必须修改初始口令 */
+            428: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOut"];
                 };
             };
         };

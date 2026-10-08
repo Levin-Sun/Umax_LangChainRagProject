@@ -15,8 +15,12 @@ step() { printf '\n=== %s ===\n' "$1"; }
 run()  { if "$@"; then echo "  ✅ $*"; else echo "  ❌ $*"; fail=1; fi; }
 
 # pytest.ini 在 backend/ 下（testpaths/pythonpath 都在那儿）——必须在该目录里跑
-step "后端用例（含 RBAC/审计/权限/评测/重建全套回归）"
-(cd "$ROOT/backend" && run "$PY" -m pytest -q)
+# 覆盖率棘轮：--cov-fail-under 卡在基线之下=谁把测试删了/绕过就红；
+# 与用例同一轮跑（不额外多跑一遍），报告里带缺失行号，方便看"哪些分支从没被执行过"
+COV_MIN=${COV_MIN:-93}
+step "后端用例 + 覆盖率（含 RBAC/审计/权限/评测/重建/并发全套回归）"
+(cd "$ROOT/backend" && run "$PY" -m pytest -q --cov=app --cov-report=term-missing \
+  --cov-fail-under="$COV_MIN")
 step "契约 fuzz（schemathesis：声明与实现必须一致）"
 (cd "$ROOT/backend" && run "$PY" -m pytest -m contract -q)
 step "契约新鲜度（改了端点没重导 spec 即红）"

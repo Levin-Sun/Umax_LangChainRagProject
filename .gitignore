@@ -3,6 +3,10 @@ __pycache__/
 *.py[cod]
 .venv/
 venv/
+# 覆盖率产物（pytest-cov）：数据文件与 HTML 报告都不入库
+.coverage
+.coverage.*
+htmlcov/
 
 # Node
 node_modules/

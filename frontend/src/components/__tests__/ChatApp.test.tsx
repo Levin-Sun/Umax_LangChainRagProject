@@ -143,7 +143,7 @@ it("re-clicking the currently open conversation keeps the local answer on screen
 // 任务 7 换轨：me 就绪前只有骨架，业务请求一次不发；loaded 无 me → 弹回登录页
 it("unauthenticated chat page bounces to login and never fires business GETs", async () => {
   nav.replaced = [];
-  const bizGet = vi.fn(async (_u: string) => ok(convs));
+  const bizGet = vi.fn(async (_u: string) => ok(convs));   // _u 是调用形状的一部分（按签名被调用）
   const anon = fakeApi({
     GET: (u: string) => (u.includes("/auth/me") ? fail("需要登录", 401) : bizGet(u)),
     POST: async () => ok(chatOut),
@@ -184,7 +184,7 @@ it("deletes a conversation via DELETE and clears it from the list", async () => 
 
 // ---- 会话搜索 + 传图提问（阶段 2 放开）----
 it("搜索框输入 → GET /conversations 带 q 参数", async () => {
-  const GET = vi.fn((u: string, init?: unknown) =>
+  const GET = vi.fn((u: string, _init?: unknown) =>   // _init：断言里会读 mock.calls[0][1]
     u.includes("/auth/me") ? ok(ME) : ok([]));
   render(<AuthProvider client={fakeApi({ GET }) as never}><ChatApp api={fakeApi({ GET }) as never} /></AuthProvider>);
   await screen.findByLabelText("搜索会话");

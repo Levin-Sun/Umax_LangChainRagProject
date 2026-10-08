@@ -8,7 +8,7 @@ import AdminBanner from "@/components/AdminBanner";
 import { call, callVoid, uploadDocument, uploadDocuments, type Client } from "@/lib/api";
 import { P } from "@/lib/paths";
 import { useAsync, usePolling } from "@/lib/hooks";
-import type { BatchUploadItem, ChunkOut, DocOut, KbOut, ReindexOut } from "@/lib/types";
+import type { BatchUploadItem, ChunkOut, DocOut, JobOut, KbOut, ReindexOut } from "@/lib/types";
 
 // 0.1MB（104857.6 B）以上一律按 MB 显示（1 位小数）——KB 在几十万字节时读起来更长，
 // 也占列宽；不足 0.1MB 才用 KB（1 位小数）保证小文件仍可读
@@ -30,7 +30,21 @@ const fmtTime = (iso: string) => {
 const STATUS_LABEL: Record<string, string> = {
   pending: "排队中", parsing: "解析中", ready: "就绪", failed: "失败",
 };
+// 后台作业状态：与文档状态分开看——作业回答"谁为什么发起、最后成不成"，
+// 文档回答"每一篇跑到哪了"（两套进度必然漂移，所以进度只留文档那套）
+const JOB_LABEL: Record<string, string> = {
+  queued: "已交给后台处理", running: "进行中", done: "已完成", failed: "失败",
+  interrupted: "被服务重启中断",
+};
+const JOB_KIND: Record<string, string> = { reindex: "重建索引" };
 const terminal = (docs: DocOut[]) => docs.every((d) => d.status === "ready" || d.status === "failed");
+
+
+// 作业的作用域文案。fail-soft：作业行形状不对时不能让整页崩（真进度在文档列表里，这里只是辅助信息）
+function jobScopeLabel(j: JobOut, kbs: KbOut[] | undefined): string {
+  if (!j.scope?.kb_ids) return "全部知识库";
+  return kbs?.find((k) => k.id === j.scope.kb_ids?.[0])?.name ?? "单库";
+}
 
 export default function KbAdmin({ api }: { api: Client }) {
   const [kbId, setKbId] = useState<number | null>(null);
@@ -48,6 +62,8 @@ export default function KbAdmin({ api }: { api: Client }) {
   const [actionErr, setActionErr] = useState<unknown>(null);
   const [chunks, setChunks] = useState<{ doc: DocOut; rows: ChunkOut[] } | null>(null);
   const kbs = useAsync(() => call(api.GET(P.kb)) as Promise<KbOut[]>);
+  // 作业记录：进程被杀后"跑完没有"就靠它回答（评审补的盲区）
+  const jobs = useAsync(() => call(api.GET(P.jobs)) as Promise<JobOut[]>);
   const docs = usePolling(
     () => (kbId === null ? Promise.resolve([] as DocOut[])
       : call(api.GET(P.kbDocs, { params: { path: { kb_id: kbId } } })) as Promise<DocOut[]>),
@@ -65,9 +81,11 @@ export default function KbAdmin({ api }: { api: Client }) {
     setNotice(null);
     try {
       const out = await call(api.POST(P.reindex, { body: { kb_ids: scope } }) as never) as ReindexOut;
-      setNotice(`已开始重建 ${out.documents} 篇文档的索引——进度见下表，可以关掉页面（服务端会跑完）`);
+      setNotice(`已开始重建 ${out.documents} 篇文档的索引（作业 #${out.job_id}）——进度见下表，`
+                + "可以关掉页面（服务端会跑完）");
       docs.reload();   // 立刻翻到"排队中"，不然要等下一次轮询才知道动起来了
       kbs.reload();
+      jobs.reload();
     } catch (e) {
       setActionErr(e);
     } finally {
@@ -283,7 +301,33 @@ export default function KbAdmin({ api }: { api: Client }) {
               </table>
             </div>
             {docs.loading && !docs.data && <p className="text-caption text-ink-3">载入…</p>}
-            <AdminBanner error={docs.error} />
+            {(jobs.data ?? []).length > 0 && (
+              <div className="space-y-1 border-t border-border pt-3">
+                <p className="text-caption text-ink-3">
+                  后台作业（回答「谁为什么发起、最后成不成」；每一篇跑到哪看上面的文档状态）
+                </p>
+                <ul className="space-y-0.5">
+                  {(jobs.data ?? []).slice(0, 5).map((j) => (
+                    <li key={j.id} className="flex flex-wrap items-center gap-2 text-caption text-ink-2">
+                      <span className="text-ink-3">#{j.id}</span>
+                      <span>{JOB_KIND[j.kind] ?? j.kind}</span>
+                      <span className={j.status === "interrupted" || j.status === "failed"
+                        ? "text-destructive" : ""}>
+                        {JOB_LABEL[j.status] ?? j.status}
+                      </span>
+                      {/* 单一文本节点：跨节点拼出来的文案会被 JSX 空白折叠拆开，断言与阅读都不可靠 */}
+                      <span className="text-ink-3">
+                        {`${jobScopeLabel(j, kbs.data)} · ${j.done + j.failed}/${j.total}` +
+                          (j.failed > 0 ? `（失败 ${j.failed}）` : "")}
+                      </span>
+                      <span className="text-ink-3">{fmtTime(j.started_at)}</span>
+                      <span className="text-ink-3">{j.created_by ?? ""}</span>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
+            <AdminBanner error={docs.error ?? jobs.error} />
           </div>
         )}
       </section>

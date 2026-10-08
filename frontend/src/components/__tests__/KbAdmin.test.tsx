@@ -5,7 +5,7 @@ import { describe, expect, it, vi } from "vitest";
 import KbAdmin from "@/components/KbAdmin";
 import { P } from "@/lib/paths";
 import { fail, fakeApi, ok } from "@/lib/testkit";
-import type { DocOut } from "@/lib/types";
+import type { DocOut, JobOut } from "@/lib/types";
 
 const pending: DocOut = { id: 1, kb_id: 1, name: "ops.txt", status: "pending", error: null, size_bytes: 5, created_at: "2026-10-07T10:00:00+00:00" };
 const ready: DocOut = { ...pending, status: "ready" };
@@ -130,7 +130,7 @@ it("分块抽屉标出图片描述来源", async () => {
   render(<KbAdmin api={fakeApi({
     GET: (u) => (u === P.kb ? ok([{ id: 1, name: "图库", description: null }])
       : u === P.kbDocs ? ok([{ id: 1, kb_id: 1, name: "流程.docx", status: "ready", error: null, size_bytes: 100, created_at: "2026-10-07T10:00:00+00:00" }])
-      : u === P.docChunks ? ok(chunks) : undefined),
+      : u === P.docChunks ? ok(chunks) : u === P.jobs ? ok([]) : undefined),
   })} />);
   await screen.findByText("图库");
   await userEvent.click(screen.getByText("图库"));
@@ -141,7 +141,8 @@ it("分块抽屉标出图片描述来源", async () => {
 // ---- 文档列表：上传时间列 + 删除（二次确认） ----
 it("文档表显示上传时间（本地时区到分钟）", async () => {
   render(<KbAdmin api={fakeApi({
-    GET: (u) => (u === P.kb ? ok([{ id: 1, name: "库A", description: null }]) : ok([ready])),
+    GET: (u) => (u === P.kb ? ok([{ id: 1, name: "库A", description: null }])
+      : u === P.jobs ? ok([]) : ok([ready])),
   })} />);
   await screen.findByText("库A");
   await userEvent.click(screen.getByText("库A"));
@@ -153,7 +154,8 @@ it("文档表显示上传时间（本地时区到分钟）", async () => {
 it("删除文档：先确认再发 DELETE，取消则不发", async () => {
   const DELETE = vi.fn(() => ok(undefined));
   render(<KbAdmin api={fakeApi({
-    GET: (u) => (u === P.kb ? ok([{ id: 1, name: "库A", description: null }]) : ok([ready])),
+    GET: (u) => (u === P.kb ? ok([{ id: 1, name: "库A", description: null }])
+      : u === P.jobs ? ok([]) : ok([ready])),
     DELETE,
   })} />);
   await screen.findByText("库A");
@@ -213,6 +215,7 @@ it("大小按 0.1MB 分档：大文件用 MB，小文件用 KB", async () => {
     created_at: "2026-10-07T10:00:00+00:00" });
   render(<KbAdmin api={fakeApi({
     GET: (u) => (u === P.kb ? ok([{ id: 1, name: "库A", description: null }])
+      : u === P.jobs ? ok([])
       : ok([mk(1, "大.docx", 9_017_941), mk(2, "中.pdf", 104_858), mk(3, "小.md", 1234)])),
   })} />);
   await screen.findByText("库A");
@@ -325,9 +328,56 @@ describe("重建索引", () => {
   it("没有在跑的文档时不显示进度行（不制造虚假的「正在忙」）", async () => {
     const done: DocOut = { id: 1, kb_id: 1, name: "ok.txt", status: "ready", error: null,
       size_bytes: 10, created_at: "2026-10-08T10:00:00+00:00" };
-    render(<KbAdmin api={fakeApi({ GET: (u) => (u === P.kb ? ok([lib]) : ok([done])) })} />);
+    render(<KbAdmin api={fakeApi({
+      GET: (u) => (u === P.kb ? ok([lib]) : u === P.jobs ? ok([]) : ok([done])),
+    })} />);
     await userEvent.click(await screen.findByText("运营库"));
     await screen.findByText("ok.txt");
     expect(screen.queryByRole("status")).not.toBeInTheDocument();
+  });
+});
+
+// 评审遗留：后台作业记录上屏（回答"谁为什么发起、最后成不成"）
+describe("后台作业", () => {
+  const lib = { id: 1, name: "运营库", description: null };
+  const job = (over: Partial<JobOut> = {}): JobOut => ({
+    id: 7, kind: "reindex", status: "done", scope: { kb_ids: [1] }, total: 3, done: 3,
+    failed: 0, error: null, created_by: "admin@umax.local",
+    started_at: "2026-10-08T10:00:00+00:00", finished_at: "2026-10-08T10:01:00+00:00", ...over });
+
+  it("列出最近作业：状态/范围/进度/发起人", async () => {
+    render(<KbAdmin api={fakeApi({
+      GET: (u) => (u === P.kb ? ok([lib]) : u === P.jobs ? ok([job()]) : ok([])),
+    })} />);
+    await userEvent.click(await screen.findByText("运营库"));
+    expect(await screen.findByText(/后台作业/)).toBeInTheDocument();
+    const row = (await screen.findByText("#7")).closest("li") as HTMLElement;
+    expect(within(row).getByText("重建索引")).toBeInTheDocument();
+    expect(within(row).getByText("已完成")).toBeInTheDocument();
+    expect(within(row).getByText(/运营库 · 3\/3/)).toBeInTheDocument();
+    expect(within(row).getByText("admin@umax.local")).toBeInTheDocument();
+  });
+
+  it("被重启中断的作业标红并显示失败数（这正是最容易说不清的那类）", async () => {
+    render(<KbAdmin api={fakeApi({
+      GET: (u) => (u === P.kb ? ok([lib])
+        : u === P.jobs ? ok([job({ status: "interrupted", done: 1, total: 3, failed: 1 })]) : ok([])),
+    })} />);
+    await userEvent.click(await screen.findByText("运营库"));
+    const row = (await screen.findByText("#7")).closest("li") as HTMLElement;
+    expect(within(row).getByText("被服务重启中断")).toBeInTheDocument();
+    expect(within(row).getByText(/2\/3（失败 1）/)).toBeInTheDocument();
+  });
+
+  it("起重建后刷新作业列表（作业号进提示语）", async () => {
+    const POST = vi.fn(async () => ok({ documents: 3, kb_ids: [1], job_id: 9 }));
+    const GET = vi.fn((u: string) => (u === P.kb ? ok([lib]) : u === P.jobs ? ok([]) : ok([])));
+    render(<KbAdmin api={fakeApi({ GET, POST })} />);
+    await userEvent.click(await screen.findByText("运营库"));
+    await userEvent.click(await screen.findByRole("button", { name: "重建本库索引" }));
+    await userEvent.click(within(await screen.findByRole("dialog", { name: "重建索引确认" }))
+      .getByRole("button", { name: "开始重建" }));
+    expect(await screen.findByText(/作业 #9/)).toBeInTheDocument();
+    expect(GET.mock.calls.filter(([u]) => u === P.jobs).length).toBeGreaterThanOrEqual(2);
   });
 });

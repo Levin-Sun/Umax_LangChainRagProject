@@ -58,7 +58,9 @@ def test_reindex_kb_scope_rebuilds_vectors(engine, db, tmp_path):
     login(c2, *ADMIN)
     r = c2.post("/api/v1/reindex", json={"kb_ids": [kb["id"]]})
     assert r.status_code == 202, r.text
-    assert r.json() == {"documents": 3, "kb_ids": [kb["id"]]}
+    body = r.json()
+    assert (body["documents"], body["kb_ids"]) == (3, [kb["id"]])
+    assert body["job_id"], "重建必须回作业号（进程被杀后靠它查）"
 
     with Session(engine) as s:
         assert s.query(Chunk).filter_by(kb_id=kb["id"]).count() == 3
@@ -70,7 +72,8 @@ def test_reindex_kb_scope_rebuilds_vectors(engine, db, tmp_path):
         assert all(d.status == "ready" for d in s.query(Document).filter_by(kb_id=kb["id"]))
     with Session(engine) as s:
         row = s.query(AuditLog).filter_by(action="reindex_started").one()
-        assert row.detail == {"kb_ids": [kb["id"]], "documents": 3}
+        assert row.detail["kb_ids"] == [kb["id"]] and row.detail["documents"] == 3
+        assert row.detail["job_id"], "审计里带上作业号：从审计能追到那一次重建"
         assert row.target_type == "kb" and row.target_id == kb["id"]
 
 
@@ -81,11 +84,12 @@ def test_reindex_all_libraries_when_scope_is_null(engine, db, tmp_path):
     a = _mk_kb(c, "库A", docs=2)
     b = _mk_kb(c, "库B", docs=1)
     r = c.post("/api/v1/reindex", json={})
-    assert r.status_code == 202 and r.json() == {"documents": 3, "kb_ids": None}
+    assert r.status_code == 202
+    assert (r.json()["documents"], r.json()["kb_ids"]) == (3, None) and r.json()["job_id"]
     with Session(engine) as s:
         assert s.query(Chunk).filter(Chunk.embedding.is_(None)).count() == 0
-        assert s.query(AuditLog).filter_by(action="reindex_started").one().detail == {
-            "kb_ids": None, "documents": 3}
+        detail = s.query(AuditLog).filter_by(action="reindex_started").one().detail
+        assert (detail["kb_ids"], detail["documents"]) == (None, 3) and detail["job_id"]
     assert {a["id"], b["id"]} == {k["id"] for k in c.get("/api/v1/kb").json()}
 
 

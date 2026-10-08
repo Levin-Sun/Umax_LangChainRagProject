@@ -2,7 +2,7 @@
 // 无取消、遮罩不可关；改密成功 refresh 拉新 me，标记翻false 后框自动消失露出业务页。
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { expect, it, vi } from "vitest";
+import { expect, it } from "vitest";
 import { AuthProvider } from "@/lib/auth";
 import { MustChangeGate } from "@/components/Providers";
 import { fail, fakeApi, ok } from "@/lib/testkit";

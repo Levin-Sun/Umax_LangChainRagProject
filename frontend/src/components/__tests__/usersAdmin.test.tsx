@@ -5,7 +5,7 @@ import userEvent from "@testing-library/user-event";
 import UsersAdmin from "@/components/UsersAdmin";
 import { P } from "@/lib/paths";
 import { fakeApi, ok, fail } from "@/lib/testkit";
-import { describe, expect, it, vi } from "vitest";
+import { expect, it, vi } from "vitest";
 
 const ME = { email: "admin@x.com", name: "admin", role: "admin" as const, kb_ids: null, must_change_password: false };
 const rows = [

@@ -26,9 +26,9 @@ from starlette.routing import Match
 from starlette.types import ASGIApp, Receive, Scope, Send
 
 from app.core.config import get_settings
-from app.models import (ApiKey, AppSetting, AuditLog, Chunk, Conversation, Document,
-                        EvalItemResult, EvalQuestion, EvalRun, KnowledgeBase, Message,
-                        ModelConfig, User, UserKbGrant, UserSession, UsageRecord)
+from app.models import (ApiKey, AppSetting, AuditLog, BackgroundJob, Chunk, Conversation,
+                        Document, EvalItemResult, EvalQuestion, EvalRun, KnowledgeBase,
+                        Message, ModelConfig, User, UserKbGrant, UserSession, UsageRecord)
 from app.services.audit import record as audit_record
 from app.services.auth import (LoginThrottle, hash_password, new_api_key, new_session_token,
                                token_digest, verify_password)
@@ -36,6 +36,7 @@ from app.services.citations import parse_citations
 from app.services.crypto import decrypt_secret, encrypt_secret
 from app.services.evaluation import aggregate, check_item, load_golden, render_report
 from app.services.ingest import ingest_document, read_stored, supported_ext
+from app.services.jobs import create_job, finish_job, finish_progress
 from app.services.judge import judge_stats, make_judge_fn
 from app.services.license import load_license_status, machine_fingerprint
 from app.services.retrieval import retrieve
@@ -53,6 +54,8 @@ SCENARIO_PATTERN = "^(" + "|".join(sorted(SCENARIOS)) + ")$"
 DOC_STATUSES = ("pending", "parsing", "ready", "failed")
 # 评测运行状态机（同款派生）：running 是"后台正在跑"，前端据此轮询进度
 EVAL_RUN_STATUSES = ("running", "done", "failed")
+# 后台作业状态：queued=已交外部 worker / running=同步档线程在跑 / done / failed / interrupted
+JOB_STATUSES = ("queued", "running", "done", "failed", "interrupted")
 
 # role/status 枚举同款派生（任务 4）：约束写进 schema，运行时校验集合是同一事实源，防漂移
 ROLES = {"admin", "member"}
@@ -174,6 +177,7 @@ JsonSafe = Annotated[dict, BeforeValidator(_utf8_str)]         # JSONB 列（cap
 
 DocStatus = Literal[*DOC_STATUSES]   # 3.11+ 解包写法：与 DOC_STATUSES 不会漂移
 EvalRunStatus = Literal[*EVAL_RUN_STATUSES]
+JobStatusName = Literal[*JOB_STATUSES]
 # 响应侧枚举（评审补齐）：契约要能自己说清 role 只有两个值——此前是裸 string，
 # 前端手写联合类型只能算"口头约定"，而且两边都不报错（耦合断言一上来就抓到了这类漂移）
 RoleName = Literal[*sorted(ROLES)]
@@ -705,6 +709,26 @@ class ReindexIn(BaseModel):
 class ReindexOut(BaseModel):
     documents: int                        # 本次将重建的文档数（前端据此显示"共 N 篇"）
     kb_ids: list[int] | None
+    job_id: int                           # 作业号：进程被杀后靠它查"跑完没有"
+
+
+class JobScopeOut(BaseModel):
+    kb_ids: list[int] | None
+
+
+class JobOut(BaseModel):
+    """后台作业（评审补齐）：与文档状态机分工——作业说"谁为什么发起"，文档说"跑到哪了"。"""
+    id: int
+    kind: str
+    status: JobStatusName
+    scope: JobScopeOut
+    total: int
+    done: int
+    failed: int
+    error: str | None
+    created_by: str | None
+    started_at: datetime
+    finished_at: datetime | None
 
 
 # 契约 fuzz 前提：真实错误码必须写进 spec，否则 schemathesis 判合法响应为违约
@@ -2271,11 +2295,16 @@ def create_app(
         session.commit()
 
     # ==================== 重建索引（§3.3 风险对策「换 embedding 模型翻车」）====================
-    def _execute_reindex(doc_ids: list[int]) -> None:
+    def _execute_reindex(doc_ids: list[int], job_id: int | None = None) -> None:
         """逐篇重建（各自独立 session 提交）。单篇失败只记在那篇身上——一篇坏文件不该让
         整库重建停在中途（与批量上传的"部分成功"同一口径）。整轮的异常只记日志：
-        此时各篇状态已落库，前端看得到哪些成了、哪些没有。"""
+        此时各篇状态已落库，前端看得到哪些成了、哪些没有。
+
+        作业行负责"谁为什发了这件事、最后成不成"：逐篇更新 done/failed，结束时收尾——
+        进程被杀时这一行留在 running，重启收尾会把它标成 interrupted（评审发现的盲区）。
+        """
         c = cfg.effective()
+        done = failed = 0
         for doc_id in doc_ids:
             try:
                 with Session(engine) as session:
@@ -2288,6 +2317,7 @@ def create_app(
                                     caption_images=c["doc_image_caption"],
                                     **_chunk_params(session, kb))
             except Exception as exc:     # 文件丢了/解析器炸了：只影响这一篇
+                failed += 1
                 logging.getLogger("umax").exception("重建索引失败 doc=%s", doc_id)
                 try:
                     with Session(engine) as s2:
@@ -2299,6 +2329,18 @@ def create_app(
                             s2.commit()
                 except Exception:
                     logging.getLogger("umax").exception("重建失败态回写也失败 doc=%s", doc_id)
+            else:
+                done += 1
+            if job_id is not None:      # 逐篇落作业进度：重启后也能看出"跑到哪一篇"
+                try:
+                    with Session(engine) as s3:
+                        finish_progress(s3, job_id, done=done, failed=failed)
+                except Exception:
+                    logging.getLogger("umax").exception("作业进度回写失败 job=%s", job_id)
+        if job_id is not None:
+            with Session(engine) as s4:
+                finish_job(s4, s4.get(BackgroundJob, job_id), done=done, failed=failed)
+                s4.commit()
 
     @app.post("/api/v1/reindex", status_code=202, response_model=ReindexOut,
               responses={**_ERR(400, "知识库不存在，或范围内没有可重建的文档"),
@@ -2328,17 +2370,38 @@ def create_app(
             d.status, d.error = "pending", None
         doc_ids = [d.id for d in docs]
         single = kb_ids[0] if kb_ids and len(kb_ids) == 1 else None
+        # 作业登记：异步档是 queued（进度与收尾归 worker，backend 不谎称 running），
+        # 同步档是 running（后台线程就在本进程里，进程没了它就没了 → 重启收尾会标 interrupted）
+        job = create_job(session, kind="reindex", scope={"kb_ids": kb_ids},
+                         total=len(doc_ids), created_by=admin.email,
+                         status="queued" if queue is not None else "running")
+        job_id = job.id
         audit_record(session, "reindex_started", user_email=admin.email,
                      target_type="kb" if single else "reindex", target_id=single,
-                     detail={"kb_ids": kb_ids, "documents": len(doc_ids)},
+                     detail={"kb_ids": kb_ids, "documents": len(doc_ids), "job_id": job_id},
                      ip=_client_ip(request))
         session.commit()
         if queue is not None:
             for doc_id in doc_ids:       # 异步档交给 worker（同 reprocess 的口径）
                 queue.enqueue_import(doc_id)
         else:
-            spawn_fn(lambda: _execute_reindex(doc_ids))
-        return {"documents": len(doc_ids), "kb_ids": kb_ids}
+            spawn_fn(lambda: _execute_reindex(doc_ids, job_id))
+        return {"documents": len(doc_ids), "kb_ids": kb_ids, "job_id": job_id}
+
+    def _job_json(j: BackgroundJob) -> dict:
+        return {"id": j.id, "kind": j.kind, "status": j.status, "scope": j.scope or {},
+                "total": j.total, "done": j.done, "failed": j.failed, "error": j.error,
+                "created_by": j.created_by, "started_at": j.started_at,
+                "finished_at": j.finished_at}
+
+    @app.get("/api/v1/jobs", response_model=list[JobOut], responses={**_ERR_GATE})
+    def list_jobs(limit: QueryInt = 20, admin: User = Depends(require_admin_role),
+                  session: Session = Depends(get_session)):
+        """后台作业列表（最近在前）。**与文档列表分工**：这里回答"谁为什么发起、最后成不成"，
+        文档列表回答"每一篇跑到哪了"——两套进度必然漂移，所以只留一套真进度。"""
+        limit = max(1, min(limit, 100))
+        return [_job_json(j) for j in session.query(BackgroundJob)
+                .order_by(BackgroundJob.id.desc()).limit(limit)]
 
     app.add_middleware(_AllowHeaderMiddleware, routes=app.router.routes)
     return app
@@ -2484,6 +2547,18 @@ def build_production_app(upload_dir: str = "uploads",
         from app.queue import ArqQueue
 
         queue = ArqQueue(redis_host=s.redis_host, redis_port=s.redis_port)
+    # 重启收尾（评审遗留）：上次进程留下的 running 作业与孤儿 pending 文档必须说明白——
+    # 否则界面永远显示"排队中"，而没有任何东西会去处理它。异步档只标作业、**绝不动文档**：
+    # 那些 pending 正是排队等 worker 的任务，worker 是另一个进程，重启 backend 不影响它。
+    from app.services.jobs import recover_interrupted_jobs
+
+    rec = recover_interrupted_jobs(engine, has_external_worker=queue is not None)
+    if rec["jobs"] or rec["documents"]:
+        import logging
+
+        logging.getLogger("umax").warning(
+            "启动收尾：%d 个后台作业标记为中断，%d 篇文档从「排队中」改为失败（可点重建/重试继续）",
+            rec["jobs"], rec["documents"])
     if not s.admin_email or not s.admin_password:
         import logging
 

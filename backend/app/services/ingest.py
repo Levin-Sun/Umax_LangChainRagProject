@@ -2,7 +2,7 @@
 # 调度：queue 参数为空时 API 同步调用；配 ARQ 后由 worker 的 run_import 调用
 from collections.abc import Callable
 
-from sqlalchemy import delete
+from sqlalchemy import delete, select
 from sqlalchemy.orm import Session
 
 from app.models import Chunk, Document
@@ -65,6 +65,11 @@ def ingest_document(
 ) -> Document:
     doc.status = "parsing"
     session.commit()
+    # 同文档串行化（真机并发测试发现）：两个并发 ingest 打同一篇文档（同时点"重建"、
+    # 或重建撞上 worker 的重处理）时，双方都看不见对方尚未提交的行，各自 DELETE→INSERT 一遍，
+    # 结果是**切块翻倍**——同一段内容在检索里出现两次，白烧 token 还会给出重复引用。
+    # 取文档行锁把同一篇的 ingest 排队（锁在函数结束的 commit 释放）；不同文档互不阻塞。
+    session.execute(select(Document.id).where(Document.id == doc.id).with_for_update())
     try:
         text = parse_document(doc.name, raw, mineru=mineru)
         pieces = chunk_text(text, target=chunk_target, min_len=chunk_min)

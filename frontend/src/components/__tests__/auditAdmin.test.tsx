@@ -4,7 +4,7 @@ import userEvent from "@testing-library/user-event";
 import AuditAdmin from "@/components/AuditAdmin";
 import { P } from "@/lib/paths";
 import { fakeApi, ok } from "@/lib/testkit";
-import { describe, expect, it, vi } from "vitest";
+import { expect, it, vi } from "vitest";
 
 const auditRow = (id: number) => ({
   id, user_email: "dev@x.com", action: "login_failed", target_type: null,

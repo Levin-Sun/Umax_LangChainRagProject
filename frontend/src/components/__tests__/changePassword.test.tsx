@@ -1,10 +1,10 @@
-import { render, screen, waitFor } from "@testing-library/react";
+import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import ChangePasswordDialog from "@/components/ChangePasswordDialog";
 import { call, setUnauthorizedHandler } from "@/lib/api";
 import { P } from "@/lib/paths";
 import { fail, fakeApi } from "@/lib/testkit";
-import { describe, expect, it, vi } from "vitest";
+import { expect, it, vi } from "vitest";
 
 const fill = async (oldPw: string, newPw: string, confirm: string) => {
   await userEvent.type(screen.getByLabelText("旧口令"), oldPw);

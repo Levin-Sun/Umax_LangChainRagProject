@@ -10,7 +10,7 @@ import { fakeApi, ok, fail } from "@/lib/testkit";
 
 const ME = { email: "a@x.com", name: "a", role: "admin" as const, kb_ids: null, must_change_password: false };
 
-function Probe({ client }: { client: never }) {
+function Probe() {
   const { me, loaded, login } = useAuth();
   return (
     <div>
@@ -22,7 +22,7 @@ function Probe({ client }: { client: never }) {
 
 it("挂载即拉 /auth/me：200→admin，401→anon", async () => {
   const api = fakeApi({ GET: (u) => (u.includes("/auth/me") ? ok(ME) : ok([])) }) as never;
-  render(<AuthProvider client={api}><Probe client={api} /></AuthProvider>);
+  render(<AuthProvider client={api}><Probe /></AuthProvider>);
   await waitFor(() => expect(screen.getByTestId("state")).toHaveTextContent("admin"));
 });
 
@@ -31,7 +31,7 @@ it("me 401 → 匿名态不抛错；login 成功后重拉", async () => {
   let me: Promise<MeResult> = fail("需要登录", 401);
   const api = { GET: vi.fn((u: string) => (u.includes("/auth/me") ? me : ok([]))),
                POST: vi.fn(() => { me = ok(ME); return ok(undefined); }) } as never;
-  render(<AuthProvider client={api}><Probe client={api} /></AuthProvider>);
+  render(<AuthProvider client={api}><Probe /></AuthProvider>);
   await waitFor(() => expect(screen.getByTestId("state")).toHaveTextContent("anon"));
   await act(async () => { await userEvent.click(screen.getByText("login")); });
   await waitFor(() => expect(screen.getByTestId("state")).toHaveTextContent("admin"));
@@ -40,7 +40,7 @@ it("me 401 → 匿名态不抛错；login 成功后重拉", async () => {
 it("login 走 P.authLogin（email+password），me 仍 401 时抛错不留假登录态", async () => {
   const post = vi.fn(() => fail("邮箱或口令错误", 401));
   const api = fakeApi({ GET: () => fail("需要登录", 401), POST: post });
-  render(<AuthProvider client={api}><Probe client={api as never} /></AuthProvider>);
+  render(<AuthProvider client={api}><Probe /></AuthProvider>);
   await waitFor(() => expect(screen.getByTestId("state")).toHaveTextContent("anon"));
   await act(async () => { await userEvent.click(screen.getByText("login")); });
   expect(post).toHaveBeenCalledWith("/api/v1/auth/login", expect.objectContaining({
@@ -73,7 +73,7 @@ it("收编⑫：/auth/me 非 401 失败（500）解除骨架并降为匿名，�
   // 挂载即 refresh；fetchMe 对非 401 抛错——旧实现会让 loaded 永挂 false（全站卡骨架）
   const spy = vi.spyOn(console, "error").mockImplementation(() => {});
   const api = fakeApi({ GET: () => fail("网关炸了", 500) }) as never;
-  render(<AuthProvider client={api}><Probe client={api} /></AuthProvider>);
+  render(<AuthProvider client={api}><Probe /></AuthProvider>);
   await waitFor(() => expect(screen.getByTestId("state")).toHaveTextContent("anon"));
   spy.mockRestore();
 });

@@ -20,4 +20,6 @@ pypdf>=5.1
 pytest>=8.3
 httpx>=0.27
 cryptography>=44
-schemathesis>=4.27,<5  # 契约 fuzz（实测 4.27.4：from_fixture + call_and_validate）；卡主版本防 v5 破坏 API
+schemathesis>=4.27,<5
+pytest-cov>=6  # 覆盖率度量（评审补齐：此前"哪些分支从没被执行过"完全不可见）
+# schemathesis 卡主版本防 v5 破坏 API（实测 4.27.4：from_fixture + call_and_validate）

@@ -34,4 +34,5 @@ export const P = {
   evalRun: "/api/v1/eval/runs/{run_id}",
   evalRunReport: "/api/v1/eval/runs/{run_id}/report",
   reindex: "/api/v1/reindex",
+  jobs: "/api/v1/jobs",
 } as const;

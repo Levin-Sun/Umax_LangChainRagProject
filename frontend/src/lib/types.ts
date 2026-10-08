@@ -3,8 +3,13 @@ export interface KbOut { id: number; name: string; description: string | null }
 export interface DocOut { id: number; kb_id: number; name: string; status: DocStatus; error: string | null; size_bytes: number | null; created_at: string }
 // 批量上传逐项结果（部分成功：坏文件只在自己这行有 error）
 export interface BatchUploadItem { name: string; document: DocOut | null; error: string | null }
-// 重建索引（换 embedding 模型后全库重算）：documents=本次要重建的文档数，kb_ids null=全部知识库
-export interface ReindexOut { documents: number; kb_ids: number[] | null }
+// 重建索引（换 embedding 模型后全库重算）：documents=本次要重建的文档数，kb_ids null=全部知识库。
+// job_id=作业号：进程被杀后靠它查"跑完没有"（作业记录是评审补的那个盲区）
+export interface ReindexOut { documents: number; kb_ids: number[] | null; job_id: number }
+// 后台作业（/jobs）：作业回答"谁为什么发起、最后成不成"，每一篇跑到哪了看文档列表——
+// 两套进度必然漂移，所以只留一套真进度
+export type JobStatus = "queued" | "running" | "done" | "failed" | "interrupted";
+export interface JobOut { id: number; kind: string; status: JobStatus; scope: { kb_ids: number[] | null }; total: number; done: number; failed: number; error: string | null; created_by: string | null; started_at: string; finished_at: string | null }
 export interface ChunkOut { id: number; chunk_index: number; content: string; has_embedding: boolean; meta: Record<string, unknown> }
 export interface Citation { n: number; doc_name: string; chunk_id: number; excerpt: string }
 export interface ChatOut { conversation_id: number; answer: string; citations: Citation[]; cited_docs: string[]; usage: { prompt_tokens: number; completion_tokens: number } }

@@ -11,9 +11,9 @@ import { describe, expect, it } from "vitest";
 import type { paths } from "@umax/sdk-ts";
 import type {
   ApiKeyCreated, ApiKeyOut, AuditOut, AuthMe, BatchUploadItem, BrandingOut, ChatOut,
-  ChunkOut, ConversationOut, DocOut, EvalQuestionOut, EvalRunDetailOut, EvalRunOut, KbOut,
-  LicenseOut, MessageOut, ModelOut, QuotaOut, SettingsSnapshot, UsageOut, UsageUserOut,
-  UserOut,
+  ChunkOut, ConversationOut, DocOut, EvalQuestionOut, EvalRunDetailOut, EvalRunOut, JobOut,
+  KbOut, LicenseOut, MessageOut, ModelOut, QuotaOut, ReindexOut, SettingsSnapshot, UsageOut,
+  UsageUserOut, UserOut,
 } from "@/lib/types";
 
 /** 两个类型完全一致才为 true（双向可赋值）；不等价时 `= true` 处直接编译报错。 */
@@ -25,6 +25,9 @@ type R<P extends keyof paths, M extends keyof paths[P]> =
     ? J : never;
 type R201<P extends keyof paths, M extends keyof paths[P]> =
   paths[P][M] extends { responses: { 201: { content: { "application/json": infer J } } } }
+    ? J : never;
+type R202<P extends keyof paths, M extends keyof paths[P]> =
+  paths[P][M] extends { responses: { 202: { content: { "application/json": infer J } } } }
     ? J : never;
 
 // ---- 逐端点断言：后端换字段名 → 这里编译失败 ----
@@ -57,7 +60,11 @@ describe("契约类型耦合", () => {
   it("手写类型与生成的 SDK 类型等价（任一漂移都会在 typecheck 变红）", () => {
     const asserted = [_kb, _doc, _chunk, _batch, _chat, _convs, _msgs, _models, _users,
                       _audit, _quota, _usageUsers, _usage, _keys, _keyCreated, _branding,
-                      _license, _settings, _me, _questions, _runs, _runDetail];
+                      _license, _settings, _me, _questions, _runs, _runDetail, _jobs, _reindex];
     expect(asserted.every((x) => x === true)).toBe(true);
   });
 });
+
+// 评审遗留：后台作业（含重建索引的作业号）也纳入耦合断言——新增接口最容易忘了同步类型
+const _jobs: Equal<JobOut[], R<"/api/v1/jobs", "get">> = true;
+const _reindex: Equal<ReindexOut, R202<"/api/v1/reindex", "post">> = true;

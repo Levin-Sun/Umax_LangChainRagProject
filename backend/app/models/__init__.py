@@ -223,6 +223,34 @@ class ApiKey(Base):
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
 
+class BackgroundJob(Base):
+    """后台作业（评审补齐）：一次"由人发起、在后台跑、会持续一段时间"的动作。
+
+    为什么需要它：**进程被杀时"跑完没有"必须答得出来**。此前只有评测有记录（eval_runs），
+    重建索引没有——客户点一次重建、容器重启，界面上既无作业也无结论，只能靠"文档列表里
+    还剩几个排队中"去猜。作业行记录"谁、何时、对什么范围、发起了什么"；
+    **进度仍就地取文档状态机**（不另造一套），两者各司其职。
+
+    状态语义：queued=已交给外部 worker（进度看文档列表）/ running=同步档后台线程正在跑 /
+    done=跑完了（含部分失败，失败数在 failed）/ failed=整轮性故障 / interrupted=进程重启中断
+    """
+    __tablename__ = "background_jobs"
+
+    id = Column(Integer, primary_key=True)
+    tenant_id = T()
+    kind = Column(String(32), nullable=False, index=True)   # reindex（后续可扩批量导入等）
+    status = Column(String(16), nullable=False, default="running",
+                    server_default="running", index=True)
+    scope = J(nullable=False, default=dict)   # {"kb_ids": [..]} | {"kb_ids": null}=全部
+    total = Column(Integer, nullable=False, default=0)
+    done = Column(Integer, nullable=False, default=0)
+    failed = Column(Integer, nullable=False, default=0)
+    error = Column(Text)
+    created_by = Column(String(255))
+    started_at = Column(DateTime(timezone=True), server_default=func.now())
+    finished_at = Column(DateTime(timezone=True))
+
+
 class EvalQuestion(Base):
     """金标准问答集（§阶段2「评测体系正式化」）：评测的标尺本身，所以它自己也受审计。
 
