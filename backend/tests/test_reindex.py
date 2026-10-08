@@ -108,7 +108,7 @@ def test_reindex_marks_all_docs_pending_before_background_work(engine, db, tmp_p
         def __init__(self):
             self.ids: list[int] = []
 
-        def enqueue_import(self, doc_id: int) -> None:
+        def enqueue_import(self, doc_id: int, job_id: int | None = None) -> None:
             self.ids.append(doc_id)
 
     q = Recorder()

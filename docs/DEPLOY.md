@@ -90,6 +90,32 @@ docker compose up -d --build
 
 > ⚠️ `MACHINE_FINGERPRINT` 必须显式设置：容器重建会改变容器内 machine-id，不固定会导致授权突然失效。
 
+## 第 5 步：交付验收（一条命令走完整链路）
+
+部署完、初始化向导走完、License 放好之后，用自检脚本替客户把第二天要做的事先做一遍——
+它逐项断言：服务与版本 → 登录与会话 → 匿名面/白标 → 授权门闸 → 模型通路 → 建库 → 上传 →
+入库（异步档自动轮询到 ready）→ 切块与向量 → 混合检索 → **带引用问答** → 用量台账与会话历史 →
+**一键重建索引与后台作业**，最后打印回答原文供人眼确认。
+
+```bash
+# 容器里跑（依赖都在镜像里，最省事）
+docker compose exec backend python scripts/smoke_delivery.py --new-password '你的新口令'
+
+# 或从宿主机打已发布端口
+python scripts/smoke_delivery.py --base-url http://<IP>:8000 \
+    --email admin@umax.local --password '你的口令'
+```
+
+常用参数：`--new-password`（账号还卡在"首登强改密"门禁上时顺手改掉）、`--skip-reindex`、
+`--cleanup`（结束时删掉自检知识库；默认保留，方便你到界面上看效果）、`--ready-timeout` / `--job-timeout`。
+
+**退出码 0=全绿、1=有硬失败**，失败项会直接给出下一步怎么修。看到 `⚠️` 不必惊慌：
+未启用 License 校验、没登记 chat/embedding 模型这类是"能跑但生产不该这么交"的提醒，
+脚本会继续往下走并把真实影响跑出来（比如问答是否退化成了"未命中兜底"、入库是否退化成"只建 BM25"）。
+
+> 自检脚本的请求面被 CI 钉在契约上（`tests/test_smoke_delivery.py` 断言它调的每个端点都在
+> `contracts/openapi.json` 里），所以端点改名不会让脚本在客户现场才失效。
+
 ## 日常运维
 
 | 操作 | 命令 |

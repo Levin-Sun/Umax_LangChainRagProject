@@ -110,8 +110,10 @@ def build_router(rt: Runtime) -> APIRouter:
                      ip=client_ip(request))
         session.commit()
         if rt.queue is not None:
-            for doc_id in doc_ids:       # 异步档交给 worker（同 reprocess 的口径）
-                rt.queue.enqueue_import(doc_id)
+            # 异步档交给 worker（同 reprocess 的口径），**带上作业号**：进度与收尾由 worker
+            # 每跑完一篇回报一次（backend 建完作业行就不再假装知道进度）
+            for doc_id in doc_ids:
+                rt.queue.enqueue_import(doc_id, job_id)
         else:
             rt.spawn(lambda: execute_reindex(doc_ids, job_id))
         return {"documents": len(doc_ids), "kb_ids": kb_ids, "job_id": job_id}

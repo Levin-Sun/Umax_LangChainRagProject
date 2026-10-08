@@ -25,7 +25,7 @@ class RecordingQueue:
     def __init__(self):
         self.enqueued: list[int] = []
 
-    def enqueue_import(self, document_id: int) -> None:
+    def enqueue_import(self, document_id: int, job_id: int | None = None) -> None:
         self.enqueued.append(document_id)
 
 
@@ -161,3 +161,83 @@ def test_jobs_list_requires_admin(engine, db, tmp_path):
     seed_user(engine, email="m@umax.local", password="Member-Pass-1", role="member")
     login(c, "m@umax.local", "Member-Pass-1")
     assert c.get("/api/v1/jobs").status_code == 403
+
+
+# ---- 异步档：作业的收尾只能由 worker 回报（此前漏了这一步）----
+class JobAwareQueue:
+    """记录 (doc_id, job_id)：异步档的作业号必须随任务一起下发给 worker。"""
+
+    def __init__(self):
+        self.pairs: list[tuple[int, int | None]] = []
+
+    def enqueue_import(self, document_id: int, job_id: int | None = None) -> None:
+        self.pairs.append((document_id, job_id))
+
+
+def _run_all_pending(engine, pairs: list[tuple[int, int | None]], job_id: int) -> None:
+    """模拟真 worker 逐个接手（真环境里是 arq 进程，这里直接调同一个函数）。"""
+    from app.worker import run_import
+
+    for doc_id, jid in pairs:
+        assert jid == job_id, "作业号没随任务下发，worker 就无从回报进度"
+        run_import(document_id=doc_id, engine=engine, embedder=FakeEmbedder(1024), job_id=job_id)
+
+
+def test_async_reindex_job_is_finished_by_worker_reports(engine, db, tmp_path):
+    """异步档点重建：backend 只建作业行 + 入队，**终局由 worker 每篇回报一次**。
+
+    此前漏了回报这一步——作业行建完永远停在 queued、done/failed 恒为 0，界面"排队中"
+    永不结束（而文档其实已经 ready，只有作业行在撒谎）。交付验证（arq 档）会直接撞见它。
+    """
+    q = JobAwareQueue()
+    c = _client(engine, tmp_path, queue=q)
+    kb_id = _kb_with_docs(c, docs=2)
+    q.pairs.clear()                     # 上传本身也会入队，这里只看重建这一段
+    out = c.post("/api/v1/reindex", json={"kb_ids": [kb_id]}).json()
+    job_id = out["job_id"]
+    assert len(q.pairs) == 2            # 每篇都入队，且带同一个作业号
+    with Session(engine) as s:
+        job = s.get(BackgroundJob, job_id)
+        assert (job.status, job.done, job.failed) == ("queued", 0, 0)
+    _run_all_pending(engine, q.pairs, job_id)
+    with Session(engine) as s:
+        job = s.get(BackgroundJob, job_id)
+        assert (job.status, job.done, job.failed) == ("done", 2, 0)
+        assert job.finished_at is not None
+        assert s.query(Document).filter_by(kb_id=kb_id).filter_by(status="ready").count() == 2
+
+
+def test_async_job_reports_partial_failures_like_the_sync_path(engine, db, tmp_path):
+    """一篇坏文件不该让作业收不了尾：计数照实、终局照旧（与同步档同一套 finish_job 语义）。"""
+    q = JobAwareQueue()
+    c = _client(engine, tmp_path, queue=q)
+    kb_id = _kb_with_docs(c, docs=2)
+    q.pairs.clear()
+    job_id = c.post("/api/v1/reindex", json={"kb_ids": [kb_id]}).json()["job_id"]
+    with Session(engine) as s:          # 原始文件丢了（磁盘被清过）
+        bad = s.query(Document).filter_by(kb_id=kb_id).order_by(Document.id).first()
+        bad.storage_path = str(tmp_path / "没了.txt")
+        s.commit()
+    _run_all_pending(engine, q.pairs, job_id)
+    with Session(engine) as s:
+        job = s.get(BackgroundJob, job_id)
+        assert (job.status, job.done, job.failed) == ("done", 1, 1)
+
+
+def test_async_job_finishes_when_a_queued_document_was_deleted(engine, db, tmp_path):
+    """排队期间被删的那一篇也要计入（否则作业永远差一篇、界面永远不结束）。"""
+    q = JobAwareQueue()
+    c = _client(engine, tmp_path, queue=q)
+    kb_id = _kb_with_docs(c, docs=2)
+    q.pairs.clear()
+    job_id = c.post("/api/v1/reindex", json={"kb_ids": [kb_id]}).json()["job_id"]
+    with Session(engine) as s:
+        gone = s.query(Document).filter_by(kb_id=kb_id).order_by(Document.id).first()
+        gone_id = gone.id
+        s.delete(gone)
+        s.commit()
+    _run_all_pending(engine, q.pairs, job_id)      # 包含已删的那篇 id
+    with Session(engine) as s:
+        job = s.get(BackgroundJob, job_id)
+        assert (job.status, job.done, job.failed) == ("done", 1, 1)
+        assert s.get(Document, gone_id) is None

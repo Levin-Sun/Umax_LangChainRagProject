@@ -76,7 +76,7 @@ def test_batch_enqueues_each_file_when_async(engine, db, tmp_path):
     calls: list[int] = []
 
     class Q:
-        def enqueue_import(self, doc_id: int) -> None:
+        def enqueue_import(self, doc_id: int, job_id: int | None = None) -> None:
             calls.append(doc_id)
 
     c = _client(engine, tmp_path, queue=Q())

@@ -22,7 +22,7 @@ class RecordingQueue:
     def __init__(self):
         self.enqueued: list[int] = []
 
-    def enqueue_import(self, document_id: int) -> None:
+    def enqueue_import(self, document_id: int, job_id: int | None = None) -> None:
         self.enqueued.append(document_id)
 
 

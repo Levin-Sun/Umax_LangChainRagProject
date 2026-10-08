@@ -42,6 +42,33 @@ def finish_progress(session: Session, job_id: int, *, done: int, failed: int) ->
     session.commit()
 
 
+def report_doc_outcome(session: Session, job_id: int, *, ok: bool) -> None:
+    """**异步档**（ARQ worker）每处理完一篇就报一次：计数 +1，全部结清即收尾。
+
+    为什么必须由 worker 报：异步档下每篇的结果只在 worker 手里，backend 只负责建作业行 + 入队。
+    **此前漏了这一步**——作业行建完就永远停在 `queued`、done/failed 恒为 0，界面上"排队中"永不结束
+    （文档其实已经 ready，只有作业行在撒谎）。做交付验证时它会以"异步档点一次重建，
+    文档全好但作业面板卡住"的形态露出来。
+
+    为什么取行锁：ARQ worker 的 `max_jobs > 1`，同一作业的多篇会被并发处理，读-改-写会丢计数
+    （表现同样是"永远收不了尾"）。行锁把同一作业的计数串行化，不同作业互不阻塞。
+    终局语义复用 `finish_job`——"done 还是 failed"只允许有一个定义处。
+    """
+    from sqlalchemy import select
+
+    job = session.execute(select(BackgroundJob).where(BackgroundJob.id == job_id)
+                          .with_for_update()).scalar_one_or_none()
+    if job is None:
+        return          # 作业行被删了（或本来就没登记）：worker 不该因此失败
+    if ok:
+        job.done += 1
+    else:
+        job.failed += 1
+    if job.finished_at is None and job.done + job.failed >= job.total:
+        finish_job(session, job, done=job.done, failed=job.failed)
+    session.commit()
+
+
 def recover_interrupted_jobs(engine, *, has_external_worker: bool) -> dict:
     """进程重启后的收尾：把上一次留下的烂摊子说明白。返回 {jobs, documents} 处理计数。
 

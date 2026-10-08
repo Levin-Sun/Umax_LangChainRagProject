@@ -119,7 +119,7 @@ def test_delete_kb_with_pending_documents_does_not_break_worker_path(client, eng
         def __init__(self):
             self.ids: list[int] = []
 
-        def enqueue_import(self, doc_id: int) -> None:
+        def enqueue_import(self, doc_id: int, job_id: int | None = None) -> None:
             self.ids.append(doc_id)
 
     q = Q()
