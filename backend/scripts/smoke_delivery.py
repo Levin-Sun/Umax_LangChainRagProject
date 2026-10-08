@@ -99,6 +99,9 @@ def wait_for(fn, *, timeout: float, interval: float = 2.0, label: str = ""):
 def main() -> int:
     ap = argparse.ArgumentParser(description="交付自检（走完整链路并逐项断言）")
     ap.add_argument("--base-url", default="http://127.0.0.1:8000")
+    ap.add_argument("--frontend-url", default=None,
+                    help="可选：浏览器入口（宿主机 http://127.0.0.1:3000，容器内 http://frontend:3000）。"
+                         "给了就额外断言前端代理这条路能打到后端")
     ap.add_argument("--email", default=None)
     ap.add_argument("--password", default=None)
     ap.add_argument("--new-password", default=None,
@@ -135,6 +138,31 @@ def main() -> int:
         ok(f"健康检查 200｜commit={h.get('commit')}｜启动于 {h.get('started_at')}")
         if not h.get("commit") or h["commit"] == "unknown":
             warn("commit 为空/unknown：镜像可能没注入 BUILD_COMMIT，排查'改了不生效'时会缺一手信息")
+
+        # 浏览器走的是**前端代理**这条路（前端把 /api/v1/* rewrite 到后端），和后端直连是两条链。
+        # 只打 :8000 会假绿——真机踩过：前端容器里 rewrite 打的是 127.0.0.1:8000（它自己），
+        # 登录页拉 /auth/me、/branding 全 ECONNREFUSED 报 Internal Server Error，而后端直连 12/12 全绿。
+        if args.frontend_url:
+            fc = httpx.Client(base_url=args.frontend_url.rstrip("/"), timeout=30.0)
+            try:
+                fr = fc.get("/api/v1/branding")      # 经代理的 API（登录页首屏就靠它）
+                lp = fc.get("/admin/login")          # 登录页本体
+                if fr.status_code == 200 and lp.status_code == 200:
+                    ok(f"前端代理通：{args.frontend_url}｜登录页 {lp.status_code}｜"
+                       f"经代理的 /api/v1/branding {fr.status_code}")
+                else:
+                    bad(f"前端 {args.frontend_url} 不通：登录页 {lp.status_code}、"
+                        f"经代理的 /api/v1/branding {fr.status_code}（浏览器看到的就是这条路）",
+                        "rewrite 的目标在**构建期**烧进产物：容器里必须是 http://backend:8000。"
+                        "改完要 docker compose up -d --build frontend 重建，光重启容器不生效")
+            except Exception as e:                   # 连不上/超时：前端没起或端口没发布
+                bad(f"前端 {args.frontend_url} 连不上：{e}",
+                    "确认容器在跑、端口已发布；容器内跑本脚本时用 --frontend-url http://frontend:3000")
+            finally:
+                fc.close()
+        else:
+            info("未传 --frontend-url：本次不覆盖浏览器那条路（前端代理 → 后端）——"
+                 "从宿主机跑时建议带 --frontend-url http://127.0.0.1:3000")
 
         # ---- 2. 登录（含首登强改密门闸）----
         title("[2/12] 登录与会话")

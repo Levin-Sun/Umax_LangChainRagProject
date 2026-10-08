@@ -17,8 +17,11 @@ const nextConfig: NextConfig = {
     resolveAlias: { "@umax/sdk-ts": "../sdk-ts/src/client.ts" },
   },
   async rewrites() {
-    // rewrite 在服务端执行：容器部署经 compose 网络打 backend 服务（BACKEND_ORIGIN），
-    // 本机开发缺省 127.0.0.1:8000 不变
+    // 容器部署经 compose 网络打 backend 服务；本机开发缺省 127.0.0.1:8000。
+    // ⚠️ rewrites() 在 **构建期** 求值一次，结果写进 .next/routes-manifest.json，
+    // 运行期只读这份清单——改 BACKEND_ORIGIN 必须重新 build（docker compose up -d --build），
+    // 光重启容器不生效。前端镜像的构建参数由 frontend/Dockerfile 的 ARG 接住，
+    // compose 在 frontend.build.args 里传（这条链路由 dockerProxyWiring.test.ts 钉住）。
     const origin = process.env.BACKEND_ORIGIN ?? "http://127.0.0.1:8000";
     return [{ source: "/api/v1/:path*", destination: `${origin}/api/v1/:path*` }];
   },

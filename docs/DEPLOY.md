@@ -121,20 +121,23 @@ docker compose up -d --build
 ## 第 5 步：交付验收（一条命令走完整链路）
 
 部署完、初始化向导走完、License 放好之后，用自检脚本替客户把第二天要做的事先做一遍——
-它逐项断言：服务与版本 → 登录与会话 → 匿名面/白标 → 授权门闸 → 模型通路 → 建库 → 上传 →
+它逐项断言：服务与版本（给了 `--frontend-url` 就含前端代理 → 登录页那条路）→ 登录与会话 → 匿名面/白标 → 授权门闸 → 模型通路 → 建库 → 上传 →
 入库（异步档自动轮询到 ready）→ 切块与向量 → 混合检索 → **带引用问答** → 用量台账与会话历史 →
 **一键重建索引与后台作业**，最后打印回答原文供人眼确认。
 
 ```bash
 # 容器里跑（依赖都在镜像里，最省事）
-docker compose exec backend python scripts/smoke_delivery.py --new-password '你的新口令'
+docker compose exec backend python scripts/smoke_delivery.py --new-password '你的新口令' \
+    --frontend-url http://frontend:3000
 
 # 或从宿主机打已发布端口
 python scripts/smoke_delivery.py --base-url http://<IP>:8000 \
-    --email admin@umax.local --password '你的口令'
+    --email admin@umax.local --password '你的口令' \
+    --frontend-url http://<IP>:3000
 ```
 
-常用参数：`--new-password`（账号还卡在"首登强改密"门禁上时顺手改掉）、`--skip-reindex`、
+常用参数：`--frontend-url`（**建议都带上**：浏览器走的是「前端代理 → 后端」这条路，只打 `:8000`
+是另一条链，前端 rewrite 打不到后端时这里才会红）、`--new-password`（账号还卡在"首登强改密"门禁上时顺手改掉）、`--skip-reindex`、
 `--cleanup`（结束时删掉自检知识库；默认保留，方便你到界面上看效果）、`--ready-timeout` / `--job-timeout`。
 
 **退出码 0=全绿、1=有硬失败**，失败项会直接给出下一步怎么修。看到 `⚠️` 不必惊慌：
