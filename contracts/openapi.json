@@ -596,6 +596,17 @@
             "title": "Conversation Id",
             "type": "integer"
           },
+          "degraded_reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Degraded Reason"
+          },
           "usage": {
             "$ref": "#/components/schemas/ChatUsageOut"
           }

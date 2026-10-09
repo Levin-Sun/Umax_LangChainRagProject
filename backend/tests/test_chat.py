@@ -81,6 +81,40 @@ def test_chat_endpoint_converts_gateway_failure_to_miss(engine, db, tmp_path):
     r = c.post("/api/v1/chat", json={"question": "生鲜能退吗", "kb_ids": [kb["id"]]})
     assert r.status_code == 200, r.text
     assert r.json()["answer"] == "资料里没有相关内容，无法回答。"
+    # 兜底话术必须带成因：这里检索是命中的（有文档、BM25 能召回），失败的是模型调用。
+    # 真机踩中（2026-10-09）：界面只说"资料里没有相关内容"，人就去重建索引、翻文档，白忙一场。
+    assert r.json()["degraded_reason"] == "model_error"
+
+
+def test_chat_degraded_reason_distinguishes_no_hit_and_no_model(engine, db, tmp_path):
+    """三种兜底成因各归其位：检索空=no_hit、没有 chat 通路=no_model、正常作答=null。"""
+    from fastapi.testclient import TestClient
+
+    from app.main import create_app
+    from tests.conftest import login, seed_user
+
+    def _app(chat_fn):
+        return create_app(engine=engine, secret="s", embedder=None, chat_fn=chat_fn,
+                          upload_dir=str(tmp_path))
+
+    seed_user(engine, "admin@x.com", "Adm1n-Pass-123", role="admin")
+    # 没有 chat 通路：端点按未命中兜底，但成因是"没模型"而不是"资料里没有"
+    c = TestClient(_app(None))
+    login(c, "admin@x.com", "Adm1n-Pass-123")
+    kb = c.post("/api/v1/kb", json={"name": "k"}).json()
+    r = c.post("/api/v1/chat", json={"question": "空库里问一句", "kb_ids": [kb["id"]]})
+    assert r.status_code == 200
+    assert r.json()["degraded_reason"] == "no_hit"      # 库里一个字都没有：检索先空
+
+    c2 = TestClient(_app(lambda q, hits: {"answer": "答[1]", "prompt_tokens": 1,
+                                          "completion_tokens": 1}))
+    login(c2, "admin@x.com", "Adm1n-Pass-123")
+    kb2 = c2.post("/api/v1/kb", json={"name": "k2"}).json()
+    raw = "售后规则：生鲜商品不支持七天无理由退货。" * 5
+    c2.post(f"/api/v1/kb/{kb2['id']}/documents",
+            files={"file": ("a.txt", raw.encode(), "text/plain")})
+    ok = c2.post("/api/v1/chat", json={"question": "生鲜能退吗", "kb_ids": [kb2["id"]]})
+    assert ok.json()["degraded_reason"] is None          # 正常作答：不进降级态
 
 
 # ---- 体验反馈④（2026-10-07）：会话删除——仅本人（别人的/不存在同文案 404），消息级联清 ----

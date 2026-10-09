@@ -25,7 +25,7 @@ export default function UsersAdmin({ api, me }: { api: Client; me: AuthMe }) {
   const [rowErr, setRowErr] = useState<unknown>(null);
   const [grantFor, setGrantFor] = useState<UserOut | null>(null);
   const [grantKbs, setGrantKbs] = useState<number[]>([]);
-  const [resetFor, setResetFor] = useState<number | null>(null);
+  const [resetFor, setResetFor] = useState<UserOut | null>(null);
   const [quotaFor, setQuotaFor] = useState<UserOut | null>(null);
   const [quotaForm, setQuotaForm] = useState<{ daily: string; monthly: string }>({ daily: "", monthly: "" });
   const [resetPw, setResetPw] = useState("");
@@ -92,6 +92,20 @@ export default function UsersAdmin({ api, me }: { api: Client; me: AuthMe }) {
     setQuotaFor(u);
     setQuotaForm({ daily: u.daily_token_limit?.toString() ?? "",
                    monthly: u.monthly_token_limit?.toString() ?? "" });
+  }
+
+  // 重置口令走弹窗（与配额同型）：此前是行内展开两个输入框，一行被撑高、整张表跟着跳，
+  // 触发按钮还跟着换行——破坏列表的等距节奏（真机反馈 2026-10-09）。
+  function openReset(u: UserOut) {
+    setRowErr(null);
+    setResetFor(u);
+    setResetPw("");
+    setResetPw2("");
+  }
+
+  async function saveReset() {
+    if (!resetFor || rowBusy || resetPw.length < 8 || resetPw !== resetPw2) return;
+    await patch(resetFor, { password: resetPw });   // 成功后由 patch 统一关窗 + 刷新列表
   }
 
   async function saveQuota() {
@@ -181,26 +195,12 @@ export default function UsersAdmin({ api, me }: { api: Client; me: AuthMe }) {
                     <Button size="sm" variant="outline" className="h-7 rounded-lg" disabled={rowBusy}
                             onClick={() => openQuota(u)}>配额</Button>
                     <Button size="sm" variant="ghost" className="h-7 rounded-lg text-ink-1" disabled={rowBusy}
-                            onClick={() => { setResetFor(resetFor === u.id ? null : u.id); setResetPw(""); setResetPw2(""); }}>
+                            onClick={() => openReset(u)}>
                       重置口令
                     </Button>
                     {!self && (
                       <Button size="sm" variant="ghost" className="h-7 rounded-lg text-destructive hover:text-destructive"
                               disabled={rowBusy} onClick={() => void del(u)}>删除</Button>
-                    )}
-                    {resetFor === u.id && (
-                      <span className="ml-2 inline-flex flex-wrap items-center gap-1.5">
-                        <Input aria-label="新口令" type="password" placeholder="新口令" className="h-7 w-28 rounded-lg border-border"
-                               value={resetPw} onChange={(e) => setResetPw(e.target.value)} />
-                        <Input aria-label="确认新口令" type="password" placeholder="确认新口令" className="h-7 w-28 rounded-lg border-border"
-                               value={resetPw2} onChange={(e) => setResetPw2(e.target.value)} />
-                        {resetPw.length > 0 && resetPw.length < 8 && (
-                          <span className="text-caption text-destructive">新口令至少 8 位</span>
-                        )}
-                        <Button size="sm" className="h-7 rounded-lg"
-                                disabled={rowBusy || !resetPw || resetPw.length < 8 || resetPw !== resetPw2}
-                                onClick={() => patch(u, { password: resetPw })}>保存</Button>
-                      </span>
                     )}
                   </td>
                 </tr>
@@ -253,6 +253,44 @@ export default function UsersAdmin({ api, me }: { api: Client; me: AuthMe }) {
               <Button type="submit" size="sm" className="h-8 rounded-lg" disabled={rowBusy}>保存</Button>
               <Button type="button" size="sm" variant="ghost" className="h-8 rounded-lg text-ink-3"
                       disabled={rowBusy} onClick={() => setQuotaFor(null)}>取消</Button>
+            </div>
+          </form>
+        </div>
+      )}
+      {resetFor && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 px-4"
+             onClick={() => { if (!rowBusy) setResetFor(null); }}>
+          <form role="dialog" aria-label={`重置口令 ${resetFor.email}`}
+                onClick={(e) => e.stopPropagation()}
+                onSubmit={(e) => { e.preventDefault(); void saveReset(); }}
+                className="w-full max-w-sm space-y-3 rounded-xl border border-border bg-card px-6 py-5 shadow-lg">
+            <h3 className="text-h2 font-semibold text-ink-1">重置口令 · {resetFor.name}</h3>
+            <p className="text-caption text-ink-3">
+              设一个新口令并告知本人；对方下次登录会被要求再自行改一次（与新建用户同口径）。
+            </p>
+            <label className="block space-y-1">
+              <span className="text-h3 font-medium text-ink-2">新口令</span>
+              <Input aria-label="新口令" type="password" placeholder="至少 8 位" disabled={rowBusy}
+                     className="h-9 rounded-lg border-border" value={resetPw}
+                     onChange={(e) => setResetPw(e.target.value)} />
+            </label>
+            <label className="block space-y-1">
+              <span className="text-h3 font-medium text-ink-2">确认新口令</span>
+              <Input aria-label="确认新口令" type="password" placeholder="再输一遍" disabled={rowBusy}
+                     className="h-9 rounded-lg border-border" value={resetPw2}
+                     onChange={(e) => setResetPw2(e.target.value)} />
+            </label>
+            {resetPw.length > 0 && resetPw.length < 8 && (
+              <p className="text-caption text-destructive">新口令至少 8 位</p>
+            )}
+            {resetPw2.length > 0 && resetPw !== resetPw2 && (
+              <p className="text-caption text-destructive">两次输入不一致</p>
+            )}
+            <div className="flex gap-2">
+              <Button type="submit" size="sm" className="h-8 rounded-lg"
+                      disabled={rowBusy || resetPw.length < 8 || resetPw !== resetPw2}>保存</Button>
+              <Button type="button" size="sm" variant="ghost" className="h-8 rounded-lg text-ink-3"
+                      disabled={rowBusy} onClick={() => setResetFor(null)}>取消</Button>
             </div>
           </form>
         </div>

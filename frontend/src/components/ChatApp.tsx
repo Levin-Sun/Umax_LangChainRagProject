@@ -31,6 +31,15 @@ function answerParts(answer: string, citations: Citation[], onCite: (c: Citation
 // POST 成功后按 key 就地填答案，失败按 key 摘除——提问不再等后端回包。
 interface LocalTurn { key: number; convId: number | null; question: string; images: string[]; out: ChatOut | null }
 
+// 兜底话术的三种成因必须说清：一律显示「资料里没有相关内容」会把"模型挂了"误导成"检索没命中"，
+// 于是人去重建索引、翻文档，白忙一场（真机 2026-10-09 就这么被坑了半天）。
+const DEGRADE_HINT: Record<string, string> = {
+  no_hit: "检索没有命中任何内容，以上是兜底话术——确认相关文档已入库、且问法与文档用词接近。",
+  no_model: "还没有可用的问答模型，以上是兜底话术——到「模型」页登记 chat 模型。",
+  model_error: "模型调用失败，以上是兜底话术（不是「资料里没有」）——到「模型」页核对地址与 key，"
+    + "后端日志有具体原因：docker compose logs backend",
+};
+
 export default function ChatApp({ api }: { api: Client }) {
   // 任务 7 换轨：/auth/me 就绪前不发业务请求（匿名只会处处 401）；loaded 无 me → 弹回登录页。
   const { me, loaded } = useAuth();
@@ -52,6 +61,7 @@ export default function ChatApp({ api }: { api: Client }) {
   // activeConv 仅由点击设置——useAsync deps 变化 = 用户点了某个会话 = 拉历史
   const [activeConv, setActiveConv] = useState<number | null>(null);
   const taRef = useRef<HTMLTextAreaElement>(null);
+  const logRef = useRef<HTMLDivElement>(null);
   const seq = useRef(0);
   const quota = useAsync(
     () => (ready ? call(api.GET(P.usageMe)) as Promise<QuotaOut>
@@ -67,6 +77,13 @@ export default function ChatApp({ api }: { api: Client }) {
     () => (!ready || activeConv === null ? Promise.resolve([] as MessageOut[])
       : call(api.GET(P.convMessages, { params: { path: { conv_id: activeConv } } })) as Promise<MessageOut[]>),
     [activeConv, ready]);
+
+  // 新消息（本地追加的提问/答案、拉回的历史）与"检索并生成中"都要把视口带到最下面。
+  // 声明在所有提前 return 之前：hook 不能有条件地调用。
+  useEffect(() => {
+    const el = logRef.current;
+    if (el) el.scrollTop = el.scrollHeight;
+  }, [msgs.data, turns, sending, convId]);
 
   function pickImages(files: FileList | null) {
     setImgErr(null);
@@ -166,6 +183,9 @@ export default function ChatApp({ api }: { api: Client }) {
       return [q, { id: -1001 - i, role: "assistant" as const, content: [{ type: "text" as const, text: t.out.answer }], citations: t.out.citations }];
     }),
   ];
+  // 只取"最后一轮"：新一轮还在等回包（out=null）时提示自然消失，不会残留上一轮的原因
+  const lastTurn = [...turns].reverse().find((t) => t.convId === convId);
+  const degraded = lastTurn?.out?.degraded_reason ?? null;
 
   return (
     <div className="flex h-[calc(100vh-3rem)]">
@@ -194,7 +214,7 @@ export default function ChatApp({ api }: { api: Client }) {
         </ul>
       </aside>
       <main className="flex min-w-0 flex-1 flex-col">
-        <div role="log" className="flex-1 overflow-y-auto">
+        <div role="log" ref={logRef} className="flex-1 overflow-y-auto">
           <div className="mx-auto w-full max-w-[760px] space-y-6 px-4 py-6">
             {shown.map((m, i) => m.role === "user" ? (
               <div key={`${m.id}:${i}`} className="flex justify-end">
@@ -215,6 +235,11 @@ export default function ChatApp({ api }: { api: Client }) {
               </div>
             ))}
             {sending && <p className="text-caption text-ink-3">检索并生成中…</p>}
+            {!sending && degraded && (
+              <p role="status" className="rounded-lg bg-muted px-3 py-2 text-caption text-ink-3">
+                {DEGRADE_HINT[degraded] ?? `本次回答未经过模型（${degraded}）`}
+              </p>
+            )}
             <ErrorBanner error={msgs.error ?? convs.error ?? sendErr} />
           </div>
         </div>
@@ -243,7 +268,8 @@ export default function ChatApp({ api }: { api: Client }) {
             {imgErr && <p className="px-4 pt-2 text-caption text-destructive">{imgErr}</p>}
             <textarea ref={taRef} aria-label="提问" rows={1}
                       placeholder="就知识库内容提问…" value={question}
-                      disabled={sending}
+                      // 生成期间不锁输入框：模型慢或卡住时，锁住的是"人"，而不是那次请求
+                      // （发新消息由 send() 内的 sending 守卫拦住，不需要靠禁用输入框实现）
                       onChange={(e) => { setQuestion(e.target.value); autoGrow(); }}
                       onKeyDown={(e) => {
                         if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); send(); }

@@ -325,6 +325,10 @@ class ChatOut(BaseModel):
     citations: list[CitationOut]
     cited_docs: list[str]
     usage: ChatUsageOut
+    # 兜底/降级成因（null=正常由模型作答）：no_hit=检索没命中、no_model=没有可用的 chat 模型、
+    # model_error=模型调用失败。三种情况回的是同一句未命中兜底文案，界面只能靠这个字段区分——
+    # 否则"模型挂了"会被读成"资料里没有"，人去重建索引、翻文档，白忙一场（真机 2026-10-09 踩中）。
+    degraded_reason: str | None = None
 
 
 class ConversationOut(BaseModel):

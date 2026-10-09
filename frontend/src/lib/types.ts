@@ -12,7 +12,8 @@ export type JobStatus = "queued" | "running" | "done" | "failed" | "interrupted"
 export interface JobOut { id: number; kind: string; status: JobStatus; scope: { kb_ids: number[] | null }; total: number; done: number; failed: number; error: string | null; created_by: string | null; started_at: string; finished_at: string | null }
 export interface ChunkOut { id: number; chunk_index: number; content: string; has_embedding: boolean; meta: Record<string, unknown> }
 export interface Citation { n: number; doc_name: string; chunk_id: number; excerpt: string }
-export interface ChatOut { conversation_id: number; answer: string; citations: Citation[]; cited_docs: string[]; usage: { prompt_tokens: number; completion_tokens: number } }
+// degraded_reason=null 表示正常由模型作答；no_hit/no_model/model_error 表示走了兜底话术（三者文案相同，必须靠它区分）
+export interface ChatOut { conversation_id: number; answer: string; citations: Citation[]; cited_docs: string[]; usage: { prompt_tokens: number; completion_tokens: number }; degraded_reason?: string | null }
 export interface ConversationOut { id: number; title: string; kb_ids: number[] }
 // 消息片段：与契约 MessagePartOut 逐字对齐（契约把它声明成"显式字段 + extra 放行"的容器）。
 // 索引签名保留未来新增的片段类型（文件、音频）——契约侧也是这么放行的。

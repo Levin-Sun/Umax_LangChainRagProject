@@ -81,14 +81,37 @@ it("收编⑯：库列表加载中授权保存禁用", async () => {
   expect(within(dialog).getByRole("button", { name: "保存" })).toBeDisabled();
 });
 
-it("收编⑱：重置口令不足 8 位时保存禁用并给文案", async () => {
-  renderAdmin(fakeApi({ GET: (u) => u === P.kb ? ok([]) : ok(rows), PATCH: vi.fn(() => ok(rows[1])) }));
+// 真机反馈（2026-10-09）：行内展开两个口令框会把整行撑高、表格跟着跳，改成与配额一致的弹窗。
+it("收编⑱：重置口令走弹窗，行内不长出输入框；短口令禁用保存并给文案", async () => {
+  const PATCH = vi.fn(() => ok(rows[1]));
+  renderAdmin(fakeApi({ GET: (u) => u === P.kb ? ok([]) : ok(rows), PATCH }));
+  const devRowEl = await screen.findByRole("row", { name: /dev@x\.com/ });
+  await userEvent.click(within(devRowEl).getByRole("button", { name: "重置口令" }));
+  const dialog = await screen.findByRole("dialog", { name: /重置口令 dev@x\.com/ });
+  expect(within(devRowEl).queryByLabelText("新口令")).toBeNull();   // 列表行保持等距，不被撑开
+  await userEvent.type(within(dialog).getByLabelText("新口令"), "Ab1!");
+  await userEvent.type(within(dialog).getByLabelText("确认新口令"), "Ab1!");
+  expect(within(dialog).getByText("新口令至少 8 位")).toBeInTheDocument();
+  expect(within(dialog).getByRole("button", { name: "保存" })).toBeDisabled();
+  expect(PATCH).not.toHaveBeenCalled();
+});
+
+it("重置口令：两次不一致禁用保存；一致后 PATCH 带新口令", async () => {
+  const PATCH = vi.fn(() => ok(rows[1]));
+  renderAdmin(fakeApi({ GET: (u) => u === P.kb ? ok([]) : ok(rows), PATCH }));
   const devRow = within(await screen.findByRole("row", { name: /dev@x\.com/ }));
   await userEvent.click(devRow.getByRole("button", { name: "重置口令" }));
-  await userEvent.type(devRow.getByLabelText("新口令"), "Ab1!");
-  await userEvent.type(devRow.getByLabelText("确认新口令"), "Ab1!");
-  expect(devRow.getByText("新口令至少 8 位")).toBeInTheDocument();
-  expect(devRow.getByRole("button", { name: "保存" })).toBeDisabled();
+  const dialog = await screen.findByRole("dialog", { name: /重置口令 dev@x\.com/ });
+  await userEvent.type(within(dialog).getByLabelText("新口令"), "Passw0rd-1");
+  await userEvent.type(within(dialog).getByLabelText("确认新口令"), "Passw0rd-2");
+  expect(within(dialog).getByText("两次输入不一致")).toBeInTheDocument();
+  expect(within(dialog).getByRole("button", { name: "保存" })).toBeDisabled();
+  await userEvent.clear(within(dialog).getByLabelText("确认新口令"));
+  await userEvent.type(within(dialog).getByLabelText("确认新口令"), "Passw0rd-1");
+  await userEvent.click(within(dialog).getByRole("button", { name: "保存" }));
+  await waitFor(() => expect(PATCH).toHaveBeenCalledWith(P.user, expect.objectContaining({
+    params: { path: { user_id: 2 } }, body: { password: "Passw0rd-1" },
+  })));
 });
 
 // ---- 体验反馈①②③（2026-10-07）：创建表单友好校验 + 用户删除 ----

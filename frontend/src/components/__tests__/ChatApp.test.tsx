@@ -237,6 +237,68 @@ it("历史消息里的 image part 渲染成图片", async () => {
 });
 
 // ---- 配额预警条（§C）：接近上限出提示、超限出强提示 ----
+
+// 真机反馈（2026-10-09）：① 生成期间输入框被 disabled，模型慢/卡住时人也被锁住；
+// ② 最新消息不自动滚到底；③ 兜底话术分不清"没检索到"与"模型挂了"。
+it("生成期间不锁输入框：模型还没回也能继续打字", async () => {
+  const pending = fakeApi({
+    GET: (u) => (u.includes("/auth/me") ? ok(ME)
+      : u === P.conversations ? ok(convs) : u === P.convMessages ? ok([])
+      : u === P.usageMe ? ok(QUOTA) : undefined),
+    POST: () => new Promise(() => {}),          // 永挂：模拟"模型很慢/卡住"
+  });
+  render(<AuthProvider client={pending as never}><ChatApp api={pending as never} /></AuthProvider>);
+  const box = await screen.findByLabelText("提问");
+  await userEvent.type(box, "第一问");
+  await userEvent.click(screen.getByRole("button", { name: "发送" }));
+  expect(box).not.toBeDisabled();               // 修复前 disabled={sending}
+  await userEvent.type(box, "第二问");
+  expect((box as HTMLTextAreaElement).value).toBe("第二问");
+});
+
+it("新消息与生成状态都会把消息区滚到底", async () => {
+  let resolvePost: ((v: unknown) => void) | undefined;
+  const full = fakeApi({
+    GET: (u) => (u.includes("/auth/me") ? ok(ME)
+      : u === P.conversations ? ok(convs) : u === P.convMessages ? ok([])
+      : u === P.usageMe ? ok(QUOTA) : undefined),
+    POST: () => new Promise((r) => { resolvePost = r; }),
+  });
+  render(<AuthProvider client={full as never}><ChatApp api={full as never} /></AuthProvider>);
+  await screen.findByLabelText("提问");
+  const log = screen.getByRole("log");
+  // jsdom 没有布局：自己接管 scrollHeight/scrollTop，把"有没有滚"变成可断言的事实
+  let scrolledTo = -1;
+  Object.defineProperty(log, "scrollHeight", { value: 1234, configurable: true });
+  Object.defineProperty(log, "scrollTop", {
+    get: () => scrolledTo, set: (v: number) => { scrolledTo = v; }, configurable: true,
+  });
+  await userEvent.type(screen.getByLabelText("提问"), "售后多久响应？");
+  await userEvent.click(screen.getByRole("button", { name: "发送" }));
+  expect(scrolledTo).toBe(1234);                 // 提问上屏即滚到底
+  scrolledTo = -1;
+  await act(async () => { resolvePost?.(ok(chatOut)); });
+  expect(await screen.findByText(/需24小时响应/)).toBeInTheDocument();
+  expect(scrolledTo).toBe(1234);                 // 答案到达再滚一次
+});
+
+it("走兜底话术时界面说清成因：模型失败 ≠ 资料里没有", async () => {
+  const degraded = { ...chatOut, answer: "资料里没有相关内容，无法回答。",
+                     citations: [], cited_docs: [], degraded_reason: "model_error" };
+  const full = fakeApi({
+    GET: (u) => (u.includes("/auth/me") ? ok(ME)
+      : u === P.conversations ? ok(convs) : u === P.convMessages ? ok([])
+      : u === P.usageMe ? ok(QUOTA) : undefined),
+    POST: async () => ok(degraded),
+  });
+  render(<AuthProvider client={full as never}><ChatApp api={full as never} /></AuthProvider>);
+  await screen.findByLabelText("提问");
+  await userEvent.type(screen.getByLabelText("提问"), "退货运费谁承担？");
+  await userEvent.click(screen.getByRole("button", { name: "发送" }));
+  expect(await screen.findByRole("status")).toHaveTextContent("模型调用失败");
+});
+
+
 it("接近上限显示预警条；超限显示用尽提示", async () => {
   const near = { ...QUOTA, daily_used: 90, daily_limit: 100, near_limit: true };
   const full = fakeApi({

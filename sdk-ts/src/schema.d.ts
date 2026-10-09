@@ -897,6 +897,8 @@ export interface components {
             cited_docs: string[];
             /** Conversation Id */
             conversation_id: number;
+            /** Degraded Reason */
+            degraded_reason?: string | null;
             usage: components["schemas"]["ChatUsageOut"];
         };
         /** ChatUsageOut */

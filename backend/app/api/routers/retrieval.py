@@ -86,7 +86,10 @@ def build_router(rt: Runtime) -> APIRouter:
         session.add(Message(tenant_id="default", conversation_id=conv.id, role="user",
                             content=user_parts))
 
+        degraded: str | None = None
         if not hits or rt.chat_fn is None:
+            # 兜底也要说清"为什么兜底"：检索真的空 vs 压根没有模型可用（见 ChatOut.degraded_reason）
+            degraded = "no_hit" if not hits else "no_model"
             answer, usage, citations = c["chat_miss_answer"], {"prompt_tokens": 0, "completion_tokens": 0}, []
         else:
             try:
@@ -97,6 +100,7 @@ def build_router(rt: Runtime) -> APIRouter:
                 logging.getLogger("umax").warning("chat 生成失败，转未命中兜底：%s", exc)
                 out = None
             if out is None:
+                degraded = "model_error"
                 answer, usage, citations = c["chat_miss_answer"], {"prompt_tokens": 0, "completion_tokens": 0}, []
             else:
                 answer = clean_text(out["answer"])   # 模型输出也过规范化闸（否则 NUL 直接 500）
@@ -115,7 +119,8 @@ def build_router(rt: Runtime) -> APIRouter:
                             content=[{"type": "text", "text": answer}], citations=citations))
         session.commit()
         return {"conversation_id": conv.id, "answer": answer, "citations": citations,
-                "cited_docs": parse_citations(answer, hits), "usage": usage}
+                "cited_docs": parse_citations(answer, hits), "usage": usage,
+                "degraded_reason": degraded}
 
     # ---- 会话历史：按登录者隔离（admin 也没有特权看别人的会话）----
     @router.get("/api/v1/conversations", response_model=list[ConversationOut], responses={**ERR_LOGIN_GATE})

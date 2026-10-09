@@ -168,4 +168,16 @@
   body {
     @apply bg-background text-foreground;
   }
+  /* 原生表单控件跟随主题：不加这条，深色模式下复选框还是白底黑勾、下拉框白底配浅色文字
+     （字几乎看不见）。color-scheme 让浏览器按主题渲染勾选框/下拉/滚动条/日期选择。
+     真机反馈（2026-10-09）：深色模式的多选框应当黑底白勾。 */
+  :root {
+    color-scheme: light;
+  }
+  .dark {
+    color-scheme: dark;
+  }
+  .sepia {
+    color-scheme: light;
+  }
 }
