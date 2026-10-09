@@ -2,7 +2,7 @@
 // 聊天页：左栏会话、主区消息流、引用 [n] → chips → 右侧原文抽屉（零额外请求）
 // 取数模型：只有"点击会话"才拉历史；send() 的结果存本地 turns 追加渲染——
 // 避免"新会话 send 后 refetch → 本地+远端同一答案渲染两遍"。
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -14,21 +14,42 @@ import { useAsync } from "@/lib/hooks";
 import type { ChatOut, Citation, ConversationOut, MessageOut, QuotaOut } from "@/lib/types";
 
 function answerParts(answer: string, citations: Citation[], onCite: (c: Citation) => void) {
-  return answer.split(/(\[\d+\])/g).map((seg, i) => {
+  const byN = new Map(citations.map((c) => [c.n, c]));
+  const segs = answer.split(/(\[\d+\])/g);
+  const nodes: ReactNode[] = [];
+  for (let i = 0; i < segs.length; i++) {
+    const seg = segs[i];
     const m = seg.match(/^\[(\d+)\]$/);
-    const c = m ? citations.find((x) => x.n === Number(m[1])) : undefined;
-    if (!c) return <span key={i}>{seg}</span>;
-    // 引用只留序号的小角标（DeepSeek 那种）：来源名与摘录放进悬停提示，点开右侧抽屉看原文。
-    // 之前每个角标都印一遍「[1] 文档名」——三个同源引用就把整段正文淹掉一半（真机反馈"太繁重"）。
-    return (
-      <button key={i} onClick={() => onCite(c)}
-              aria-label={`引用 ${c.n}：${c.doc_name}`}
-              title={`[${c.n}] ${c.doc_name}\n${c.excerpt}`}
+    const c = m ? byN.get(Number(m[1])) : undefined;
+    if (!c) {
+      nodes.push(<span key={i}>{seg}</span>);
+      continue;
+    }
+    // 引用只留序号的小角标：来源名与摘录放进悬停提示，点开右侧抽屉看原文。
+    // 连续的同源角标再合并成一段——同一篇文档的 [1][2][3] 各占一格会把正文切碎
+    // （真机反馈"太繁重"）。**只在紧邻且同一篇时合并**：不同来源合成一格会丢掉出处，
+    // 而 split 后相邻两个角标之间正好是空串，拿它当"紧邻"的判据。
+    const group = [c];
+    while (segs[i + 1] === "" && /^\[\d+\]$/.test(segs[i + 2] ?? "")) {
+      const nxt = byN.get(Number((segs[i + 2] ?? "").slice(1, -1)));
+      if (!nxt || nxt.doc_name !== c.doc_name) break;
+      group.push(nxt);
+      i += 2;
+    }
+    const head = group[0];
+    const label = group.length > 1 ? `${head.n}-${group[group.length - 1].n}` : String(head.n);
+    nodes.push(
+      <button key={i} onClick={() => onCite(head)}
+              aria-label={`引用 ${label}：${head.doc_name}`}
+              title={group.length > 1
+                ? `[${label}] ${head.doc_name} · 同一篇文档的 ${group.length} 段\n${head.excerpt}`
+                : `[${head.n}] ${head.doc_name}\n${head.excerpt}`}
               className="mx-0.5 inline-flex h-4.5 min-w-4.5 items-center justify-center rounded bg-muted align-middle font-mono text-caption text-ink-3 transition-colors hover:bg-accent hover:text-ink-1">
-        {c.n}
+        {label}
       </button>
     );
-  });
+  }
+  return nodes;
 }
 
 // 乐观上屏：send() 先以 out=null 的 pending turn 立即渲染提问气泡，

@@ -94,6 +94,50 @@ it("引用角标只显示序号，文档名不做可见文本", async () => {
   expect(chip).toHaveAttribute("title", expect.stringContaining("运营手册.txt"));
 });
 
+// 用户拍板选「合并同源」：连续且同一篇文档的角标并成一段（1-3），不同来源不许并（会丢出处）。
+it("连续的同源引用合并成一个角标 1-3", async () => {
+  const same = [
+    { n: 1, doc_name: "退货规则.txt", chunk_id: 11, excerpt: "7 个自然日" },
+    { n: 2, doc_name: "退货规则.txt", chunk_id: 12, excerpt: "超期走人工审核" },
+    { n: 3, doc_name: "退货规则.txt", chunk_id: 13, excerpt: "生鲜 24 小时" },
+  ];
+  const out = { ...chatOut, answer: "规则如下[1][2][3]。", citations: same, cited_docs: ["退货规则.txt"] };
+  const full = fakeApi({
+    GET: (u) => (u.includes("/auth/me") ? ok(ME)
+      : u === P.conversations ? ok(convs) : u === P.convMessages ? ok([])
+      : u === P.usageMe ? ok(QUOTA) : undefined),
+    POST: async () => ok(out),
+  });
+  render(<AuthProvider client={full as never}><ChatApp api={full as never} /></AuthProvider>);
+  await screen.findByLabelText("提问");
+  await userEvent.type(screen.getByLabelText("提问"), "退货时效");
+  await userEvent.click(screen.getByRole("button", { name: "发送" }));
+  const chip = await screen.findByRole("button", { name: "引用 1-3：退货规则.txt" });
+  expect(chip).toHaveTextContent("1-3");
+  expect(screen.getAllByRole("button", { name: /^引用 / })).toHaveLength(1);   // 三连只剩一格
+  expect(chip).toHaveAttribute("title", expect.stringContaining("同一篇文档的 3 段"));
+});
+
+it("不同来源的相邻引用不合并（出处不能丢）", async () => {
+  const mixed = [
+    { n: 1, doc_name: "售后规范.txt", chunk_id: 1, excerpt: "甲" },
+    { n: 2, doc_name: "物流说明.pdf", chunk_id: 2, excerpt: "乙" },
+  ];
+  const out = { ...chatOut, answer: "见[1][2]。", citations: mixed, cited_docs: ["售后规范.txt", "物流说明.pdf"] };
+  const full = fakeApi({
+    GET: (u) => (u.includes("/auth/me") ? ok(ME)
+      : u === P.conversations ? ok(convs) : u === P.convMessages ? ok([])
+      : u === P.usageMe ? ok(QUOTA) : undefined),
+    POST: async () => ok(out),
+  });
+  render(<AuthProvider client={full as never}><ChatApp api={full as never} /></AuthProvider>);
+  await screen.findByLabelText("提问");
+  await userEvent.type(screen.getByLabelText("提问"), "多久");
+  await userEvent.click(screen.getByRole("button", { name: "发送" }));
+  expect(await screen.findByRole("button", { name: "引用 1：售后规范.txt" })).toBeInTheDocument();
+  expect(screen.getByRole("button", { name: "引用 2：物流说明.pdf" })).toBeInTheDocument();
+});
+
 it("renders backend detail in banner when list fails", async () => {
   const api3 = fakeApi({ GET: async () => fail("知识库不存在", 404) });
   const full = withAuth(api3);
