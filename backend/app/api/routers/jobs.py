@@ -9,6 +9,7 @@
 import logging
 
 from fastapi import APIRouter, Depends, HTTPException, Request
+from sqlalchemy import or_
 from sqlalchemy.orm import Session
 
 from app.api.deps import Runtime, client_ip, get_session, require_admin_role, require_license
@@ -119,12 +120,24 @@ def build_router(rt: Runtime) -> APIRouter:
         return {"documents": len(doc_ids), "kb_ids": kb_ids, "job_id": job_id}
 
     @router.get("/api/v1/jobs", response_model=list[JobOut], responses={**ERR_GATE})
-    def list_jobs(limit: QueryInt = 20, admin: User = Depends(require_admin_role),
+    def list_jobs(limit: QueryInt = 20, kb_id: QueryInt | None = None,
+                  admin: User = Depends(require_admin_role),
                   session: Session = Depends(get_session)):
         """后台作业列表（最近在前）。**与文档列表分工**：这里回答"谁为什么发起、最后成不成"，
-        文档列表回答"每一篇跑到哪了"——两套进度必然漂移，所以只留一套真进度。"""
+        文档列表回答"每一篇跑到哪了"——两套进度必然漂移，所以只留一套真进度。
+
+        `kb_id`：只回**与该库有关**的作业——显式点名了它的（`scope.kb_ids` 含它），
+        或当时覆盖全部库的（`scope.kb_ids` 为 null）。
+        **为什么需要这个过滤**：这块面板长在"选中库"的详情里，而列表原本是全局的，于是新建的库里会
+        冒出别的库的历史作业（真机反馈："为什么我建新库也会存在"）。
+        **为什么"全部库"的作业不算越界**：它当时确实重建了这个库；隐藏掉的话，人在这个库上点了
+        「重建全部库索引」却看不到任何新作业，会以为没生效。"""
         limit = max(1, min(limit, 100))
-        return [job_json(j) for j in session.query(BackgroundJob)
-                .order_by(BackgroundJob.id.desc()).limit(limit)]
+        q = session.query(BackgroundJob)
+        if kb_id is not None:
+            # scope 是 JSONB：@> 判"数组里含这个库"；json null 走 ->> 为 SQL NULL（未限定范围＝全部库）
+            q = q.filter(or_(BackgroundJob.scope["kb_ids"].contains([kb_id]),
+                             BackgroundJob.scope["kb_ids"].astext.is_(None)))
+        return [job_json(j) for j in q.order_by(BackgroundJob.id.desc()).limit(limit)]
 
     return router

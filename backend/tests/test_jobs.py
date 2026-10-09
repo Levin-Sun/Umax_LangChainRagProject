@@ -241,3 +241,28 @@ def test_async_job_finishes_when_a_queued_document_was_deleted(engine, db, tmp_p
         job = s.get(BackgroundJob, job_id)
         assert (job.status, job.done, job.failed) == ("done", 1, 1)
         assert s.get(Document, gone_id) is None
+def test_jobs_filter_by_kb_id_keeps_all_scope_visible(engine, db, tmp_path):
+    """按库过滤：只回点名了它的 或 当时覆盖全部库的作业。
+
+    真机反馈（2026-10-09）：这块面板长在"选中库"的详情里却返回全局最近作业，于是新建的库里
+    冒出别的库的历史。过滤必须按库做（前端过滤不行——接口只回最近 N 条，某库的作业早于窗口
+    就会显示成"没有作业"）。
+    """
+    from app.models import BackgroundJob
+
+    c = _client(engine, tmp_path)
+    db.add_all([
+        BackgroundJob(tenant_id="default", kind="reindex", status="done", total=1, done=1,
+                      scope={"kb_ids": [1]}, created_by=ADMIN[0]),
+        BackgroundJob(tenant_id="default", kind="reindex", status="done", total=1, done=1,
+                      scope={"kb_ids": [2]}, created_by=ADMIN[0]),
+        # 重建全部库：scope.kb_ids 为 null——它当时确实覆盖了库 1，所以在库 1 的视图里要看得见
+        BackgroundJob(tenant_id="default", kind="reindex", status="done", total=2, done=2,
+                      scope={"kb_ids": None}, created_by=ADMIN[0]),
+    ])
+    db.commit()
+    assert [j["scope"]["kb_ids"] for j in c.get("/api/v1/jobs").json()] == [None, [2], [1]]
+    got = c.get("/api/v1/jobs", params={"kb_id": 1}).json()
+    assert [j["scope"]["kb_ids"] for j in got] == [None, [1]]
+    assert [j["id"] for j in got] == sorted((j["id"] for j in got), reverse=True)  # 仍按最近在前
+

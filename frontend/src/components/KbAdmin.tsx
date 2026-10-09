@@ -42,8 +42,11 @@ const terminal = (docs: DocOut[]) => docs.every((d) => d.status === "ready" || d
 
 // 作业的作用域文案。fail-soft：作业行形状不对时不能让整页崩（真进度在文档列表里，这里只是辅助信息）
 function jobScopeLabel(j: JobOut, kbs: KbOut[] | undefined): string {
-  if (!j.scope?.kb_ids) return "全部知识库";
-  return kbs?.find((k) => k.id === j.scope.kb_ids?.[0])?.name ?? "单库";
+  const ids = j.scope?.kb_ids;
+  if (!ids) return "全部知识库";                      // null=当时覆盖全部库
+  if (ids.length > 1) return `${ids.length} 个库`;
+  // 库被删了也要读得懂：此前回退成「单库」这种零信息量的词（真机反馈）
+  return kbs?.find((k) => k.id === ids[0])?.name ?? `已删除的库 #${ids[0]}`;
 }
 
 export default function KbAdmin({ api }: { api: Client }) {
@@ -62,8 +65,14 @@ export default function KbAdmin({ api }: { api: Client }) {
   const [actionErr, setActionErr] = useState<unknown>(null);
   const [chunks, setChunks] = useState<{ doc: DocOut; rows: ChunkOut[] } | null>(null);
   const kbs = useAsync(() => call(api.GET(P.kb)) as Promise<KbOut[]>);
-  // 作业记录：进程被杀后"跑完没有"就靠它回答（评审补的盲区）
-  const jobs = useAsync(() => call(api.GET(P.jobs)) as Promise<JobOut[]>);
+  // 作业记录：进程被杀后"跑完没有"就靠它回答（评审补的盲区）。
+  // **按选中的库过滤**：这块面板长在"选中库"的详情里，而接口原本回的是全局最近作业，
+  // 于是新建的库里会冒出别的库的历史（真机反馈："为什么我建新库也会存在"）。
+  // 过滤必须放在后端做——接口只回最近 N 条，前端过滤会把"早于窗口的作业"显示成"没有作业"。
+  const jobs = useAsync(
+    () => (kbId === null ? Promise.resolve([] as JobOut[])
+      : call(api.GET(P.jobs, { params: { query: { kb_id: kbId } } })) as Promise<JobOut[]>),
+    [kbId]);
   const docs = usePolling(
     () => (kbId === null ? Promise.resolve([] as DocOut[])
       : call(api.GET(P.kbDocs, { params: { path: { kb_id: kbId } } })) as Promise<DocOut[]>),
@@ -304,7 +313,7 @@ export default function KbAdmin({ api }: { api: Client }) {
             {(jobs.data ?? []).length > 0 && (
               <div className="space-y-1 border-t border-border pt-3">
                 <p className="text-caption text-ink-3">
-                  后台作业（回答「谁为什么发起、最后成不成」；每一篇跑到哪看上面的文档状态）
+                  后台作业 · 本库（回答「谁为什么发起、最后成不成」；每一篇跑到哪看上面的文档状态）
                 </p>
                 <ul className="space-y-0.5">
                   {(jobs.data ?? []).slice(0, 5).map((j) => (

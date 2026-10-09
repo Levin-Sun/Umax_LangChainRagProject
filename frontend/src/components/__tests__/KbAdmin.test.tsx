@@ -380,4 +380,33 @@ describe("后台作业", () => {
     expect(await screen.findByText(/作业 #9/)).toBeInTheDocument();
     expect(GET.mock.calls.filter(([u]) => u === P.jobs).length).toBeGreaterThanOrEqual(2);
   });
+
+  // 真机反馈（2026-10-09）：这块面板长在"选中库"的详情里却显示全局最近作业，
+  // 于是新建的库里冒出别的库的历史。过滤按库做（后端参数），切库要重取。
+  it("按选中的库过滤：GET /jobs 带 kb_id，切库会重取", async () => {
+    const libs = [{ id: 1, name: "库一", description: null },
+                  { id: 2, name: "库二", description: null }];
+    const GET = vi.fn((u: string, _init?: unknown) =>
+      (u === P.kb ? ok(libs) : u === P.jobs ? ok([job()]) : ok([])));
+    render(<KbAdmin api={fakeApi({ GET })} />);
+    const jobsKbId = () => {
+      const call = GET.mock.calls.filter(([u]) => u === P.jobs).at(-1);
+      return (call?.[1] as { params?: { query?: { kb_id?: number } } } | undefined)
+        ?.params?.query?.kb_id;
+    };
+    await userEvent.click(await screen.findByText("库一"));
+    await waitFor(() => expect(jobsKbId()).toBe(1));
+    await userEvent.click(screen.getByText("库二"));
+    await waitFor(() => expect(jobsKbId()).toBe(2));
+  });
+
+  it("作用域指向已删除的库时写明「已删除的库 #42」，不再是零信息量的「单库」", async () => {
+    render(<KbAdmin api={fakeApi({
+      GET: (u) => (u === P.kb ? ok([lib])
+        : u === P.jobs ? ok([job({ scope: { kb_ids: [42] } })]) : ok([])),
+    })} />);
+    await userEvent.click(await screen.findByText("运营库"));
+    const row = (await screen.findByText("#7")).closest("li") as HTMLElement;
+    expect(within(row).getByText(/已删除的库 #42 · 3\/3/)).toBeInTheDocument();
+  });
 });
