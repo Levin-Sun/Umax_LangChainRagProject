@@ -51,7 +51,8 @@ it("renders history and opens cite drawer without extra request", async () => {
   // 改为 findByText（存在性断言强度不变，仅换异步查询），expect 断言全部逐字保留。
   await userEvent.click(await screen.findByText("退货政策"));
   expect(await screen.findByText(/退货需7天响应/)).toBeInTheDocument();
-  await userEvent.click(screen.getByRole("button", { name: /\[1\] 运维手册\.md/ }));
+  // 引用角标只留序号，来源名在可访问名（与悬停提示）里——点它仍开右侧原文抽屉
+  await userEvent.click(screen.getByRole("button", { name: /引用 1：运维手册\.md/ }));
   expect(await screen.findByText("退货窗口为 7 个自然日")).toBeInTheDocument();
 });
 
@@ -69,7 +70,7 @@ it("asks question, shows inline citation chip, allows second question", async ()
   await screen.findByLabelText("提问"); // me 就绪后骨架让位于聊天界面
   await userEvent.type(screen.getByLabelText("提问"), "售后多久响应？");
   await userEvent.click(screen.getByRole("button", { name: "发送" }));
-  const chip = await screen.findByRole("button", { name: /\[1\] 运营手册\.txt/ });
+  const chip = await screen.findByRole("button", { name: /引用 1：运营手册\.txt/ });
   await userEvent.click(chip);
   expect(await screen.findByText("售后响应承诺：24小时")).toBeInTheDocument();
   expect(asked).toEqual(["售后多久响应？"]);
@@ -77,6 +78,20 @@ it("asks question, shows inline citation chip, allows second question", async ()
   await userEvent.type(screen.getByLabelText("提问"), "换货呢？");
   await userEvent.click(screen.getByRole("button", { name: "发送" }));
   expect(asked).toEqual(["售后多久响应？", "换货呢？"]);
+});
+
+// 真机反馈（2026-10-09）：引用块"太繁重"——每个角标都印一遍文档名，同源的三个引用就把正文淹了。
+// 现在只留序号，来源名进可访问名与悬停提示（可见文本里不出现），点开仍是右侧原文抽屉。
+it("引用角标只显示序号，文档名不做可见文本", async () => {
+  const full = withAuth(api);
+  render(<AuthProvider client={full}><ChatApp api={full} /></AuthProvider>);
+  await screen.findByLabelText("提问");
+  await userEvent.type(screen.getByLabelText("提问"), "售后多久响应？");
+  await userEvent.click(screen.getByRole("button", { name: "发送" }));
+  const chip = await screen.findByRole("button", { name: /引用 1：运营手册\.txt/ });
+  expect(chip).toHaveTextContent("1");
+  expect(chip.textContent).not.toContain("运营手册");
+  expect(chip).toHaveAttribute("title", expect.stringContaining("运营手册.txt"));
 });
 
 it("renders backend detail in banner when list fails", async () => {

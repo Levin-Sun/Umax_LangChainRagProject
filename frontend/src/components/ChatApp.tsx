@@ -18,10 +18,14 @@ function answerParts(answer: string, citations: Citation[], onCite: (c: Citation
     const m = seg.match(/^\[(\d+)\]$/);
     const c = m ? citations.find((x) => x.n === Number(m[1])) : undefined;
     if (!c) return <span key={i}>{seg}</span>;
+    // 引用只留序号的小角标（DeepSeek 那种）：来源名与摘录放进悬停提示，点开右侧抽屉看原文。
+    // 之前每个角标都印一遍「[1] 文档名」——三个同源引用就把整段正文淹掉一半（真机反馈"太繁重"）。
     return (
-      <button key={i} className="mx-0.5 rounded px-1 font-mono text-caption text-ink-3 transition-colors hover:bg-accent hover:underline"
-              onClick={() => onCite(c)} title={c.excerpt}>
-        {`[${c.n}] ${c.doc_name}`}
+      <button key={i} onClick={() => onCite(c)}
+              aria-label={`引用 ${c.n}：${c.doc_name}`}
+              title={`[${c.n}] ${c.doc_name}\n${c.excerpt}`}
+              className="mx-0.5 inline-flex h-4.5 min-w-4.5 items-center justify-center rounded bg-muted align-middle font-mono text-caption text-ink-3 transition-colors hover:bg-accent hover:text-ink-1">
+        {c.n}
       </button>
     );
   });
