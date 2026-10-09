@@ -92,6 +92,8 @@ it("JSX 文本里不出现裸引号或 Markdown 星号", () => {
 // 所以 select/option 必须显式上主题色，这条不许被删回"只靠 color-scheme"。
 it("原生下拉在深色下显式上主题色（不能只靠 color-scheme）", () => {
   const css = fs.readFileSync(path.resolve(__dirname, "..", "app", "globals.css"), "utf8");
+  // 关掉原生外观才有圆角：系统外观会吞掉 rounded-*（"方方正正、不像一套"的真因）
+  expect(css).toMatch(/select\s*\{[^}]*appearance:\s*none/);
   expect(css).toMatch(/select\s+option\s*\{[^}]*background-color:\s*var\(--card\)/);
   expect(css).toMatch(/select\s+option\s*\{[^}]*color:\s*var\(--ink-1\)/);
   expect(css).toMatch(/\.dark\s*\{\s*color-scheme:\s*dark/);
