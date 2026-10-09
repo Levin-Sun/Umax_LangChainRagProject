@@ -513,6 +513,57 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/model-bundles": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Create Bundle
+         * @description 一键配齐：按内置标本把这家厂商的能力一次登记成多条配置，客户只提供一把 key。
+         *
+         *     三个刻意的取舍：
+         *     1. **幂等**：同（场景+厂商+地址+模型名）已存在就更新 key 并重新启用，不再插一条——
+         *        客户反复点不该堆出十份重复配置，"换 key 重新配"也因此只有一条路径。
+         *     2. **登记即试调**：逐能力发一次最小真实请求，把厂商的原始报错回给界面。标本会过期，
+         *        错误必须当场可见，而不是等入库全线 failed 才回头查（真机踩过）。
+         *     3. **维度闸**：embedding 维度必须等于库里的 VECTOR(n)，不等直接 400——否则会在
+         *        写库那一步炸（真机踩过 text-embedding-v2 = 1536）。
+         */
+        post: operations["create_bundle_api_v1_model_bundles_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/model-catalog": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Model Catalog
+         * @description 内置厂商标本：界面据此做「选厂商 → 一键配齐」，客户不必知道四类模型各自的端点与模型名。
+         *
+         *     标本是**数据**（app/data/model_catalog.json），厂商上新/改名只改这份文件；
+         *     `verified=false` 的厂商界面会如实标注"未实测"，提醒以厂商文档为准。
+         */
+        get: operations["model_catalog_api_v1_model_catalog_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/models": {
         parameters: {
             query?: never;
@@ -875,6 +926,109 @@ export interface components {
             brand_name?: string | null;
             /** Logo */
             logo?: string | null;
+        };
+        /** BundleIn */
+        BundleIn: {
+            /** Api Key */
+            api_key: string;
+            /**
+             * Capabilities
+             * @default []
+             */
+            capabilities: string[];
+            /**
+             * Test
+             * @default true
+             */
+            test: boolean;
+            /** Vendor Id */
+            vendor_id: string;
+        };
+        /** BundleItemOut */
+        BundleItemOut: {
+            /** Action */
+            action: string;
+            /** Base Url */
+            base_url: string;
+            /** Capability */
+            capability: string;
+            /** Detail */
+            detail?: string | null;
+            /** Model */
+            model: string;
+            /** Ok */
+            ok?: boolean | null;
+            /** Scenario */
+            scenario: string;
+        };
+        /** BundleOut */
+        BundleOut: {
+            /** Items */
+            items: components["schemas"]["BundleItemOut"][];
+            /** Vendor */
+            vendor: string;
+        };
+        /** CatalogCapabilityOut */
+        CatalogCapabilityOut: {
+            /** Dim */
+            dim?: number | null;
+            /** Key */
+            key: string;
+            /** Model */
+            model: string;
+            /** Note */
+            note?: string | null;
+            /** Profile */
+            profile: string;
+            /** Scenario */
+            scenario: string;
+        };
+        /** CatalogProfileOut */
+        CatalogProfileOut: {
+            /** Base Url */
+            base_url: string;
+            /** Hint */
+            hint?: string | null;
+            /** Id */
+            id: string;
+            /** Name */
+            name: string;
+        };
+        /** CatalogVendorOut */
+        CatalogVendorOut: {
+            /**
+             * Aliases
+             * @default []
+             */
+            aliases: string[];
+            /**
+             * Capabilities
+             * @default []
+             */
+            capabilities: components["schemas"]["CatalogCapabilityOut"][];
+            /** Id */
+            id: string;
+            /** Name */
+            name: string;
+            /** Note */
+            note?: string | null;
+            /**
+             * Pinyin
+             * @default []
+             */
+            pinyin: string[];
+            /**
+             * Profiles
+             * @default []
+             */
+            profiles: components["schemas"]["CatalogProfileOut"][];
+            /**
+             * Verified
+             * @default false
+             */
+            verified: boolean;
+            /** Verified At */
+            verified_at?: string | null;
         };
         /** ChangePasswordIn */
         ChangePasswordIn: {
@@ -1512,6 +1666,23 @@ export interface components {
             type: string;
         } & {
             [key: string]: unknown;
+        };
+        /** ModelCatalogOut */
+        ModelCatalogOut: {
+            /** Capability Labels */
+            capability_labels: {
+                [key: string]: string;
+            };
+            /** Capability Miss */
+            capability_miss: {
+                [key: string]: string;
+            };
+            /** Catalog Version */
+            catalog_version: string;
+            /** Updated At */
+            updated_at: string;
+            /** Vendors */
+            vendors: components["schemas"]["CatalogVendorOut"][];
         };
         /** ModelIn */
         ModelIn: {
@@ -4132,6 +4303,131 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["LicenseOut"];
+                };
+            };
+            /** @description 需要登录 */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOut"];
+                };
+            };
+            /** @description 需要管理员权限 */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOut"];
+                };
+            };
+            /** @description 首次登录必须修改初始口令 */
+            428: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOut"];
+                };
+            };
+        };
+    };
+    create_bundle_api_v1_model_bundles_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["BundleIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BundleOut"];
+                };
+            };
+            /** @description 厂商不合法，或该厂商没有你勾选的能力 */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOut"];
+                };
+            };
+            /** @description 需要登录 */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOut"];
+                };
+            };
+            /** @description 需要管理员权限 */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+            /** @description 首次登录必须修改初始口令 */
+            428: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOut"];
+                };
+            };
+            /** @description 未配置 GATEWAY_SECRET */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOut"];
+                };
+            };
+        };
+    };
+    model_catalog_api_v1_model_catalog_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ModelCatalogOut"];
                 };
             };
             /** @description 需要登录 */

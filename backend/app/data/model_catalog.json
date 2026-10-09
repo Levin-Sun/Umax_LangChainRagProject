@@ -1,0 +1,102 @@
+{
+  "catalog_version": "2026.10.10",
+  "updated_at": "2026-10-10",
+  "capability_labels": {
+    "chat": "对话问答",
+    "embedding": "语义检索",
+    "vision": "看图提问",
+    "rerank": "结果精排"
+  },
+  "capability_miss": {
+    "chat": "只能靠字面检索，答不出完整回答",
+    "embedding": "文档只能按字面搜，同义不同词问不出来",
+    "vision": "图片被忽略，只按文字回答（可选）",
+    "rerank": "少一道精排，答案略逊（可选）"
+  },
+  "vendors": [
+    {
+      "id": "bailian",
+      "name": "阿里百炼",
+      "aliases": ["bailian", "百炼", "dashscope", "通义", "千问", "qwen", "阿里云"],
+      "pinyin": ["alibailian", "abl", "bailian", "tongyi", "qianwen"],
+      "verified": true,
+      "verified_at": "2026-10-10",
+      "profiles": [
+        {
+          "id": "metered",
+          "name": "按量计费",
+          "base_url": "https://dashscope.aliyuncs.com/compatible-mode/v1"
+        },
+        {
+          "id": "native",
+          "name": "原生端点（精排专用）",
+          "base_url": "https://dashscope.aliyuncs.com/api/v1",
+          "hint": "精排不走兼容模式，必须用这个地址"
+        }
+      ],
+      "capabilities": [
+        {"key": "chat", "scenario": "chat", "model": "qwen-plus", "profile": "metered"},
+        {"key": "embedding", "scenario": "embedding", "model": "text-embedding-v4", "profile": "metered", "dim": 1024},
+        {"key": "vision", "scenario": "vision", "model": "qwen-vl-max", "profile": "metered"},
+        {"key": "rerank", "scenario": "rerank", "model": "qwen3.7-text-rerank", "profile": "native"}
+      ]
+    },
+    {
+      "id": "stepfun",
+      "name": "阶越星辰",
+      "aliases": ["stepfun", "step", "阶越", "阶跃", "跃星辰"],
+      "pinyin": ["jieyuexingchen", "jyx", "jieyue", "jystep"],
+      "verified": true,
+      "verified_at": "2026-10-10",
+      "profiles": [
+        {"id": "metered", "name": "按量计费", "base_url": "https://api.stepfun.com/v1"},
+        {
+          "id": "plan",
+          "name": "订阅套餐（Step Plan）",
+          "base_url": "https://api.stepfun.com/step_plan/v1",
+          "hint": "订阅制：需先在该厂商开通套餐，否则会报 no active step plan subscription"
+        }
+      ],
+      "capabilities": [
+        {"key": "chat", "scenario": "chat", "model": "step-3.7-flash", "profile": "metered"},
+        {"key": "vision", "scenario": "vision", "model": "step-3.7-flash", "profile": "metered"}
+      ],
+      "note": "模型名必须逐字照抄：step-3.7-flash（不是 Step 3.7 Flash）"
+    },
+    {
+      "id": "deepseek",
+      "name": "DeepSeek",
+      "aliases": ["deepseek", "深度求索", "ds"],
+      "pinyin": ["shenqiusuo", "sdu", "deepseek"],
+      "verified": false,
+      "profiles": [{"id": "metered", "name": "按量计费", "base_url": "https://api.deepseek.com/v1"}],
+      "capabilities": [
+        {"key": "chat", "scenario": "chat", "model": "deepseek-chat", "profile": "metered"}
+      ],
+      "note": "只提供对话，不提供向量（embedding）——入库还需要再选一家有向量模型的厂商"
+    },
+    {
+      "id": "siliconflow",
+      "name": "硅基流动",
+      "aliases": ["siliconflow", "硅基", "sf"],
+      "pinyin": ["guijiliudong", "gjld", "guiji"],
+      "verified": false,
+      "profiles": [{"id": "metered", "name": "按量计费", "base_url": "https://api.siliconflow.cn/v1"}],
+      "capabilities": [
+        {"key": "chat", "scenario": "chat", "model": "Qwen/Qwen3-8B", "profile": "metered"},
+        {"key": "embedding", "scenario": "embedding", "model": "BAAI/bge-m3", "profile": "metered", "dim": 1024},
+        {"key": "rerank", "scenario": "rerank", "model": "BAAI/bge-reranker-v2-m3", "profile": "metered"}
+      ]
+    },
+    {
+      "id": "self",
+      "name": "自建 / 本地部署",
+      "aliases": ["ollama", "vllm", "tei", "自建", "本地", "内网"],
+      "pinyin": ["zijian", "zj", "bendi", "neiwang"],
+      "verified": false,
+      "profiles": [{"id": "custom", "name": "自建服务", "base_url": ""}],
+      "capabilities": [],
+      "note": "没有内置清单：请用下方「高级：手动登记」填地址与模型名"
+    }
+  ]
+}

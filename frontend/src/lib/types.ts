@@ -20,6 +20,15 @@ export interface ConversationOut { id: number; title: string; kb_ids: number[] }
 export interface MessagePart { type: string; text?: string | null; image_url?: { url: string } | null; [key: string]: unknown }
 export interface MessageOut { id: number; role: "user" | "assistant" | "system"; content: MessagePart[]; citations: Citation[] | null }
 export interface ModelOut { id: number; scenario: "chat" | "embedding" | "rerank" | "vision"; provider: string; base_url: string; model_name: string; capabilities: Record<string, unknown>; is_default: boolean; fallback_rank: number; enabled: boolean; api_key_masked: string }
+// 内置厂商标本（GET /model-catalog）：界面据此做「选厂商 → 一键配齐」，客户不必知道
+// 四类模型各自的端点与模型名。capabilities 里的 key 是"能力"（用途），scenario 是系统内部路由键。
+export interface CatalogProfile { id: string; name: string; base_url: string; hint?: string | null }
+export interface CatalogCapability { key: string; scenario: string; model: string; profile: string; dim?: number | null; note?: string | null }
+export interface CatalogVendor { id: string; name: string; aliases: string[]; pinyin: string[]; verified: boolean; verified_at?: string | null; profiles: CatalogProfile[]; capabilities: CatalogCapability[]; note?: string | null }
+export interface ModelCatalog { catalog_version: string; updated_at: string; capability_labels: Record<string, string>; capability_miss: Record<string, string>; vendors: CatalogVendor[] }
+// 一键配齐的结果：action=created/updated（幂等，反复点不会堆重复）；ok=试调结果（null=未试调）
+export interface BundleItem { capability: string; scenario: string; model: string; base_url: string; action: string; ok: boolean | null; detail: string | null }
+export interface BundleOut { vendor: string; items: BundleItem[] }
 export interface UsageOut { scenario: string; model: string; calls: number; prompt_tokens: number; completion_tokens: number }
 // 登录态唯一真相源（GET /auth/me）：kb_ids null=admin 隐式全库，数组=member 库级授权；
 // must_change_password=true 时全站被 428 门闸拦下，前端弹强改密框（首登/管理员重置口令后）

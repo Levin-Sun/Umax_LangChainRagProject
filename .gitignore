@@ -25,6 +25,10 @@ dist/
 data/
 uploads/
 logs/
+# 例外：随代码发布的**内置数据**要进版本库（厂商标本是产品知识，不是客户数据）。
+# 不显式放行的话，新机器 clone 下来会缺这份文件——一键配齐直接失效（CI 也会红）。
+!backend/app/data/
+!backend/app/data/**
 
 # 测试运行产物（hypothesis/schemathesis 反例库缓存）
 .hypothesis/

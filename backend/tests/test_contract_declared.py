@@ -32,6 +32,10 @@ _EXPECTED_BASE = {
     ("/api/v1/models", "post"): {"400", "401", "403", "503"},
     ("/api/v1/models/{model_id}", "patch"): {"400", "401", "403", "404", "503"},
     ("/api/v1/models/{model_id}", "delete"): {"401", "403", "503"},
+    # 厂商标本（一键配齐的依据）：admin 面只读，无写操作
+    ("/api/v1/model-catalog", "get"): {"401", "403"},
+    # 一键配齐：admin 面 + 授权门闸；400=厂商/能力不合法或维度不匹配，503=未配主密钥
+    ("/api/v1/model-bundles", "post"): {"400", "401", "403", "503"},
     ("/api/v1/usage/summary", "get"): {"401", "403"},
     ("/api/v1/auth/login", "post"): {"401", "429"},
     ("/api/v1/auth/logout", "post"): {"401"},

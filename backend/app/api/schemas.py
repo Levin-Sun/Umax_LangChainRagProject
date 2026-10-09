@@ -201,6 +201,65 @@ class ModelPatchIn(BaseModel):
     enabled: StrictBool | None = None
 
 
+# ---- 内置厂商标本 + 一键配齐（客户不该被迫回答厂商实现细节）----
+class CatalogProfileOut(BaseModel):
+    id: str
+    name: str
+    base_url: str
+    hint: str | None = None
+
+
+class CatalogCapabilityOut(BaseModel):
+    key: str                # 能力（给客户看的用途）：chat/embedding/vision/rerank
+    scenario: str           # 落库时的场景（系统内部的路由键）
+    model: str
+    profile: str
+    dim: JsonInt | None = None
+    note: str | None = None
+
+
+class CatalogVendorOut(BaseModel):
+    id: str
+    name: str
+    aliases: list[str] = []
+    pinyin: list[str] = []
+    verified: bool = False
+    verified_at: str | None = None
+    profiles: list[CatalogProfileOut] = []
+    capabilities: list[CatalogCapabilityOut] = []
+    note: str | None = None
+
+
+class ModelCatalogOut(BaseModel):
+    catalog_version: str
+    updated_at: str
+    capability_labels: dict[str, str]
+    capability_miss: dict[str, str]
+    vendors: list[CatalogVendorOut]
+
+
+class BundleIn(BaseModel):
+    vendor_id: str = Field(max_length=32)
+    api_key: Utf8Str
+    capabilities: list[str] = []        # 勾选要启用的能力；空＝该厂商全部能力
+    test: StrictBool = True             # 登记后各试调一次，把真实原因回给界面
+
+
+class BundleItemOut(BaseModel):
+    capability: str
+    scenario: str
+    model: str
+    base_url: str
+    action: str                         # created / updated（重复点不会堆出多份配置）
+    ok: bool | None = None              # 试调结果：None=没试（test=False 或该能力未接线）
+    detail: str | None = None
+
+
+class BundleOut(BaseModel):
+    vendor: str
+    items: list[BundleItemOut]
+
+
 class LoginIn(BaseModel):          # 邮箱+口令登录（RBAC spec §2）
     email: Utf8Str = Field(max_length=255)
     password: Utf8Str = Field(max_length=256)
