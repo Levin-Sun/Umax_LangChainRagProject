@@ -213,7 +213,7 @@ export default function ModelsAdmin({ api }: { api: Client }) {
       </section>
 
       <section className="space-y-2 rounded-xl border border-border bg-card px-6 py-5 shadow-sm">
-        <h3 className="text-h2 font-semibold">现在能做什么</h3>
+        <h3 className="text-h2 font-semibold">模型能力状态</h3>
         <p className="text-caption text-ink-3">状态取自当前配置；缺哪一项，右侧直接说清代价。</p>
         <div className="overflow-x-auto">
         <table className="w-full text-body text-ink-2">
@@ -275,7 +275,7 @@ export default function ModelsAdmin({ api }: { api: Client }) {
         </summary>
       <form className="mt-4 max-w-md space-y-3"
             onSubmit={(e) => { e.preventDefault(); register(); }}>
-        <h3 className="text-h2 font-semibold">登记模型</h3>
+        <h3 className="text-h2 font-semibold">手动登记模型</h3>
         <p className="text-caption text-ink-3">
           四个场景各自的用处：chat=问答生成；embedding=文档与问题的向量化；rerank=检索结果精排
           （登记后检索多做一道精排，不登记就直接用 RRF 融合结果，问答不受影响）；vision=传图提问与

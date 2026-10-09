@@ -6,51 +6,13 @@ import { useEffect, useRef, useState, type ReactNode } from "react";
 import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { AnswerBody } from "@/components/AnswerBody";
 import { ErrorBanner } from "@/components/ErrorBanner";
 import { call, callVoid, type Client } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 import { P } from "@/lib/paths";
 import { useAsync } from "@/lib/hooks";
 import type { ChatOut, Citation, ConversationOut, MessageOut, QuotaOut } from "@/lib/types";
-
-function answerParts(answer: string, citations: Citation[], onCite: (c: Citation) => void) {
-  const byN = new Map(citations.map((c) => [c.n, c]));
-  const segs = answer.split(/(\[\d+\])/g);
-  const nodes: ReactNode[] = [];
-  for (let i = 0; i < segs.length; i++) {
-    const seg = segs[i];
-    const m = seg.match(/^\[(\d+)\]$/);
-    const c = m ? byN.get(Number(m[1])) : undefined;
-    if (!c) {
-      nodes.push(<span key={i}>{seg}</span>);
-      continue;
-    }
-    // 引用只留序号的小角标：来源名与摘录放进悬停提示，点开右侧抽屉看原文。
-    // 连续的同源角标再合并成一段——同一篇文档的 [1][2][3] 各占一格会把正文切碎
-    // （真机反馈"太繁重"）。**只在紧邻且同一篇时合并**：不同来源合成一格会丢掉出处，
-    // 而 split 后相邻两个角标之间正好是空串，拿它当"紧邻"的判据。
-    const group = [c];
-    while (segs[i + 1] === "" && /^\[\d+\]$/.test(segs[i + 2] ?? "")) {
-      const nxt = byN.get(Number((segs[i + 2] ?? "").slice(1, -1)));
-      if (!nxt || nxt.doc_name !== c.doc_name) break;
-      group.push(nxt);
-      i += 2;
-    }
-    const head = group[0];
-    const label = group.length > 1 ? `${head.n}-${group[group.length - 1].n}` : String(head.n);
-    nodes.push(
-      <button key={i} onClick={() => onCite(head)}
-              aria-label={`引用 ${label}：${head.doc_name}`}
-              title={group.length > 1
-                ? `[${label}] ${head.doc_name} · 同一篇文档的 ${group.length} 段\n${head.excerpt}`
-                : `[${head.n}] ${head.doc_name}\n${head.excerpt}`}
-              className="mx-0.5 inline-flex h-4.5 min-w-4.5 items-center justify-center rounded bg-muted align-middle font-mono text-caption text-ink-3 transition-colors hover:bg-accent hover:text-ink-1">
-        {label}
-      </button>
-    );
-  }
-  return nodes;
-}
 
 // 乐观上屏：send() 先以 out=null 的 pending turn 立即渲染提问气泡，
 // POST 成功后按 key 就地填答案，失败按 key 摘除——提问不再等后端回包。
@@ -251,11 +213,13 @@ export default function ChatApp({ api }: { api: Client }) {
                 </div>
               </div>
             ) : (
-              <div key={`${m.id}:${i}`} className="max-w-full text-body text-ink-2">
+              <div key={`${m.id}:${i}`} className="max-w-full space-y-2 text-body text-ink-2">
                 {m.content.map((p, j) => p.type === "text" && (
-                  <p key={j} className="mb-2 last:mb-0">{m.role === "assistant" && m.citations
-                    ? answerParts(p.text ?? "", m.citations, setCite)
-                    : p.text}</p>
+                  m.role === "assistant" && m.citations
+                    // 助手回答交给排版组件：模型输出的 Markdown 子集（粗体/列表/标题/代码）要渲染出来，
+                    // 并保留 [n] 引用角标与"合并同源"的行为
+                    ? <AnswerBody key={j} text={p.text ?? ""} citations={m.citations} onCite={setCite} />
+                    : <p key={j} className="whitespace-pre-wrap">{p.text}</p>
                 ))}
               </div>
             ))}

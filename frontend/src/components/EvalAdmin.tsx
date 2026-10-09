@@ -328,7 +328,7 @@ export default function EvalAdmin({ api }: { api: Client }) {
           )}
 
           <div className="space-y-2">
-            <h3 className="text-h3 font-medium text-ink-2">历史</h3>
+            <h3 className="text-h3 font-medium text-ink-2">历史评测记录</h3>
             {list.length === 0 && (
               <p className="rounded-xl border border-border bg-card px-6 py-4 text-body text-ink-3">
                 还没有评测记录。点上面的「开始评测」跑第一轮——它会成为后续所有「变准了没有」的基准。
