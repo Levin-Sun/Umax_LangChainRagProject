@@ -1,4 +1,4 @@
-import { render, screen } from "@testing-library/react";
+import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import ModelsAdmin from "@/components/ModelsAdmin";
 import { P } from "@/lib/paths";
@@ -50,7 +50,8 @@ const CATALOG: ModelCatalog = {
     {
       id: "bailian", name: "阿里百炼", aliases: ["百炼", "dashscope"], pinyin: ["abl", "alibailian"],
       verified: true, verified_at: "2026-10-10",
-      profiles: [{ id: "metered", name: "按量计费", base_url: "https://ds/compatible-mode/v1" }],
+      profiles: [{ id: "metered", name: "按量计费", base_url: "https://ds/compatible-mode/v1" },
+                 { id: "native", name: "原生端点（精排专用）", base_url: "https://ds/api/v1" }],
       capabilities: [
         { key: "chat", scenario: "chat", model: "qwen-plus", profile: "metered" },
         { key: "embedding", scenario: "embedding", model: "text-embedding-v4", profile: "metered", dim: 1024 },
@@ -119,6 +120,66 @@ it("能力矩阵：已配的显示模型名，未配的说清代价", async () =
   expect(await screen.findByText("已配 text-embedding-v4")).toBeInTheDocument();
   expect(screen.getAllByText("未配置").length).toBeGreaterThan(0);
   expect(screen.getByText(/答不出完整回答/)).toBeInTheDocument();
+});
+
+// 用户反馈：列表没有厂商列，按厂商找模型费劲；同一个厂商还有多条档案（兼容模式 / 原生端点）。
+it("列表显示厂商与接入档案，便于按厂商找模型", async () => {
+  const rows: ModelOut[] = [
+    { ...m, provider: "阿里百炼", base_url: "https://ds/compatible-mode/v1", model_name: "qwen-plus" },
+    { ...m, id: 9, scenario: "rerank", provider: "阿里百炼", base_url: "https://ds/api/v1",
+      model_name: "qwen3.7-text-rerank" },
+  ];
+  const api = fakeApi({
+    GET: (u: string) => (u === P.modelCatalog ? ok(CATALOG) : u === P.models ? ok(rows) : undefined),
+  });
+  render(<ModelsAdmin api={api} />);
+  // 限定在"模型配置列表"里找：能力矩阵那张表也会出现模型名，不限定会撞行
+  const listTable = within(await screen.findByRole("table", { name: "模型配置列表" }));
+  const rerankRow = await listTable.findByRole("row", { name: /qwen3\.7-text-rerank/ });
+  expect(within(rerankRow).getByText("阿里百炼")).toBeInTheDocument();
+  // 档案名来自标本反查：光有厂商名分不清"精排走的是原生端点"
+  expect(within(rerankRow).getByText("原生端点（精排专用）")).toBeInTheDocument();
+});
+
+// 用户反馈：需要一个"修改"入口（换 key / 换模型）；否则改 key 只能删了重登，那一瞬该能力没有模型可用。
+it("编辑模型：改模型名时留空密钥 → PATCH 不带 api_key", async () => {
+  const PATCH = vi.fn((..._a: unknown[]) => ok(m));
+  const api = fakeApi({
+    GET: (u: string) => (u === P.modelCatalog ? ok(CATALOG) : u === P.models ? ok([m]) : undefined),
+    PATCH,
+  });
+  render(<ModelsAdmin api={api} />);
+  const listTable = within(await screen.findByRole("table", { name: "模型配置列表" }));
+  const row = await listTable.findByRole("row", { name: /qwen3\.7-max/ });
+  await userEvent.click(within(row).getByRole("button", { name: "编辑" }));
+  const dialog = await screen.findByRole("dialog", { name: /编辑模型 qwen3\.7-max/ });
+  await userEvent.clear(within(dialog).getByLabelText("模型名"));
+  await userEvent.type(within(dialog).getByLabelText("模型名"), "qwen-plus");
+  await userEvent.click(within(dialog).getByRole("button", { name: "保存" }));
+  await waitFor(() => expect(PATCH).toHaveBeenCalledWith(P.model, expect.objectContaining({
+    params: { path: { model_id: 3 } },
+    body: expect.objectContaining({ model_name: "qwen-plus", scenario: "chat" }),
+  })));
+  const body = (PATCH.mock.calls[0][1] as { body: Record<string, unknown> }).body;
+  expect(body).not.toHaveProperty("api_key");     // 留空＝不修改（库里只有密文，打码值不能回写）
+});
+
+it("编辑模型：填了密钥才带上 api_key", async () => {
+  const PATCH = vi.fn((..._a: unknown[]) => ok(m));
+  const api = fakeApi({
+    GET: (u: string) => (u === P.modelCatalog ? ok(CATALOG) : u === P.models ? ok([m]) : undefined),
+    PATCH,
+  });
+  render(<ModelsAdmin api={api} />);
+  const listTable = within(await screen.findByRole("table", { name: "模型配置列表" }));
+  const row = await listTable.findByRole("row", { name: /qwen3\.7-max/ });
+  await userEvent.click(within(row).getByRole("button", { name: "编辑" }));
+  const dialog = await screen.findByRole("dialog", { name: /编辑模型 qwen3\.7-max/ });
+  await userEvent.type(within(dialog).getByLabelText("密钥（留空不改）"), "sk-new");
+  await userEvent.click(within(dialog).getByRole("button", { name: "保存" }));
+  await waitFor(() => expect(PATCH).toHaveBeenCalledWith(P.model, expect.objectContaining({
+    body: expect.objectContaining({ api_key: "sk-new" }),
+  })));
 });
 
 it("renders 503 detail from backend (gateway secret missing)", async () => {

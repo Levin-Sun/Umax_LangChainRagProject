@@ -79,6 +79,53 @@ export default function ModelsAdmin({ api }: { api: Client }) {
     return hit ? { configured: true, model: hit.model_name } : { configured: false, model: "" };
   }
 
+  /** 接入档案名（按量计费 / 原生端点…）：用（厂商 + 地址）从标本里反查。
+   *  同一个厂商会有多行，光看厂商名分不清是哪条档案。 */
+  function profileLabel(m: ModelOut): string {
+    const v = vendors.find((x) => x.name === m.provider);
+    return v?.profiles.find((p) => p.base_url === m.base_url)?.name ?? "";
+  }
+
+  // ---- 编辑已有配置（改 key / 换模型 / 调优先级）----
+  // 没有它，改一个 key 只能"删了重登"——那一瞬间该能力就没有模型可用了。
+  // 密钥留空＝不修改：库里只有密文、界面只有打码，所以不能拿打码值回写。
+  const [editFor, setEditFor] = useState<ModelOut | null>(null);
+  const [editForm, setEditForm] = useState({ scenario: "chat", provider: "", base_url: "",
+                                            model_name: "", api_key: "", fallback_rank: 0, enabled: true });
+
+  function openEdit(m: ModelOut) {
+    setRowErr(null);
+    setEditFor(m);
+    setEditForm({ scenario: m.scenario, provider: m.provider, base_url: m.base_url,
+                  model_name: m.model_name, api_key: "", fallback_rank: m.fallback_rank,
+                  enabled: m.enabled });
+  }
+
+  async function saveEdit() {
+    if (!editFor || rowBusy) return;
+    if (!editForm.provider.trim() || !editForm.base_url.trim() || !editForm.model_name.trim()) {
+      setRowErr(new Error("厂商、接口地址、模型名均不能为空"));
+      return;
+    }
+    setRowBusy(true);
+    setRowErr(null);
+    try {
+      const body: Record<string, unknown> = {
+        scenario: editForm.scenario, provider: editForm.provider.trim(),
+        base_url: editForm.base_url.trim(), model_name: editForm.model_name.trim(),
+        fallback_rank: editForm.fallback_rank, enabled: editForm.enabled,
+      };
+      if (editForm.api_key.trim()) body.api_key = editForm.api_key.trim();
+      await call(api.PATCH(P.model, { params: { path: { model_id: editFor.id } }, body }));
+      setEditFor(null);
+      list.reload();
+    } catch (e) {
+      setRowErr(e);
+    } finally {
+      setRowBusy(false);
+    }
+  }
+
   async function register() {
     for (const k of ["provider", "base_url", "api_key", "model_name"] as const) {
       if (!String(form[k]).trim()) {
@@ -216,7 +263,7 @@ export default function ModelsAdmin({ api }: { api: Client }) {
         <h3 className="text-h2 font-semibold">模型能力状态</h3>
         <p className="text-caption text-ink-3">状态取自当前配置；缺哪一项，右侧直接说清代价。</p>
         <div className="overflow-x-auto">
-        <table className="w-full text-body text-ink-2">
+        <table aria-label="模型能力状态" className="w-full text-body text-ink-2">
           <thead><tr className="border-b border-border text-left text-caption font-normal text-ink-3">
             <th className="py-2 pr-3 font-normal">用途</th>
             <th className="py-2 pr-3 font-normal">状态</th>
@@ -242,20 +289,29 @@ export default function ModelsAdmin({ api }: { api: Client }) {
       </section>
 
       <div className="overflow-x-auto rounded-xl border border-border bg-card shadow-sm">
-        <table className="w-full text-body text-ink-2">
+        <table aria-label="模型配置列表" className="w-full text-body text-ink-2">
           <thead><tr className="border-b border-border bg-muted/60 text-left text-h3 font-medium text-ink-2">
-            <th className="px-4 py-2.5 font-medium">场景</th><th className="py-2.5 font-medium">模型</th>
+            <th className="px-4 py-2.5 font-medium">场景</th><th className="py-2.5 font-medium">厂商</th>
+            <th className="py-2.5 font-medium">模型</th>
             <th className="py-2.5 font-medium">API Key</th><th className="py-2.5 font-medium">fallback</th>
             <th className="py-2.5 pr-4 font-medium">操作</th></tr></thead>
           <tbody>
             {(list.data ?? []).map((m) => (
               <tr key={m.id} className="border-b border-border last:border-0">
                 <td className="px-4 py-2.5"><Badge variant="secondary" className="rounded-full font-normal">{m.scenario}</Badge></td>
-                <td>{m.model_name}{m.is_default && <span className="ml-1 text-caption font-medium text-ink-1">默认</span>}
+                {/* 厂商 + 接入档案名：同一个厂商常有多行（兼容模式 / 原生端点），
+                    只显示厂商名仍分不清是哪条档案——而"精排必须走原生端点"正是靠这一列看出来的。 */}
+                <td className="py-2.5" title={m.base_url}>
+                  <div>{m.provider}</div>
+                  {profileLabel(m) && <div className="text-caption text-ink-3">{profileLabel(m)}</div>}
+                </td>
+                <td className="py-2.5">{m.model_name}{m.is_default && <span className="ml-1 text-caption font-medium text-ink-1">默认</span>}
                   {!m.enabled && <span className="ml-1 text-caption text-ink-3">（停用）</span>}</td>
-                <td className="font-mono text-caption">{m.api_key_masked}</td>
-                <td className="font-medium">#{m.fallback_rank}</td>
-                <td className="space-x-1.5 pr-4">
+                <td className="py-2.5 font-mono text-caption">{m.api_key_masked}</td>
+                <td className="py-2.5 font-medium">#{m.fallback_rank}</td>
+                <td className="space-x-1.5 py-2.5 pr-4">
+                  <Button size="sm" variant="outline" className="h-7 rounded-lg" disabled={rowBusy}
+                          onClick={() => openEdit(m)}>编辑</Button>
                   <button role="switch" aria-checked={m.enabled} aria-label={`启用 ${m.model_name}`}
                           className={`rounded-full border px-2.5 py-0.5 text-body transition-colors ${
                             m.enabled ? "border-border text-ink-1 hover:bg-accent" : "border-border/60 text-ink-3"}`}
@@ -305,6 +361,53 @@ export default function ModelsAdmin({ api }: { api: Client }) {
         <Button type="submit" disabled={busy} className="h-9 rounded-lg">{busy ? "提交中…" : "提交登记"}</Button>
       </form>
       </details>
+
+      {editFor && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 px-4"
+             onClick={() => { if (!rowBusy) setEditFor(null); }}>
+          <form role="dialog" aria-label={`编辑模型 ${editFor.model_name}`}
+                onClick={(e) => e.stopPropagation()}
+                onSubmit={(e) => { e.preventDefault(); void saveEdit(); }}
+                className="w-full max-w-md space-y-3 rounded-xl border border-border bg-card px-6 py-5 shadow-lg">
+            <h3 className="text-h2 font-semibold text-ink-1">编辑模型 · {editFor.model_name}</h3>
+            <p className="text-caption text-ink-3">
+              保存即生效（网关每次调用现读配置）。密钥留空表示不改，当前为 {editFor.api_key_masked}。
+            </p>
+            <label className="block space-y-1">
+              <span className="text-h3 font-medium text-ink-2">场景</span>
+              <Select value={editForm.scenario}
+                      onChange={(scenario) => setEditForm((p) => ({ ...p, scenario }))}
+                      options={SCENARIOS.map((s) => ({ value: s, label: s }))} className="w-full" />
+            </label>
+            {([["provider", "厂商"], ["base_url", "接口地址"], ["model_name", "模型名"]] as const).map(([k, zh]) => (
+              <label key={k} className="block space-y-1">
+                <span className="text-h3 font-medium text-ink-2">{zh}</span>
+                <Input aria-label={zh} value={String(editForm[k])} disabled={rowBusy}
+                       className="h-9 rounded-lg border-border"
+                       onChange={(e) => setEditForm((p) => ({ ...p, [k]: e.target.value }))} />
+              </label>
+            ))}
+            <label className="block space-y-1">
+              <span className="text-h3 font-medium text-ink-2">密钥（留空不改）</span>
+              <Input aria-label="密钥（留空不改）" type="password" disabled={rowBusy}
+                     placeholder={editFor.api_key_masked} value={editForm.api_key}
+                     className="h-9 rounded-lg border-border"
+                     onChange={(e) => setEditForm((p) => ({ ...p, api_key: e.target.value }))} />
+            </label>
+            <label className="block space-y-1">
+              <span className="text-h3 font-medium text-ink-2">回退优先级</span>
+              <Input aria-label="回退优先级" type="number" disabled={rowBusy}
+                     value={editForm.fallback_rank} className="h-9 rounded-lg border-border"
+                     onChange={(e) => setEditForm((p) => ({ ...p, fallback_rank: Number(e.target.value) || 0 }))} />
+            </label>
+            <div className="flex items-center gap-2">
+              <Button type="submit" size="sm" className="h-8 rounded-lg" disabled={rowBusy}>保存</Button>
+              <Button type="button" size="sm" variant="ghost" className="h-8 rounded-lg text-ink-3"
+                      disabled={rowBusy} onClick={() => setEditFor(null)}>取消</Button>
+            </div>
+          </form>
+        </div>
+      )}
     </div>
   );
 }
