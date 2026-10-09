@@ -4,6 +4,7 @@ import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
+import { Select } from "@/components/ui/select";
 import AdminBanner from "@/components/AdminBanner";
 import { call, callVoid, type Client } from "@/lib/api";
 import { P } from "@/lib/paths";
@@ -114,10 +115,9 @@ export default function ModelsAdmin({ api }: { api: Client }) {
         </p>
         <label className="block space-y-1">
           <span className="text-h3 font-medium text-ink-2">场景</span>
-          <select className="w-full rounded-lg border border-border px-3 py-2 text-body text-ink-1 outline-none focus:border-ring"
-                  value={form.scenario} onChange={(e) => setForm({ ...form, scenario: e.target.value })}>
-            {SCENARIOS.map((s) => <option key={s} value={s}>{s}</option>)}
-          </select>
+          <Select value={form.scenario} onChange={(scenario) => setForm({ ...form, scenario })}
+                  options={SCENARIOS.map((s) => ({ value: s, label: s }))}
+                  className="w-full" />
         </label>
         {([["provider", "厂商"], ["base_url", "接口地址"], ["api_key", "API 密钥"], ["model_name", "模型名"]] as const).map(([k, zh]) => (
           <label key={k} className="block space-y-1">

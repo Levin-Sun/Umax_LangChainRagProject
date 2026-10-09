@@ -6,6 +6,7 @@ import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import AdminBanner from "@/components/AdminBanner";
+import { Select } from "@/components/ui/select";
 import { call, type Client } from "@/lib/api";
 import { P } from "@/lib/paths";
 import { useAsync } from "@/lib/hooks";
@@ -53,11 +54,10 @@ export default function AuditAdmin({ api }: { api: Client }) {
         </label>
         <label className="block space-y-1">
           <span className="text-h3 font-medium text-ink-2">动作</span>
-          <select className="h-9 rounded-lg border border-border px-3 text-body text-ink-1 outline-none focus:border-ring"
-                  value={actionInput} onChange={(e) => setActionInput(e.target.value)}>
-            <option value="">全部动作</option>
-            {AUDIT_ACTIONS.map((a) => <option key={a} value={a}>{a}</option>)}
-          </select>
+          <Select label="动作" value={actionInput} onChange={setActionInput}
+                  options={[{ value: "", label: "全部动作" },
+                            ...AUDIT_ACTIONS.map((a) => ({ value: a, label: a }))]}
+                  className="w-56" />
         </label>
         <Button type="submit" className="h-9 rounded-lg">查询</Button>
       </form>

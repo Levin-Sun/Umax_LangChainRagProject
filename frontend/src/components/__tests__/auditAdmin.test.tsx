@@ -19,7 +19,9 @@ it("查询与翻页：query 参数逐次装配", async () => {
   });
   render(<AuditAdmin api={fakeApi({ GET })} />);
   await screen.findByRole("row", { name: /login_failed/ });
-  await userEvent.selectOptions(screen.getByLabelText("动作"), "login_failed");
+  // 自绘下拉：先展开再点选项（原生 select 的 selectOptions 不再适用）
+  await userEvent.click(screen.getByLabelText("动作"));
+  await userEvent.click(await screen.findByRole("option", { name: "login_failed" }));
   await userEvent.click(screen.getByRole("button", { name: "查询" }));
   await waitFor(() => expect(GET).toHaveBeenCalledWith(P.audit, expect.objectContaining({
     params: { query: expect.objectContaining({ action: "login_failed", limit: 50, offset: 0 }) },

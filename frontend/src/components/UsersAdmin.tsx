@@ -6,6 +6,7 @@ import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
+import { Select } from "@/components/ui/select";
 import AdminBanner from "@/components/AdminBanner";
 import { call, callVoid, type Client } from "@/lib/api";
 import { P } from "@/lib/paths";
@@ -171,11 +172,10 @@ export default function UsersAdmin({ api, me }: { api: Client; me: AuthMe }) {
                   <td className="px-4 py-2.5">{u.email}</td>
                   <td>{u.name}</td>
                   <td>
-                    <select aria-label={`角色 ${u.email}`} value={u.role} disabled={self || rowBusy}
-                            className="rounded-lg border border-border px-2 py-1 text-body text-ink-1 outline-none focus:border-ring"
-                            onChange={(e) => patch(u, { role: e.target.value })}>
-                      {USER_ROLES.map((r) => <option key={r} value={r}>{r}</option>)}
-                    </select>
+                    <Select label={`角色 ${u.email}`} value={u.role} disabled={self || rowBusy}
+                            onChange={(role) => patch(u, { role })}
+                            options={USER_ROLES.map((r) => ({ value: r, label: r }))}
+                            className="w-28" />
                   </td>
                   <td><Badge variant={u.status === "disabled" ? "destructive" : "secondary"} className="rounded-full font-normal">
                     {STATUS_LABEL[u.status] ?? u.status}</Badge></td>
@@ -221,10 +221,9 @@ export default function UsersAdmin({ api, me }: { api: Client; me: AuthMe }) {
         ))}
         <label className="block space-y-1">
           <span className="text-h3 font-medium text-ink-2">角色</span>
-          <select className="w-full rounded-lg border border-border px-3 py-2 text-body text-ink-1 outline-none focus:border-ring"
-                  value={form.role} onChange={(e) => setForm({ ...form, role: e.target.value })}>
-            {USER_ROLES.map((r) => <option key={r} value={r}>{r}</option>)}
-          </select>
+          <Select value={form.role} onChange={(role) => setForm({ ...form, role })}
+                  options={USER_ROLES.map((r) => ({ value: r, label: r }))}
+                  className="w-full" />
         </label>
         {formErr && <p className="text-body text-destructive">{formErr}</p>}
         <Button type="submit" disabled={busy} className="h-9 rounded-lg">{busy ? "提交中…" : "新建用户"}</Button>
