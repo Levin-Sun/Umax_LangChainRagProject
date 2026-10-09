@@ -60,6 +60,9 @@ docker compose up -d --build
 - 异步入库档（文档量大时）：`.env` 里 `QUEUE_BACKEND=arq`，然后
   `docker compose --profile arq up -d --build`（多起 redis + worker）
 - 国内镜像拉取不畅：见 `docker-compose.yml` 头部注释（镜像源 + 重新打 tag）
+- 想让 `/health` 的 `commit` 显示本次版本（排查「改了不生效」就看它）：
+  `BUILD_COMMIT=$(git rev-parse --short HEAD) docker compose up -d --build`
+  ——不给就是 `unknown`：镜像里没有 `.git`，代码问不出自己是谁
 
 验证：`docker compose ps` 三个容器 healthy；浏览器打开 `http://<服务器IP>:3000`。
 
@@ -107,11 +110,17 @@ docker compose up -d --build
    python scripts/issue_license.py issue --private-key <私钥> \
        --customer "客户名" --fingerprint <客户指纹> --days 365 --out license.json
    ```
-3. 客户把 `license.json` 放到部署根目录，`.env` 填写公钥并固定指纹：
+3. 客户把 `license.json` 放到部署根目录下的 **`data/license/`**（即 `data/license/license.json`），
+   `.env` 填写公钥并固定指纹：
    ```
    LICENSE_PUBLIC_KEY=<服务商下发的公钥>
    MACHINE_FINGERPRINT=<交付时固定下来的标识>
    ```
+
+   > **报错对照**：若「授权」页显示**「授权文件格式错误」**（而不是「未找到授权文件」），多半是文件没放对位置。
+   > compose 挂的是 `./data/license` 这个**目录**：早先把挂载点写成文件（`./license.json`）时，宿主机上还没有
+   > 那个文件，Docker 会按挂载点自动建一个**同名目录**，客户随后拷进去的 `license.json` 只会落到那个目录里面，
+   > 授权永远读不到。确认容器里它是文件不是目录：`docker compose exec backend ls -l /app/license/license.json`。
 4. 重启：`docker compose up -d`，回到「授权」页确认状态为**有效**
 
 **行为**：授权到期或失效后系统转为**只读**——问答与查看照常，建库/上传/改模型等管理操作返回 403 并说明原因；自助改密不受影响。续期只需替换 `license.json`（每请求现读，**无需重启**）。
@@ -155,7 +164,7 @@ python scripts/smoke_delivery.py --base-url http://<IP>:8000 \
 |------|------|
 | 看状态 | `docker compose ps` |
 | 看日志 | `docker compose logs -f backend` |
-| 升级版本 | `git pull && docker compose up -d --build` |
+| 升级版本 | `git pull && BUILD_COMMIT=$(git rev-parse --short HEAD) docker compose up -d --build`（带 BUILD_COMMIT 才有版本印记，见上） |
 | 备份 | 停写后备份 `data/pg/`（全库含向量）与 `data/uploads/`（原始文件） |
 | 数据不清盘重建容器 | 数据都在 `data/` 目录挂载里，`docker compose down` 不删数据 |
 | 看数据库结构版本 | `docker compose exec postgres psql -U rag -d umaxrag -c "select version_num from alembic_version"` |

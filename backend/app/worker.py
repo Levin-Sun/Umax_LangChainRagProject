@@ -57,14 +57,19 @@ def run_import(*, document_id: int, engine=None, embedder=None, mineru=None,
 
 async def _startup(ctx: dict) -> None:
     s = get_settings()
-    from app.services.embeddings import BailianEmbedder
+    from app.services.compose import make_embedder
     from app.services.parsers import MinerUClient
 
     ctx["engine"] = create_engine(s.sqlalchemy_url(), pool_pre_ping=True)
-    ctx["embedder"] = BailianEmbedder(api_key=s.dashscope_api_key,
-                                      base_url=s.dashscope_compat_base,
-                                      model=s.embedding_model,
-                                      dimensions=s.embedding_dim)
+    gw = None
+    if s.gateway_secret:
+        from app.services.gateway import ModelGateway
+
+        gw = ModelGateway(ctx["engine"], secret=s.gateway_secret)
+    # 与 backend 共用同一套 embedder 装配：后台登记的 embedding 模型对异步档同样生效。
+    # 这里曾经自己造 BailianEmbedder(...)——于是"后台登记模型、.env 不填 key"的客户一切到异步档，
+    # 每篇文档都入库失败（LocalProtocolError: Illegal header value b'Bearer '，2026-10-09 真机）。
+    ctx["embedder"] = make_embedder(s, gateway=gw)
     ctx["mineru"] = MinerUClient(s.mineru_base_url) if s.mineru_base_url else None
     # 视觉能力与配置中心同口径：ARQ 档也要给文档图注（否则异步入库静默丢图）
     from app.services.settings import SettingsStore
@@ -73,10 +78,8 @@ async def _startup(ctx: dict) -> None:
     ctx["settings_store"] = store
     ctx["vision_fn"] = None
     ctx["caption_images"] = bool(store.effective()["doc_image_caption"])
-    if s.gateway_secret:
-        from app.services.gateway import ModelGateway
-
-        ctx["vision_fn"] = ModelGateway(ctx["engine"], secret=s.gateway_secret).make_vision_fn(
+    if gw is not None:
+        ctx["vision_fn"] = gw.make_vision_fn(
             vision_prompt=lambda: store.effective()["vision_prompt"])
 
 

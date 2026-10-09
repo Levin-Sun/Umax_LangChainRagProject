@@ -23,7 +23,11 @@ services:
     restart: unless-stopped
 
   backend:
-    build: ./backend
+    build:
+      context: ./backend
+      args:
+        # 版本印记（/health 的 commit）。给值：BUILD_COMMIT=$(git rev-parse --short HEAD) docker compose up -d --build
+        BUILD_COMMIT: ${BUILD_COMMIT:-unknown}
     image: umax-backend
     container_name: umaxrag-backend
     depends_on:
@@ -50,14 +54,17 @@ services:
       UVICORN_HOST: 0.0.0.0
       # License 授权（§D）：留空＝开发模式不校验
       LICENSE_PUBLIC_KEY: ${LICENSE_PUBLIC_KEY:-}
-      LICENSE_FILE: /app/license.json
+      LICENSE_FILE: /app/license/license.json
       MACHINE_FINGERPRINT: ${MACHINE_FINGERPRINT:-}
     ports:
       - "${BACKEND_PORT:-8000}:8000"
     volumes:
       - ./data/uploads:/app/uploads
       # 授权文件由交付时放置（不存在则视为无授权，配了公钥就会拦写操作）
-      - ./license.json:/app/license.json:ro
+      # ⚠️ 挂**目录**而不是文件：挂文件时若宿主机上还没有那个文件，Docker 会按挂载点建一个**同名目录**，
+      # 客户随后把 license.json 拷到根目录只会落进那个目录里面，授权永远读不到——
+      # 症状是「授权文件格式错误」，而不是「未找到授权文件」（真机 2026-10-09 踩中）。
+      - ./data/license:/app/license:ro
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request;urllib.request.urlopen('http://127.0.0.1:8000/api/v1/health')"]
       interval: 10s
@@ -99,7 +106,11 @@ services:
     restart: unless-stopped
 
   worker:
-    build: ./backend
+    build:
+      context: ./backend
+      args:
+        # 与 backend 同镜像：两处 args 必须一致，否则 compose 会用同一 tag 打两遍不同的镜像
+        BUILD_COMMIT: ${BUILD_COMMIT:-unknown}
     image: umax-backend   # 与 backend 同镜像，仅换命令
     container_name: umaxrag-worker
     profiles: ["arq"]
@@ -114,6 +125,9 @@ services:
       PG_PASSWORD: ${PG_PASSWORD:-rag_dev_2026}
       PG_DB: ${PG_DB:-umaxrag}
       DASHSCOPE_API_KEY: ${DASHSCOPE_API_KEY:-}
+      # 主密钥必须给到 worker：它的 embedder 走的是与 backend 同一套装配（compose.make_embedder），
+      # 没有它 worker 只看得见 .env 直连——"后台登记 embedding 模型"的客户异步档会每篇入库失败
+      GATEWAY_SECRET: ${GATEWAY_SECRET:-}
       REDIS_HOST: redis
       REDIS_PORT: 6379
       MINERU_BASE_URL: ${MINERU_BASE_URL:-}

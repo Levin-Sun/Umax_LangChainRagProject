@@ -215,6 +215,41 @@ def test_embedder_fallback_composition(engine, db):
     assert FallbackEmbedder(Gw(), Direct()).embed(["a"]) == [[0.0] * 4]
 
 
+def test_make_embedder_is_the_single_embedder_wiring(engine, db):
+    """embedder 装配的**单一事实源**：backend 与 ARQ worker 共用（真假两种情况都钉住）。
+
+    真机教训（2026-10-09，异步档第一次真跑）：worker 自己造 `BailianEmbedder(.env 的 key)`，
+    于是"后台登记 embedding 模型、.env 不填 key"的客户一切到异步档就每篇文档入库失败
+    （`LocalProtocolError: Illegal header value b'Bearer '`），而同步档全绿——两份装配漂移了。
+    """
+    from app.services.compose import FallbackEmbedder, make_embedder
+    from app.services.embeddings import BailianEmbedder
+
+    class S:
+        dashscope_api_key = ""
+        dashscope_compat_base = "http://stub/v1"
+        embedding_model = "m"
+        embedding_dim = 4
+
+    class Direct:
+        def embed(self, texts):
+            return [[0.0] * 4 for _ in texts]
+
+    class Gw:
+        def make_embedder(self):
+            return Direct()
+
+    # 没网关也没 .env key → None（不假装能向量化；ingest 按 BM25-only 降级，语义与入库侧一致）
+    assert make_embedder(S()) is None
+    # 有网关（即"后台登记了 embedding 模型"）→ 走网关，哪怕 .env 没 key——异步档当初丢的就是这条
+    assert make_embedder(S(), gateway=Gw()).embed(["a"]) == [[0.0] * 4]
+    # 有 .env key、没网关 → 直连兜底（只断言装配结果，不发真请求）
+    class S2(S):
+        dashscope_api_key = "k"
+    assert isinstance(make_embedder(S2()), BailianEmbedder)
+    assert isinstance(make_embedder(S2(), gateway=Gw()), FallbackEmbedder)
+
+
 # ---- 视觉场景（传图提问放开）：vision 走 vision 场景模型、prompt 含 data URL、失败 fallback ----
 def _vision_handler(fail_models=()):
     def handler(request):

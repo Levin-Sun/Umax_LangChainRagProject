@@ -28,7 +28,7 @@ from app.api.schemas import build_settings_put_model
 from app.core.config import get_settings
 from app.models import EvalQuestion, UsageRecord, User
 from app.services.auth import LoginThrottle, hash_password
-from app.services.compose import (FallbackEmbedder, with_gateway_fallback, with_rerank_degrade,
+from app.services.compose import (make_embedder, with_gateway_fallback, with_rerank_degrade,
                                   with_rerank_fallback)
 from app.services.evaluation import load_golden
 from app.services.jobs import recover_interrupted_jobs
@@ -166,7 +166,6 @@ def build_production_app(upload_dir: str = "uploads",
     from sqlalchemy import create_engine
 
     from app.services.chat import ChatClient, make_chat_fn
-    from app.services.embeddings import BailianEmbedder
     from app.services.parsers import MinerUClient
     from app.services.rerank import RerankClient, reorder
 
@@ -200,7 +199,7 @@ def build_production_app(upload_dir: str = "uploads",
                     "已播种 %d 条预置金标准题（可在评测页删改）", len(gold))
     chat_fn = embedder = vision_fn = None
     judge_fn = None
-    bailian_chat = bailian_embedder = None
+    bailian_chat = None
     cfg_store = SettingsStore(engine, s)          # 配置中心：端点与生成层共用同一实例
     prompt_of = lambda key: (lambda: cfg_store.effective()[key])  # noqa: E731  每次调用现取
     bailian_client = None
@@ -211,10 +210,6 @@ def build_production_app(upload_dir: str = "uploads",
                                     base_url=s.dashscope_compat_base, model=s.chat_model)
         bailian_chat = make_chat_fn(bailian_client,
                                     system_prompt=prompt_of("chat_system_prompt"))
-        bailian_embedder = BailianEmbedder(api_key=s.dashscope_api_key,
-                                           base_url=s.dashscope_compat_base,
-                                           model=s.embedding_model,
-                                           dimensions=s.embedding_dim)
         if s.rerank_model:   # 重排只在原生端点（兼容端点没有 /rerank，实测返回空）
             direct_rerank = RerankClient(api_key=s.dashscope_api_key,
                                          base_url=s.dashscope_native_base,
@@ -243,10 +238,10 @@ def build_production_app(upload_dir: str = "uploads",
         # 后台登记第一个模型立即接线；表空且无百炼 → chat MISS / 入库 BM25-only 降级
         chat_fn = with_gateway_fallback(gw.make_chat_fn(system_prompt=prompt_of("chat_system_prompt")),
                                         bailian_chat)
-        embedder = FallbackEmbedder(gw.make_embedder(), bailian_embedder)
+        embedder = make_embedder(s, gateway=gw)   # 与 ARQ worker 共用同一处装配（见 compose.make_embedder）
         vision_fn = gw.make_vision_fn(vision_prompt=prompt_of("vision_prompt"))  # 未配 vision 场景则端点降级
     else:
-        chat_fn, embedder = bailian_chat, bailian_embedder
+        chat_fn, embedder = bailian_chat, make_embedder(s)
 
     def _judge_complete(messages: list[dict]) -> dict:
         """裁判的通路：网关优先（后台换裁判模型即生效），表里没有 chat 模型时退 .env 直连。

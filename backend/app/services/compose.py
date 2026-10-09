@@ -96,3 +96,28 @@ class FallbackEmbedder:
             if self._direct is None:
                 return [None] * len(texts)
             return self._direct.embed(texts)
+
+
+def make_embedder(settings, *, gateway=None):
+    """embedder 装配的**单一事实源**：backend 与 ARQ worker 都必须走它。
+
+    为什么非得收在一处：两边各写一份必然漂移。真机踩中（2026-10-09，异步档第一次真跑）——
+    worker 的 `_startup` 自己造了个 `BailianEmbedder(api_key=s.dashscope_api_key)`，于是
+    "按推荐方式在后台登记 embedding 模型（.env 不填 key）"的客户一切到异步档，**每篇文档都入库失败**，
+    且错误文案是 `LocalProtocolError: Illegal header value b'Bearer '`——完全指不到根因。
+    同步档走网关、异步档走 .env，两边一对才露馅：这种"只有换档位才出现"的缝只能靠共用装配堵死。
+
+    语义（与 backend 原装配逐字一致，不是新规则）：
+      gateway 在 → 网关优先 + .env 兜底；gateway 不在 → 只用 .env；两边都没有 → None（BM25-only 降级）。
+    """
+    bailian = None
+    if settings.dashscope_api_key:
+        from app.services.embeddings import BailianEmbedder
+
+        bailian = BailianEmbedder(api_key=settings.dashscope_api_key,
+                                  base_url=settings.dashscope_compat_base,
+                                  model=settings.embedding_model,
+                                  dimensions=settings.embedding_dim)
+    if gateway is None:
+        return bailian
+    return FallbackEmbedder(gateway.make_embedder(), bailian)
