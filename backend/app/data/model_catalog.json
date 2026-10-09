@@ -87,16 +87,6 @@
         {"key": "embedding", "scenario": "embedding", "model": "BAAI/bge-m3", "profile": "metered", "dim": 1024},
         {"key": "rerank", "scenario": "rerank", "model": "BAAI/bge-reranker-v2-m3", "profile": "metered"}
       ]
-    },
-    {
-      "id": "self",
-      "name": "自建 / 本地部署",
-      "aliases": ["ollama", "vllm", "tei", "自建", "本地", "内网"],
-      "pinyin": ["zijian", "zj", "bendi", "neiwang"],
-      "verified": false,
-      "profiles": [{"id": "custom", "name": "自建服务", "base_url": ""}],
-      "capabilities": [],
-      "note": "没有内置清单：请用下方「高级：手动登记」填地址与模型名"
     }
   ]
 }

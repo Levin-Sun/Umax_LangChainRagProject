@@ -60,7 +60,12 @@ export function Select({ value, options, onChange, label, disabled, className }:
             className="absolute left-0 right-0 z-50 mt-1 max-h-64 overflow-y-auto rounded-xl border border-border bg-popover p-1 shadow-lg">
           {options.map((o) => (
             <li key={o.value} role="option" aria-selected={o.value === value}
-                onClick={() => { onChange(o.value); setOpen(false); }}
+                // pointerdown 只挡焦点跳动；真正的选中放在 click——
+                // 且必须 preventDefault：下拉常被包在 <label> 里，否则浏览器会把这次点击
+                // **转发给被标注的控件**（触发按钮）→ 刚选完又被打开，用户得点别处才消失
+                // （真机反馈的"选中后下拉不消失"就是这个）。
+                onPointerDown={(e) => e.preventDefault()}
+                onClick={(e) => { e.preventDefault(); onChange(o.value); setOpen(false); }}
                 className={cn(
                   "cursor-pointer truncate rounded-lg px-2.5 py-1.5 text-body transition-colors",
                   o.value === value ? "bg-accent font-medium text-ink-1" : "text-ink-2 hover:bg-accent/70",

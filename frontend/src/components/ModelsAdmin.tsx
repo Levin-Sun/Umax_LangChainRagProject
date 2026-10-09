@@ -133,7 +133,7 @@ export default function ModelsAdmin({ api }: { api: Client }) {
 
       <section className="space-y-3 rounded-xl border border-border bg-card px-6 py-5 shadow-sm">
         <div>
-          <h3 className="text-h2 font-semibold">把模型配起来</h3>
+          <h3 className="text-h2 font-semibold">模型接入</h3>
           <p className="mt-1 text-caption text-ink-3">
             两步：选厂商、粘贴一把 key。系统按这家厂商能提供的能力自动配好（接口地址与模型名由内置标本给出），
             并逐个试调一次，把厂商的真实返回直接显示出来。

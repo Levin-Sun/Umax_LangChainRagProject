@@ -30,15 +30,19 @@ def test_catalog_is_well_formed():
     assert catalog_problems() == []
 
 
-def test_catalog_covers_the_essentials_and_keeps_a_manual_door():
+def test_catalog_only_lists_vendors_that_can_be_autoconfigured():
+    """标本里只放"能一键配齐"的厂商（用户反馈：把"自建/本地部署"这种没有统一地址的选项去掉，
+    统一走「高级：手动登记」）。所以每家都必须有真实接入地址与至少一项能力。"""
     cat = load_catalog()
     ids = {v["id"] for v in cat["vendors"]}
-    assert {"bailian", "stepfun", "deepseek", "self"} <= ids
+    assert {"bailian", "stepfun", "deepseek"} <= ids
+    assert "self" not in ids
     # 至少要有一家能同时提供对话与向量：否则"一键配齐"每次都要客户再补一家
     assert [v["id"] for v in cat["vendors"]
             if {"chat", "embedding"} <= {c["key"] for c in v["capabilities"]}]
-    # 自建/本地部署必须留着手填入口（内网、代理网关这些长尾一定存在）
-    assert next(v for v in cat["vendors"] if v["id"] == "self")["capabilities"] == []
+    for v in cat["vendors"]:
+        assert v["capabilities"], f"{v['id']} 没有任何能力，不该出现在下拉里"
+        assert all(p["base_url"] for p in v["profiles"]), f"{v['id']} 有档案缺地址"
     # 拼音与别名（客户会怎么打字：de / 百炼 / abl / jyx）
     bailian = next(v for v in cat["vendors"] if v["id"] == "bailian")
     assert "百炼" in bailian["aliases"] and "abl" in bailian["pinyin"]
@@ -91,6 +95,7 @@ def test_bundle_rejects_unknown_vendor_and_missing_capability(engine, db, tmp_pa
     r = c.post(BUNDLE, json={"vendor_id": "deepseek", "api_key": "k",
                              "capabilities": ["embedding"], "test": False})
     assert r.status_code == 400 and "手动登记" in r.text
+    # 「自建 / 本地部署」不再进下拉（用户反馈）：它现在就是"未收录的厂商"
     assert c.post(BUNDLE, json={"vendor_id": "self", "api_key": "k"}).status_code == 400
 
 

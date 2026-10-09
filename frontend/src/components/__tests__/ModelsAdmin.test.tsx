@@ -83,6 +83,7 @@ it("一键配齐：选厂商 → 填 key → POST bundle，厂商的原始报错
   render(<ModelsAdmin api={withCatalog({ POST }) as never} />);
   await userEvent.click(await screen.findByLabelText("厂商（可搜索）"));
   await userEvent.click(await screen.findByRole("option", { name: /阿里百炼/ }));
+  expect(screen.queryByRole("listbox")).toBeNull();     // 选完即关（不用再点别处）
   await userEvent.type(screen.getByLabelText("厂商 API 密钥"), "sk-test");
   await userEvent.click(screen.getByRole("button", { name: "一键配齐并测试" }));
   expect(POST).toHaveBeenCalledWith(P.modelsBundle, expect.objectContaining({

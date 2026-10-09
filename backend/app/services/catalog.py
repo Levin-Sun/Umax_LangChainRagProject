@@ -58,7 +58,9 @@ def catalog_problems(catalog: dict | None = None) -> list[str]:
         if not profile_ids:
             problems.append(f"{vid}: 没有接入档案")
         for p in v.get("profiles", []):
-            if not p.get("base_url") and vid != "self":
+            # 标本里只放"能一键配齐"的厂商：每个接入档案都必须有真实地址。
+            # 自建/本地部署这类没有统一地址的，走「高级：手动登记」，不进下拉（用户反馈）。
+            if not p.get("base_url"):
                 problems.append(f"{vid}/{p.get('id')}: 接入档案缺 base_url")
         for c in v.get("capabilities", []):
             key = c.get("key")

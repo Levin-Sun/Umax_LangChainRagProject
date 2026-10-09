@@ -40,3 +40,19 @@ it("按钮回显的是 label 而不是 value", () => {
   render(<Select label="场景" value="b" options={opts} onChange={() => {}} />);
   expect(screen.getByLabelText("场景")).toHaveTextContent("乙");
 });
+
+// 真机反馈：表单里的下拉被包在 <label> 里，浏览器会把"点选项"这次点击转发给被标注的控件
+// （触发按钮）→ 刚选完又打开，得点别处才消失。用例把这个场景钉住。
+it("包在 <label> 里也必须选完即关", async () => {
+  const onChange = vi.fn();
+  render(
+    <label>
+      <span>场景</span>
+      <Select label="场景" value="a" options={opts} onChange={onChange} />
+    </label>,
+  );
+  await userEvent.click(screen.getByLabelText("场景"));
+  await userEvent.click(screen.getByRole("option", { name: "乙" }));
+  expect(onChange).toHaveBeenCalledWith("b");
+  expect(screen.queryByRole("listbox")).toBeNull();
+});

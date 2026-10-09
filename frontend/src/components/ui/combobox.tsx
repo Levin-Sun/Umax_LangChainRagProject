@@ -96,7 +96,11 @@ export function Combobox({ value, options, onChange, label, placeholder, disable
             className="absolute left-0 right-0 z-50 mt-1 max-h-64 overflow-y-auto rounded-xl border border-border bg-popover p-1 shadow-lg">
           {hits.map((o, i) => (
             <li key={o.value} role="option" aria-selected={o.value === value}
-                onPointerDown={(e) => { e.preventDefault(); pick(o); }}
+                // pointerdown 只用来保住输入焦点；选中放 click 且 preventDefault——
+                // 下拉若被包在 <label> 里，不挡的话浏览器会把这次点击转发给被标注的控件，
+                // 刚选完就又被打开（真机反馈的"选中后不消失"）。
+                onPointerDown={(e) => e.preventDefault()}
+                onClick={(e) => { e.preventDefault(); pick(o); }}
                 className={cn("flex cursor-pointer items-baseline gap-2 rounded-lg px-2.5 py-1.5 text-body",
                               i === active ? "bg-accent" : "hover:bg-accent/70",
                               o.value === value ? "font-medium text-ink-1" : "text-ink-2")}>
