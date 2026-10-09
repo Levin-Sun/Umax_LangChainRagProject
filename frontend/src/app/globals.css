@@ -180,4 +180,15 @@
   .sepia {
     color-scheme: light;
   }
+  /* 原生下拉的展开列表：color-scheme 只管控件本体，列表在部分浏览器里仍按白底画，
+     而选项文字吃的是 --ink-1（深色下近白）——白底白字，人就"看不到其他选项"（真机反馈 2026-10-09）。
+     显式给控件与 option 上主题色：不依赖浏览器默认，深色下黑底白字。 */
+  select {
+    background-color: var(--card);
+    color: var(--ink-1);
+  }
+  select option {
+    background-color: var(--card);
+    color: var(--ink-1);
+  }
 }

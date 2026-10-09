@@ -86,3 +86,13 @@ it("JSX 文本里不出现裸引号或 Markdown 星号", () => {
   }
   expect(violations).toEqual([]);
 });
+
+// 深色模式的原生下拉（真机反馈连续两轮）：color-scheme 只管控件本体，展开列表在部分浏览器里
+// 仍按白底画，而选项文字吃的是 --ink-1（深色下近白）——白底白字等于"看不到其他选项"。
+// 所以 select/option 必须显式上主题色，这条不许被删回"只靠 color-scheme"。
+it("原生下拉在深色下显式上主题色（不能只靠 color-scheme）", () => {
+  const css = fs.readFileSync(path.resolve(__dirname, "..", "app", "globals.css"), "utf8");
+  expect(css).toMatch(/select\s+option\s*\{[^}]*background-color:\s*var\(--card\)/);
+  expect(css).toMatch(/select\s+option\s*\{[^}]*color:\s*var\(--ink-1\)/);
+  expect(css).toMatch(/\.dark\s*\{\s*color-scheme:\s*dark/);
+});
