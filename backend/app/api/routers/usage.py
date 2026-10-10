@@ -35,9 +35,12 @@ def build_router(rt: Runtime) -> APIRouter:
         rows = (session.query(UsageRecord.scenario, UsageRecord.model,
                               func.count().label("calls"),
                               func.coalesce(func.sum(UsageRecord.prompt_tokens), 0),
-                              func.coalesce(func.sum(UsageRecord.completion_tokens), 0))
+                              func.coalesce(func.sum(UsageRecord.completion_tokens), 0),
+                              func.avg(UsageRecord.latency_ms))
                 .group_by(UsageRecord.scenario, UsageRecord.model).all())
         return [{"scenario": r[0], "model": r[1], "calls": r[2],
-                 "prompt_tokens": int(r[3]), "completion_tokens": int(r[4])} for r in rows]
+                 "prompt_tokens": int(r[3]), "completion_tokens": int(r[4]),
+                 # avg 会跳过 NULL（早期 embedding 记的是 0，也照算）；整组都空才给 null
+                 "avg_latency_ms": None if r[5] is None else int(round(float(r[5])))} for r in rows]
 
     return router

@@ -1953,6 +1953,8 @@ export interface components {
         };
         /** UsageSummaryOut */
         UsageSummaryOut: {
+            /** Avg Latency Ms */
+            avg_latency_ms: number | null;
             /** Calls */
             calls: number;
             /** Completion Tokens */

@@ -115,15 +115,23 @@ def test_requires_gateway_secret(client_no_secret):
 # ---- 用量看板简版：按 场景+模型 汇总 ----
 def test_usage_summary_aggregates(client, db):
     db.add_all([
-        UsageRecord(user_email="a@x", scenario="chat", model="m1", prompt_tokens=100, completion_tokens=20),
-        UsageRecord(user_email="b@x", scenario="chat", model="m1", prompt_tokens=50, completion_tokens=10),
-        UsageRecord(user_email="a@x", scenario="chat", model="m2", prompt_tokens=30, completion_tokens=5),
-        UsageRecord(user_email="s@x", scenario="embedding", model="e1", prompt_tokens=400, completion_tokens=0),
+        UsageRecord(user_email="a@x", scenario="chat", model="m1", prompt_tokens=100,
+                    completion_tokens=20, latency_ms=1000),
+        UsageRecord(user_email="b@x", scenario="chat", model="m1", prompt_tokens=50,
+                    completion_tokens=10, latency_ms=2000),
+        # 没记延迟的那条（历史数据）：不该把它当成 0 混进平均
+        UsageRecord(user_email="a@x", scenario="chat", model="m2", prompt_tokens=30,
+                    completion_tokens=5),
+        UsageRecord(user_email="s@x", scenario="embedding", model="e1", prompt_tokens=400,
+                    completion_tokens=0, latency_ms=300),
     ])
     db.commit()
     rows = {(r["scenario"], r["model"]): r for r in client.get("/api/v1/usage/summary").json()}
     assert rows[("chat", "m1")] == {"scenario": "chat", "model": "m1", "calls": 2,
-                                    "prompt_tokens": 150, "completion_tokens": 30}
+                                    "prompt_tokens": 150, "completion_tokens": 30,
+                                    "avg_latency_ms": 1500}      # (1000+2000)/2
+    assert rows[("chat", "m2")]["avg_latency_ms"] is None        # 全空 → null，不是 0
+    assert rows[("embedding", "e1")]["avg_latency_ms"] == 300
     assert rows[("embedding", "e1")]["calls"] == 1
     assert set(rows) == {("chat", "m1"), ("chat", "m2"), ("embedding", "e1")}
 

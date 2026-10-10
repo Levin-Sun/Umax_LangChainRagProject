@@ -443,6 +443,11 @@ class UsageSummaryOut(BaseModel):
     calls: int
     prompt_tokens: int
     completion_tokens: int
+    # 平均耗时（毫秒；该分组全是 NULL 时为 null）——回答"时间花在哪"的另一半：
+    # token 看成本，耗时看体验（例如 chat 输出长、embedding 每次提问都要调一次）。
+    # 不给默认值（同 DocOut 的约定）：端点恒返回该键，spec 里就该是必现字段——有默认会被标成可选，
+    # 前端类型随之变宽松，契约与实现就对不上了（contractTypes 守卫会红）。
+    avg_latency_ms: int | None
 
 
 class QuotaOut(BaseModel):

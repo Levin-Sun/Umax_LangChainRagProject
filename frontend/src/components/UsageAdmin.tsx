@@ -68,13 +68,15 @@ export default function UsageAdmin({ api }: { api: Client }) {
           <thead><tr className="border-b border-border bg-muted/60 text-left text-h3 font-medium text-ink-2">
             <th className="px-4 py-2.5 font-medium">场景</th><th className="py-2.5 font-medium">模型</th>
             <th className="py-2.5 font-medium">调用</th><th className="py-2.5 font-medium">prompt</th>
-            <th className="py-2.5 pr-4 font-medium">completion</th></tr></thead>
+            <th className="py-2.5 font-medium">completion</th>
+            <th className="py-2.5 pr-4 font-medium">平均耗时</th></tr></thead>
           <tbody>
             {rows.map((r) => (
               <tr key={`${r.scenario}:${r.model}`} className="border-b border-border last:border-0">
                 <td className="px-4 py-2.5">{r.scenario}</td><td>{r.model}</td>
                 <td className="font-medium">{r.calls}</td><td className="font-medium">{r.prompt_tokens}</td>
-                <td className="pr-4 font-medium">{r.completion_tokens}</td>
+                <td className="font-medium">{r.completion_tokens}</td>
+                <td className="pr-4 font-medium">{r.avg_latency_ms === null ? "—" : `${r.avg_latency_ms} ms`}</td>
               </tr>
             ))}
           </tbody>

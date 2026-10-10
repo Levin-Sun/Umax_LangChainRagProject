@@ -6,13 +6,19 @@ import { expect, it } from "vitest";
 
 it("aggregates totals and per model rows", async () => {
   const api = fakeApi({ GET: (u) => (u === P.usageUsers ? ok([]) : ok([
-    { scenario: "chat", model: "qwen3.7-max", calls: 12, prompt_tokens: 100, completion_tokens: 50 },
-    { scenario: "embedding", model: "qwen3.7-text-embedding", calls: 30, prompt_tokens: 300, completion_tokens: 0 },
+    { scenario: "chat", model: "qwen3.7-max", calls: 12, prompt_tokens: 100, completion_tokens: 50,
+      avg_latency_ms: 2466 },
+    { scenario: "embedding", model: "qwen3.7-text-embedding", calls: 30, prompt_tokens: 300,
+      completion_tokens: 0, avg_latency_ms: null },
   ])) });
   render(<UsageAdmin api={api} />);
   expect(await screen.findByText("qwen3.7-max")).toBeInTheDocument();
   expect(screen.getByText(/42 次/)).toBeInTheDocument();      // 汇总卡 12+30
   expect(screen.getByText(/450/)).toBeInTheDocument();        // tokens 合计
+  // 平均耗时：token 看成本、耗时看体验——没有延迟记录的分组显示 "—" 而不是 0
+  expect(screen.getByText("2466 ms")).toBeInTheDocument();
+  const embRow = within(await screen.findByRole("row", { name: /qwen3\.7-text-embedding/ }));
+  expect(embRow.getByText("—")).toBeInTheDocument();
   expect(screen.queryByText(/qwen3.7-text-rerank/)).not.toBeInTheDocument();
 });
 

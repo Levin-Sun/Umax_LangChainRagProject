@@ -31,7 +31,8 @@ export interface ModelCatalog { catalog_version: string; updated_at: string; cap
 // 一键配齐的结果：action=created/updated（幂等，反复点不会堆重复）；ok=试调结果（null=未试调）
 export interface BundleItem { capability: string; scenario: string; model: string; base_url: string; action: string; ok: boolean | null; detail: string | null }
 export interface BundleOut { vendor: string; items: BundleItem[] }
-export interface UsageOut { scenario: string; model: string; calls: number; prompt_tokens: number; completion_tokens: number }
+// avg_latency_ms：该分组平均耗时（毫秒；全为 NULL 时 null）。token 看成本，耗时看体验。
+export interface UsageOut { scenario: string; model: string; calls: number; prompt_tokens: number; completion_tokens: number; avg_latency_ms: number | null }
 // 登录态唯一真相源（GET /auth/me）：kb_ids null=admin 隐式全库，数组=member 库级授权；
 // must_change_password=true 时全站被 428 门闸拦下，前端弹强改密框（首登/管理员重置口令后）
 export interface AuthMe { email: string; name: string; role: "admin" | "member"; kb_ids: number[] | null; must_change_password: boolean }

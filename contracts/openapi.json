@@ -3317,6 +3317,17 @@
       },
       "UsageSummaryOut": {
         "properties": {
+          "avg_latency_ms": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Avg Latency Ms"
+          },
           "calls": {
             "title": "Calls",
             "type": "integer"
@@ -3343,7 +3354,8 @@
           "model",
           "calls",
           "prompt_tokens",
-          "completion_tokens"
+          "completion_tokens",
+          "avg_latency_ms"
         ],
         "title": "UsageSummaryOut",
         "type": "object"

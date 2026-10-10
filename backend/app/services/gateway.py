@@ -208,11 +208,14 @@ class ModelGateway:
         if not providers:
             raise NoProviderError("没有已启用的 embedding 模型配置（model_configs 表为空？）")
         for p in providers:  # provider 级 fallback：整批失败切下一家
+            t0 = time.monotonic()
             try:
                 vectors, prompt_tokens = self._embed_all(p, texts)
             except Exception:
                 continue
-            self._log(user_email, kb_id, "embedding", p.model_name, prompt_tokens, 0, 0)
+            # 延迟照记（此前这里恒传 0）：向量化每次提问都要调一次，用量页"时间花在哪"少了它就不完整
+            self._log(user_email, kb_id, "embedding", p.model_name, prompt_tokens, 0,
+                      int((time.monotonic() - t0) * 1000))
             return vectors
         raise GatewayError("全部 embedding 模型均调用失败")
 
