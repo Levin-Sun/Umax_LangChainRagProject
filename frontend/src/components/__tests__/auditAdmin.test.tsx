@@ -15,7 +15,10 @@ it("查询与翻页：query 参数逐次装配", async () => {
   // 故入参收 unknown 后内部拆包，断言面与 brief 完全一致
   const GET = vi.fn((_u: string, init?: unknown) => {
     const offset = (init as { params?: { query?: { offset?: number } } } | undefined)?.params?.query?.offset ?? 0;
-    return ok([auditRow(offset + 1)]);
+    // 满页（PAGE+1 条）：多出的那条只用于判"还有下一页"，末页置灰靠它。
+    // 只有第一条保留 login_failed，其余改个动作名——否则行选择器会撞上 51 行。
+    return ok(Array.from({ length: 51 }, (_, i) =>
+      i === 0 ? auditRow(offset + 1) : { ...auditRow(offset + i + 1), action: "login_ok" }));
   });
   render(<AuditAdmin api={fakeApi({ GET })} />);
   await screen.findByRole("row", { name: /login_failed/ });
@@ -24,13 +27,24 @@ it("查询与翻页：query 参数逐次装配", async () => {
   await userEvent.click(await screen.findByRole("option", { name: "login_failed" }));
   await userEvent.click(screen.getByRole("button", { name: "查询" }));
   await waitFor(() => expect(GET).toHaveBeenCalledWith(P.audit, expect.objectContaining({
-    params: { query: expect.objectContaining({ action: "login_failed", limit: 50, offset: 0 }) },
+    params: { query: expect.objectContaining({ action: "login_failed", limit: 51, offset: 0 }) },
   })));
   expect(screen.getByRole("button", { name: "上一页" })).toBeDisabled();
   await userEvent.click(screen.getByRole("button", { name: "下一页" }));
   await waitFor(() => expect(GET).toHaveBeenCalledWith(P.audit, expect.objectContaining({
     params: { query: expect.objectContaining({ offset: 50 }) },
   })));
+});
+
+// 已知限制收口：审计接口没有 total，用"多取一条"判末页——置灰才不会被当成坏了
+it("末页把「下一页」置灰：只回不满页时没有下一页", async () => {
+  const GET = vi.fn(() => ok([auditRow(1), auditRow(2)]));
+  render(<AuditAdmin api={fakeApi({ GET })} />);
+  expect(await screen.findAllByRole("row", { name: /login_failed/ })).toHaveLength(2);
+  expect(screen.getByRole("button", { name: "下一页" })).toBeDisabled();
+  expect(screen.getByRole("button", { name: "上一页" })).toBeDisabled();
+  // 只显示 2 条（多取的那条不存在时不该多渲染）
+  expect(screen.getAllByRole("row")).toHaveLength(3);      // 表头 + 2 行
 });
 
 it("收编⑲：条件未变仍在首页点查询也强制重取（查询按钮不像坏了）", async () => {

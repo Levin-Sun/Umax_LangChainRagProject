@@ -36,11 +36,15 @@ export default function AuditAdmin({ api }: { api: Client }) {
     () => call(api.GET(P.audit, {
       params: { query: {
         user: applied.user || undefined, action: applied.action || undefined,
-        limit: PAGE, offset: applied.offset,
+        // 多要一条来判"还有没有下一页"：审计接口没有 total，而多取一条是零契约改动的判法
+        // （末页置灰靠它——此前"下一页"永远可点，点进去是空表，看起来像坏了）。
+        limit: PAGE + 1, offset: applied.offset,
       } },
     })) as Promise<AuditOut[]>,
     [applied.user, applied.action, applied.offset, tick]);
-  const rows = q.data ?? [];
+  const fetched = q.data ?? [];
+  const hasMore = fetched.length > PAGE;
+  const rows = hasMore ? fetched.slice(0, PAGE) : fetched;   // 多要的那条只用来判页，不上屏
 
   return (
     <div className="mx-auto w-full max-w-5xl space-y-6 px-6 py-6">
@@ -92,7 +96,7 @@ export default function AuditAdmin({ api }: { api: Client }) {
           上一页
         </Button>
         <span className="text-caption text-ink-3">第 {applied.offset / PAGE + 1} 页 · 每页 {PAGE} 条</span>
-        <Button size="sm" variant="outline" className="h-8 rounded-lg" disabled={q.loading}
+        <Button size="sm" variant="outline" className="h-8 rounded-lg" disabled={q.loading || !hasMore}
                 onClick={() => setApplied((a) => ({ ...a, offset: a.offset + PAGE }))}>
           下一页
         </Button>
