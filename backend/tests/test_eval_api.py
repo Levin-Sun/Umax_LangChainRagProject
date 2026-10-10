@@ -337,3 +337,20 @@ def test_eval_endpoints_require_admin(client, engine, tmp_path, db):
     for method, path, body in paths:
         call = getattr(client, method)
         assert call(path, **({"json": body} if body is not None else {})).status_code == 403, path
+def test_eval_records_the_actually_used_embedding_model(engine, db, tmp_path):
+    """评测记录里的 embedding_model 要写**网关实际会用的那家**（按 fallback_rank,id 取第一个启用的），
+    而不是 .env 的默认值——真机上后者与后台登记的完全不是一回事（显示 qwen3.7-text-embedding，
+    实际用的是 text-embedding-v4），那一栏会误导人。"""
+    from app.api.routers.eval import _active_embedding_model
+    from app.models import ModelConfig
+
+    def mc(provider: str, name: str, *, rank: int, enabled: bool = True) -> ModelConfig:
+        return ModelConfig(tenant_id="default", scenario="embedding", provider=provider,
+                           base_url=f"http://{provider}/v1", model_name=name,
+                           encrypted_api_key="x", enabled=enabled, fallback_rank=rank)
+
+    db.add_all([mc("甲", "embed-a", rank=1), mc("乙", "embed-b", rank=0),
+                mc("丙", "embed-c", rank=0, enabled=False)])
+    db.commit()
+    assert _active_embedding_model(db) == "embed-b"      # rank 优先；停用的不算
+    assert _active_embedding_model(db) != "embed-c"

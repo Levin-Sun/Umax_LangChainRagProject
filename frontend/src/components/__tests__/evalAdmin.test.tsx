@@ -7,7 +7,7 @@ import { describe, expect, it, vi } from "vitest";
 import EvalAdmin from "@/components/EvalAdmin";
 import { P } from "@/lib/paths";
 import { fail, fakeApi, ok } from "@/lib/testkit";
-import type { EvalQuestionOut, EvalRunDetailOut, EvalRunOut } from "@/lib/types";
+import type { DocOut, EvalQuestionOut, EvalRunDetailOut, EvalRunOut } from "@/lib/types";
 
 const question: EvalQuestionOut = {
   id: 1, question: "生鲜能七天无理由退货吗", expect_all: ["不支持"], expect_any: [],
@@ -48,9 +48,17 @@ const renderPage = (stubs: Parameters<typeof fakeApi>[0]) =>
     // 金标准集在挂载时就拉（与 tab 无关），所有用例统一兜住
     GET: async (url: string, init?: unknown) => {
       if (url === P.evalQuestions) return ok([question]);
-      return stubs.GET ? stubs.GET(url, init) : undefined;
+      const own = stubs.GET ? stubs.GET(url, init) : undefined;
+      if (own !== undefined) return own;         // 用例自己的存根优先
+      // 评测前置自检会查"库里有没有金标准文档"：默认给一份"存在"，缺文档的用例自行覆盖
+      if (url === P.kb) return ok([{ id: 1, name: "评测库", description: null }]);
+      if (url === P.kbDocs) return ok([docNamed(question.cites[0])]);
+      return undefined;
     },
   })} />);
+
+const docNamed = (name: string): DocOut => ({ id: 1, kb_id: 1, name, status: "ready",
+  error: null, size_bytes: 10, created_at: "2026-10-07T10:00:00+00:00", has_embedding: true });
 
 describe("评测页", () => {
   it("历史与分数上屏；未改动时是空态提示", async () => {
@@ -64,6 +72,21 @@ describe("评测页", () => {
   it("空历史给的是「先跑一轮」的引导，而不是空白表格", async () => {
     renderPage({ GET: (url) => (url === P.evalRuns ? ok([]) : undefined) });
     expect(await screen.findByText(/点上面的「开始评测」跑第一轮/)).toBeInTheDocument();
+  });
+
+  it("库里没有金标准文档时先提示，避免白跑一轮（语料不配套会全 0 且看不出原因）", async () => {
+    const POST = vi.fn(async () => ok(run()));
+    renderPage({
+      POST,
+      GET: (url: string) => (url === P.evalRuns ? ok([])
+        : url === P.kbDocs ? ok([docNamed("无关文档.txt")]) : undefined),
+    });
+    await userEvent.click(await screen.findByRole("button", { name: "开始评测" }));
+    const dialog = await screen.findByRole("dialog", { name: "评测前提示" });
+    expect(within(dialog).getByText("rag_dirty_doc_01.txt")).toBeInTheDocument();
+    expect(POST).not.toHaveBeenCalled();
+    await userEvent.click(within(dialog).getByRole("button", { name: "仍然评测" }));
+    await waitFor(() => expect(POST).toHaveBeenCalled());
   });
 
   it("点开始评测：POST 空体并刷新历史（新记录立刻出现）", async () => {

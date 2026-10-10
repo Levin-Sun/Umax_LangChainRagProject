@@ -11,7 +11,7 @@ import AdminBanner from "@/components/AdminBanner";
 import { call, callVoid, type Client } from "@/lib/api";
 import { P } from "@/lib/paths";
 import { useAsync, usePolling } from "@/lib/hooks";
-import type { EvalQuestionOut, EvalRunDetailOut, EvalRunOut } from "@/lib/types";
+import type { DocOut, EvalQuestionOut, EvalRunDetailOut, EvalRunOut, KbOut } from "@/lib/types";
 
 const pct = (x: number) => `${Math.round((x || 0) * 100)}%`;
 const fmtTime = (s: string | null) => (s ? s.slice(0, 16).replace("T", " ") : "—");
@@ -34,6 +34,8 @@ export default function EvalAdmin({ api }: { api: Client }) {
   const [editing, setEditing] = useState<number | null>(null);
   const [confirmDel, setConfirmDel] = useState<number | null>(null);
   const [useJudge, setUseJudge] = useState(false);
+  // 起评测前的自检结果：库里缺哪些金标准文档（空数组＝没问题）
+  const [preflight, setPreflight] = useState<string[] | null>(null);
 
   const questions = useAsync(() => call(api.GET(P.evalQuestions)) as Promise<EvalQuestionOut[]>);
   // 有 running 的连跑就轮询（1.5s）；全终态自然停。——usePolling 的 deps=[tick,enabled] 不感知 fn，
@@ -66,6 +68,37 @@ export default function EvalAdmin({ api }: { api: Client }) {
     } finally {
       setBusy(false);
     }
+  }
+
+  /** 起评测前的自检：金标准题的判据是"引用正确"和"检索命中金标准文档"，库里要是根本没有那些
+      文档，跑出来必然 0/20——而人只会看到一片 0 却不知道为什么（真机踩过：语料不配套，
+      白白花了 20 题的模型调用）。所以先把缺的文档名列出来问一句。 */
+  async function missingGoldenDocs(): Promise<string[] | null> {
+    try {
+      const kbs = await call(api.GET(P.kb)) as KbOut[];
+      const names = new Set<string>();
+      for (const kb of kbs) {
+        const docs = await call(api.GET(P.kbDocs,
+          { params: { path: { kb_id: kb.id } } })) as DocOut[];
+        for (const d of docs) names.add(d.name);
+      }
+      const expected = [...new Set((questions.data ?? []).flatMap((q) => q.cites))];
+      const missing = expected.filter((n) => !names.has(n));
+      return missing.length ? missing : null;
+    } catch {
+      return null;   // 预检失败不阻塞评测：服务端仍会留下完整记录
+    }
+  }
+
+  async function beginRun() {
+    if (busy) return;
+    setErr(null);
+    const missing = await missingGoldenDocs();
+    if (missing) {
+      setPreflight(missing);
+      return;
+    }
+    await startRun();
   }
 
   function openRun(id: number) {
@@ -186,7 +219,7 @@ export default function EvalAdmin({ api }: { api: Client }) {
         <>
           <div className="space-y-3 rounded-xl border border-border bg-card px-6 py-4 shadow-sm">
             <div className="flex flex-wrap items-center gap-3">
-              <Button className="h-9 rounded-lg" disabled={busy} onClick={() => void startRun()}>
+              <Button className="h-9 rounded-lg" disabled={busy} onClick={() => void beginRun()}>
                 {busy ? "提交中…" : "开始评测"}
               </Button>
               {/* 裁判是可选的额外开销：默认关，开了每题多一次模型调用 */}
@@ -462,6 +495,34 @@ export default function EvalAdmin({ api }: { api: Client }) {
             </table>
           </div>
         </>
+      )}
+
+      {preflight && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 px-4"
+             onClick={() => setPreflight(null)}>
+          <div role="dialog" aria-label="评测前提示" onClick={(e) => e.stopPropagation()}
+               className="w-full max-w-md space-y-3 rounded-xl border border-border bg-card px-6 py-5 shadow-lg">
+            <h3 className="text-h2 font-semibold text-ink-1">这个库里没有金标准题期望的文档</h3>
+            <p className="text-body text-ink-2">
+              金标准题的判据是「引用正确」和「检索命中金标准文档」。库里找不到下列文档时，
+              这轮大概率全 0，而且看不出原因：
+            </p>
+            <ul className="space-y-0.5 text-caption text-ink-3">
+              {preflight.slice(0, 3).map((n) => <li key={n}>{n}</li>)}
+              {preflight.length > 3 && <li>等 {preflight.length} 个</li>}
+            </ul>
+            <p className="text-caption text-ink-3">
+              要么把配套语料（仓库 `DirtyDocs/`）传进某个知识库，要么到「金标准集」把这些题的
+              期望文档改成你库里实际的名字。
+            </p>
+            <div className="flex items-center gap-2">
+              <Button size="sm" className="h-8 rounded-lg" disabled={busy}
+                      onClick={() => { setPreflight(null); void startRun(); }}>仍然评测</Button>
+              <Button size="sm" variant="ghost" className="h-8 rounded-lg text-ink-3"
+                      onClick={() => setPreflight(null)}>取消</Button>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   );

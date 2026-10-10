@@ -16,13 +16,22 @@ from app.api.schemas import (ERR, ERR_BODY, ERR_GATE, EvalQuestionIn, EvalQuesti
                              EvalQuestionPatchIn, EvalRunDetailOut, EvalRunIn, EvalRunOut,
                              EvalReportOut, PathId, QueryInt)
 from app.api.serializers import item_json, question_json, run_json
-from app.models import (EvalItemResult, EvalQuestion, EvalRun, KnowledgeBase, UsageRecord, User)
+from app.models import (EvalItemResult, EvalQuestion, EvalRun, KnowledgeBase, ModelConfig,
+                        UsageRecord, User)
 from app.services.audit import record as audit_record
 from app.services.citations import parse_citations
 from app.services.evaluation import aggregate, check_item, render_report
 from app.services.judge import judge_stats
 from app.services.retrieval import retrieve
 from app.services.text import clean_text
+
+
+def _active_embedding_model(session: Session) -> str | None:
+    """网关**实际会用到**的向量模型：按 (fallback_rank, id) 取第一个启用的登记行
+    （与 gateway.providers 的取用顺序一致）。没登记（纯 .env 直连）时返回 None。"""
+    row = (session.query(ModelConfig).filter_by(scenario="embedding", enabled=True)
+           .order_by(ModelConfig.fallback_rank, ModelConfig.id).first())
+    return row.model_name if row else None
 
 
 def build_router(rt: Runtime) -> APIRouter:
@@ -124,7 +133,12 @@ def build_router(rt: Runtime) -> APIRouter:
                 metrics["judge"] = judge_stats(results)
                 run.metrics, run.total, run.passed = metrics, metrics["total"], metrics["passed"]
                 run.chat_model = sorted(used_models)[0] if used_models else None
-                run.embedding_model = rt.settings.embedding_model if rt.embedder is not None else None
+                # 向量模型取**网关实际会用到的那家**（按 fallback_rank,id 取第一个启用的），
+                # 而不是 .env 里的默认值：真机上后者与后台登记的完全不是一回事，评测页那栏会误导人
+                # （实测显示 qwen3.7-text-embedding，而真正在用的是 text-embedding-v4）。
+                # 没有登记（纯 .env 直连）时才回落到配置值。
+                run.embedding_model = (_active_embedding_model(session)
+                                       or (rt.settings.embedding_model if rt.embedder is not None else None))
                 run.status, run.finished_at = "done", now()
                 session.commit()
         except Exception as exc:   # 整轮性故障：连不上库、配置读炸等——留证据，别静默
