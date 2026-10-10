@@ -98,6 +98,26 @@ docker compose up -d --build
 > `base_url=http://127.0.0.1:8099/v1` 后，「网关路由 → 密钥解密 → HTTP 调用 → 用量台账 → 评测」整条链路即可跑通。
 > 拿到真 key 后同一条链路直接换成真模型，无需改配置以外的东西。
 
+> **用自己的内网网关 / 私有厂商？** 不必每次走「手动登记」——放一份覆盖文件即可：
+> `data/catalog/model_catalog.local.json`（compose 已把 `./data/catalog` 挂到容器 `/app/catalog`）。
+> 形状与内置标本一致，**同 `id` 的厂商整条替换内置那条，新 `id` 追加**：
+>
+> ```json
+> { "vendors": [
+>   { "id": "my-gw", "name": "公司内网网关", "aliases": ["内网"], "pinyin": ["neiwang"],
+>     "verified": true,
+>     "profiles": [{ "id": "metered", "name": "按量计费", "base_url": "http://10.0.0.9/v1" }],
+>     "capabilities": [
+>       { "key": "chat", "scenario": "chat", "model": "qwen-plus", "profile": "metered" },
+>       { "key": "embedding", "scenario": "embedding", "model": "text-embedding-v4",
+>         "profile": "metered", "dim": 1024 }
+>     ] } ] }
+> ```
+>
+> 改完 `docker compose up -d backend` 生效（标本进程内缓存）。三点保证：文件**缺失**只用内置标本；
+> **写坏**（JSON 不合法）记 warning 后用内置标本；**合并不合法**（例如 embedding 维度不是库里的
+> 1024）整份覆盖忽略——标本可以过期，但不许把不合法的配置塞进下拉、更不许阻塞启动。
+
 ## 第 4 步：License 授权（商业闭环；开发/试用可跳过）
 
 授权文件用厂商私钥签名，客户部署只带公钥验签——**授权文件自身即信任根**，改库或手改文件内容都会验签失败。

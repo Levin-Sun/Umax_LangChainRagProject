@@ -3,11 +3,41 @@
 # 真机教训（2026-10-09/10，连着四个坑）：地址少了 /v1、厂商只有对话没有向量、模型名写错、
 # 向量维度不匹配——全是"让客户自己填厂商实现细节"造成的。标本就是那份本该由产品内置的知识，
 # 所以它必须：形状可自检、覆盖"对话+向量"这类刚需、并且**永远留着自建/手填入口**。
+import json
+
+import pytest
+
 from app.api.schemas import SCENARIOS
 from app.services.catalog import catalog_problems, load_catalog
 
 CATALOG = "/api/v1/model-catalog"
 BUNDLE = "/api/v1/model-bundles"
+
+
+@pytest.fixture(autouse=True)
+def _fresh_catalog_cache():
+    """标本带进程内缓存：每个用例前后清一次，覆盖文件的 monkeypatch 不会串到别的用例。"""
+    load_catalog.cache_clear()
+    yield
+    load_catalog.cache_clear()
+
+
+def _vendor(vid: str, *, name: str, base: str, cap_key: str = "chat",
+            model: str = "m", dim: int | None = None) -> dict:
+    cap = {"key": cap_key, "scenario": cap_key, "model": model, "profile": "p"}
+    if dim is not None:
+        cap["dim"] = dim
+    return {"id": vid, "name": name, "aliases": [], "pinyin": [], "verified": True,
+            "verified_at": "2026-10-10",
+            "profiles": [{"id": "p", "name": "按量计费", "base_url": base}],
+            "capabilities": [cap]}
+
+
+def _write_override(tmp_path, monkeypatch, payload) -> None:
+    p = tmp_path / "model_catalog.local.json"
+    p.write_text(payload if isinstance(payload, str) else json.dumps(payload, ensure_ascii=False),
+                 encoding="utf-8")
+    monkeypatch.setenv("MODEL_CATALOG_OVERRIDE", str(p))
 
 
 def _client(engine, tmp_path, **kw):
@@ -128,3 +158,43 @@ def test_bundle_blocks_embedding_dim_mismatch(engine, db, tmp_path, monkeypatch)
     r = c.post(BUNDLE, json={"vendor_id": "bailian", "api_key": "k",
                              "capabilities": ["embedding"], "test": False})
     assert r.status_code == 400 and "VECTOR(1024)" in r.text
+
+
+# ---- 客户覆盖文件：私有化客户的内网网关 / 私有厂商 ----
+def test_override_adds_and_replaces_vendors(tmp_path, monkeypatch):
+    """客户只属于自己的接入信息写在覆盖文件里：同 id 整条替换、新 id 追加。
+    有了它，客户不必每次都走「手动登记」——那是把系统该做的判断推回给客户。"""
+    _write_override(tmp_path, monkeypatch, {"vendors": [
+        _vendor("my-gw", name="内网网关", base="http://10.0.0.9/v1"),
+        _vendor("deepseek", name="DeepSeek（公司代理）", base="http://proxy.corp/v1",
+                model="deepseek-chat"),
+    ]})
+    ids = {v["id"]: v for v in load_catalog()["vendors"]}
+    assert ids["my-gw"]["name"] == "内网网关"                       # 追加
+    assert ids["deepseek"]["name"] == "DeepSeek（公司代理）"         # 覆盖：内置那条被整条换掉
+    assert catalog_problems() == []
+
+
+def test_override_broken_json_falls_back_to_bundled(tmp_path, monkeypatch):
+    """标本可以缺失、可以写坏——但不许阻塞使用，退回内置标本即可。"""
+    _write_override(tmp_path, monkeypatch, "{ 这不是 json")
+    assert {v["id"] for v in load_catalog()["vendors"]} >= {"bailian", "deepseek"}
+
+
+def test_override_with_invalid_content_is_ignored_entirely(tmp_path, monkeypatch):
+    """合并不合法（例：向量维度不是库里的 1024）→ 整份覆盖忽略，退回内置标本：
+    不许把不合法的配置塞进下拉，让人一步步走到写库那一步才炸。"""
+    _write_override(tmp_path, monkeypatch, {"vendors": [
+        _vendor("bad", name="坏标本", base="http://x/v1", cap_key="embedding",
+                model="v2", dim=1536)]})
+    assert "bad" not in {v["id"] for v in load_catalog()["vendors"]}
+
+
+def test_catalog_endpoint_serves_merged_override(engine, db, tmp_path, monkeypatch):
+    """覆盖文件要真的出现在界面下拉里（端点上可见），而不只是能被读到。"""
+    _write_override(tmp_path, monkeypatch, {"vendors": [
+        _vendor("my-gw", name="内网网关", base="http://10.0.0.9/v1")]})
+    c = _client(engine, tmp_path)
+    names = {v["id"]: v["name"] for v in c.get(CATALOG).json()["vendors"]}
+    assert names["my-gw"] == "内网网关"
+    assert names["bailian"] == "阿里百炼"          # 内置的仍在（覆盖不是替换整份标本）

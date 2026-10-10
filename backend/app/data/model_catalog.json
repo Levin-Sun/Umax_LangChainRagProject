@@ -68,12 +68,13 @@
       "name": "DeepSeek",
       "aliases": ["deepseek", "深度求索", "ds"],
       "pinyin": ["shenqiusuo", "sdu", "deepseek"],
-      "verified": false,
+      "verified": true,
+      "verified_at": "2026-10-10",
       "profiles": [{"id": "metered", "name": "按量计费", "base_url": "https://api.deepseek.com/v1"}],
       "capabilities": [
         {"key": "chat", "scenario": "chat", "model": "deepseek-chat", "profile": "metered"}
       ],
-      "note": "只提供对话，不提供向量（embedding）——入库还需要再选一家有向量模型的厂商"
+      "note": "实测：deepseek-chat / deepseek-reasoner 都可用（带不带 /v1 都行），但**没有向量端点**（404）——入库还需要再选一家有向量模型的厂商；要更强的推理可把模型名改成 deepseek-reasoner"
     },
     {
       "id": "siliconflow",

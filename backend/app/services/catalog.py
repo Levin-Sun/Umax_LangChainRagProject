@@ -16,10 +16,17 @@ base_url 少 `/v1`、厂商只有对话没有向量、模型名写错、向量�
 from __future__ import annotations
 
 import json
+import logging
+import os
 from functools import lru_cache
 from pathlib import Path
 
 CATALOG_PATH = Path(__file__).resolve().parents[1] / "data" / "model_catalog.json"
+# 客户覆盖文件：内网网关、私有厂商、代理域名这类"只属于这台机器"的接入信息。
+# 它由 compose 以**目录**挂载进来（./data/catalog → /app/catalog）——挂目录而不是挂文件，
+# 是因为挂文件时若宿主机上还没有那个文件，Docker 会按挂载点建一个同名目录（license.json 踩过）。
+OVERRIDE_ENV = "MODEL_CATALOG_OVERRIDE"
+DEFAULT_OVERRIDE = Path("/app/catalog/model_catalog.local.json")
 
 # 能力 → 场景（网关取模型时用的键）。两者目前一一对应，但刻意分开写：
 # "能力"是给客户看的用途，"场景"是系统内部的路由键，将来一个能力对应多场景时不必改数据格式。
@@ -29,9 +36,49 @@ CAPABILITY_SCENARIOS = {"chat": "chat", "embedding": "embedding",
 
 @lru_cache(maxsize=1)
 def load_catalog() -> dict:
-    """读内置标本（带缓存；进程内不变，更新标本＝发新版镜像）。"""
+    """读内置标本（带缓存；进程内不变，更新标本＝发新版镜像）+ 合并客户覆盖文件。"""
     with open(CATALOG_PATH, encoding="utf-8") as fh:
-        return json.load(fh)
+        return _merge_override(json.load(fh))
+
+
+def _merge_override(cat: dict) -> dict:
+    """把客户自带的覆盖文件并进标本：同 id 的厂商**整条替换**，新 id **追加**。
+
+    为什么需要它：私有化客户常有自己的网关域名（如内网代理）或自建模型，让客户每次都走
+    「手动登记」是把系统该做的判断又推回给客户；而标本又不能改客户机器上的镜像——所以留一个
+    可挂载的覆盖点。
+
+    失败一律退回内置标本并记 warning：**标本可缺失、可过期，但不许阻塞使用**（这是它作为
+    "数据"而不是"代码"的前提）。合并不合法（比如向量维度不对）也按同一条口径处理。
+    """
+    path = Path(os.environ.get(OVERRIDE_ENV) or DEFAULT_OVERRIDE)
+    if not path.exists():
+        return cat
+    log = logging.getLogger("umax")
+    try:
+        local = json.loads(path.read_text(encoding="utf-8"))
+        vendors = local.get("vendors")
+        if not isinstance(vendors, list):
+            raise ValueError("顶层需要 vendors 数组")
+    except Exception as exc:
+        log.warning("模型标本覆盖文件不可用，已忽略：%s（%s）", path, exc)
+        return cat
+    merged = {v["id"]: v for v in cat.get("vendors", []) if isinstance(v, dict) and v.get("id")}
+    added, replaced = [], []
+    for v in vendors:
+        if not isinstance(v, dict) or not v.get("id"):
+            log.warning("覆盖文件里有厂商缺 id，已跳过：%r", v)
+            continue
+        (replaced if v["id"] in merged else added).append(v["id"])
+        merged[v["id"]] = v
+    out = {**cat, "vendors": list(merged.values())}
+    problems = catalog_problems(out)
+    if problems:
+        log.warning("覆盖文件合入后标本不合法，已整体忽略：%s", problems[:3])
+        return cat
+    if added or replaced:
+        log.info("模型标本已合入本地覆盖：新增 %s，覆盖 %s（%s）", added, replaced, path)
+    return out
 
 
 def catalog_problems(catalog: dict | None = None) -> list[str]:

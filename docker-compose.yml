@@ -60,6 +60,10 @@ services:
       - "${BACKEND_PORT:-8000}:8000"
     volumes:
       - ./data/uploads:/app/uploads
+      # 客户自带的厂商标本覆盖文件（内网网关、私有厂商）：挂**目录**而不是文件——
+      # 挂文件时若宿主机上还没有那个文件，Docker 会按挂载点建一个同名目录（license.json 踩过）。
+      # 放 ./data/catalog/model_catalog.local.json；不存在就只用内置标本，不阻塞。
+      - ./data/catalog:/app/catalog:ro
       # 授权文件由交付时放置（不存在则视为无授权，配了公钥就会拦写操作）
       # ⚠️ 挂**目录**而不是文件：挂文件时若宿主机上还没有那个文件，Docker 会按挂载点建一个**同名目录**，
       # 客户随后把 license.json 拷到根目录只会落进那个目录里面，授权永远读不到——
