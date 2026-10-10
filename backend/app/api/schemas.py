@@ -135,6 +135,9 @@ class DocOut(BaseModel):
     error: str | None
     size_bytes: int | None
     created_at: datetime        # 上传时间（UTC；列表按此展示，客户要能看出"什么时候传的"）
+    # 是否已有向量（≥1 个切块带向量）。没有向量＝这篇只能按字面搜——界面据此给"去配向量模型 /
+    # 重建索引"的下一步，避免客户先传文档后配模型时白忙一场（真机讨论过的返工场景）。
+    has_embedding: bool
 
 
 class BatchUploadItemOut(BaseModel):

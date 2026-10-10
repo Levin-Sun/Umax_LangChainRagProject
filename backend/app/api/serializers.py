@@ -3,14 +3,40 @@
 # 为什么单独一个模块：这些函数的输出**必须与 app/api/schemas.py 里的响应模型逐字对齐**——
 # pydantic 会把模型没声明的键默默丢掉（评测 run 的 judge 曾这样消失过一次），
 # 所以"响应形状"是一个该被集中看、集中改的东西：字段名改了要动的就这两个文件。
-from app.models import ApiKey, BackgroundJob, Document, EvalItemResult, EvalQuestion, EvalRun, ModelConfig, User
+from sqlalchemy import func, select
+
+from app.models import (ApiKey, BackgroundJob, Chunk, Document, EvalItemResult, EvalQuestion,
+                        EvalRun, ModelConfig, User)
 from app.services.crypto import decrypt_secret
 
 
-def doc_json(d: Document) -> dict:
+def embedding_map(session, doc_ids: list[int]) -> dict[int, bool]:
+    """哪些文档已经有向量（≥1 个切块带向量）。
+
+    为什么需要这个信号：客户"先传文档、后配向量模型"是会真实发生的顺序，而那种入库会退化成
+    "只建 BM25"——界面上看不出来，只能靠人去点重建。有了它，文档列表能直接标出"无向量"并给
+    可点的下一步。
+
+    一次分组查询而不是逐篇查：文档列表每 3 秒轮询一次，逐篇查就是 N+1。
+    """
+    if not doc_ids:
+        return {}
+    rows = session.execute(
+        select(Chunk.document_id, func.count(Chunk.id))
+        .where(Chunk.document_id.in_(doc_ids), Chunk.embedding.is_not(None))
+        .group_by(Chunk.document_id)).all()
+    return {doc_id: n > 0 for doc_id, n in rows}
+
+
+def doc_has_embedding(session, doc_id: int) -> bool:
+    return embedding_map(session, [doc_id]).get(doc_id, False)
+
+
+def doc_json(d: Document, has_embedding: bool) -> dict:
+    # has_embedding 做成必填参数（不给默认值）：漏传会立刻报错，而不是静默把"有向量"说成"没有"
     return {"id": d.id, "kb_id": d.kb_id, "name": d.name, "status": d.status,
             "error": d.error, "size_bytes": d.size_bytes,
-            "created_at": d.created_at}
+            "created_at": d.created_at, "has_embedding": has_embedding}
 
 
 def user_json(u: User, grants: dict[int, list[int]]) -> dict:

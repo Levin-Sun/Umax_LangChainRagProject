@@ -1,6 +1,7 @@
 "use client";
 // 知识库后台：kb 列表/新建/删除 → 选中后文档表轮询 + 上传 + 重建索引 + reprocess + chunks 抽屉
 import { useRef, useState } from "react";
+import Link from "next/link";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
@@ -8,7 +9,7 @@ import AdminBanner from "@/components/AdminBanner";
 import { call, callVoid, uploadDocument, uploadDocuments, type Client } from "@/lib/api";
 import { P } from "@/lib/paths";
 import { useAsync, usePolling } from "@/lib/hooks";
-import type { BatchUploadItem, ChunkOut, DocOut, JobOut, KbOut, ReindexOut } from "@/lib/types";
+import type { BatchUploadItem, ChunkOut, DocOut, JobOut, KbOut, ModelOut, ReindexOut } from "@/lib/types";
 
 // 0.1MB（104857.6 B）以上一律按 MB 显示（1 位小数）——KB 在几十万字节时读起来更长，
 // 也占列宽；不足 0.1MB 才用 KB（1 位小数）保证小文件仍可读
@@ -77,6 +78,12 @@ export default function KbAdmin({ api }: { api: Client }) {
     () => (kbId === null ? Promise.resolve([] as DocOut[])
       : call(api.GET(P.kbDocs, { params: { path: { kb_id: kbId } } })) as Promise<DocOut[]>),
     { intervalMs: 3000, stopWhen: terminal, enabled: kbId !== null });
+  // 模型清单：判断"有没有可用的向量模型"。**先配模型再传文档**是最省事的顺序；反过来
+  //（先传文档、后配模型）会留下"ready 但没有向量"的文档——两种都要给下一步，
+  // 否则客户只看到"搜不准"，不知道是入库那一步就缺了向量（真机讨论过的返工场景）。
+  const models = useAsync(() => call(api.GET(P.models)) as Promise<ModelOut[]>);
+  const hasEmbedding = (models.data ?? []).some((m) => m.scenario === "embedding" && m.enabled);
+  const noVecDocs = (docs.data ?? []).filter((d) => d.status === "ready" && !d.has_embedding);
   // 进度就地取材：文档状态机（排队→解析→就绪/失败）本来就是进度，不另造一套。
   // 上传与重建共用这一条，所以文案是「索引处理中」——对两件事都成立，没有撒谎的余地。
   const list = docs.data ?? [];
@@ -252,6 +259,32 @@ export default function KbAdmin({ api }: { api: Client }) {
                 {notice}
               </p>
             )}
+            {/* 顺序引导：先配模型再传文档。缺向量模型时说明代价并指路；先传了文档、后配好模型的，
+                直接给可点的重建入口——不然客户只会觉得"搜不准"，查不到是入库时就缺了向量。 */}
+            {!models.loading && !hasEmbedding && (
+              <div className="space-y-1 rounded-lg border border-border bg-muted/60 px-3 py-2">
+                <p className="text-caption text-ink-2">
+                  还没接入「语义检索」模型：现在上传的文档只能按字面搜（同义不同词问不出来）。
+                  先接入向量模型，回来点「重建本库索引」即可补齐。
+                </p>
+                <Link href="/admin/models" className="inline-block text-caption text-brand hover:underline">
+                  去接入模型 →
+                </Link>
+              </div>
+            )}
+            {hasEmbedding && noVecDocs.length > 0 && (
+              <div className="space-y-1 rounded-lg border border-border bg-muted/60 px-3 py-2">
+                <p className="text-caption text-ink-2">
+                  有 {noVecDocs.length} 篇文档还没有向量（上传时没有可用的向量模型），它们只能按字面搜。
+                </p>
+                <Button type="button" size="sm" className="h-7 rounded-lg" disabled={busy}
+                        onClick={() => setReindexFor({
+                          scope: [kbId],
+                          label: kbs.data?.find((k) => k.id === kbId)?.name ?? "本库" })}>
+                  重建本库索引补齐
+                </Button>
+              </div>
+            )}
             {/* 进度：文档状态机就是进度，上传与重建共用这一条（对两件事都成立，没有撒谎的余地） */}
             {inflight.length > 0 && (
               <p role="status" className="text-caption text-ink-2">
@@ -292,7 +325,11 @@ export default function KbAdmin({ api }: { api: Client }) {
                     </td>
                     <td className="pr-3 xl:pr-4"><Badge variant={d.status === "failed" ? "destructive" : "secondary"} className="whitespace-nowrap rounded-full font-normal">
                       {STATUS_LABEL[d.status] ?? d.status}</Badge>
-                      {d.error && <p className="mt-0.5 max-w-60 truncate text-caption text-destructive" title={d.error}>{d.error}</p>}</td>
+                      {d.error && <p className="mt-0.5 max-w-60 truncate text-caption text-destructive" title={d.error}>{d.error}</p>}
+                      {d.status === "ready" && !d.has_embedding && (
+                        <p className="mt-0.5 text-caption text-ink-3">无向量（只能按字面搜）</p>
+                      )}
+                    </td>
                     <td className="whitespace-nowrap pr-3 text-right font-medium xl:pr-4">{fmtBytes(d.size_bytes)}</td>
                     <td className="whitespace-nowrap pr-3 text-ink-3 xl:pr-4">{fmtTime(d.created_at)}</td>
                     <td className="pl-3 pr-1 text-right">

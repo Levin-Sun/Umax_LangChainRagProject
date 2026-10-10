@@ -8,7 +8,7 @@ from sqlalchemy.orm import Session
 from app.api.deps import (Runtime, allowed_kb_ids, client_ip, get_session, get_user,
                           require_license)
 from app.api.schemas import ERR, ERR_BODY, ERR_GATE, ERR_LOGIN_GATE, DocOut, KbIn, KbOut, PathId
-from app.api.serializers import doc_json
+from app.api.serializers import doc_json, embedding_map
 from app.models import Document, KnowledgeBase, User
 from app.services.audit import record as audit_record
 
@@ -81,7 +81,8 @@ def build_router(rt: Runtime) -> APIRouter:
         # 不在授权范围内的库与"不存在"同文案：探测不出别人的库 id 存不存在
         if not session.get(KnowledgeBase, kb_id) or (allowed is not None and kb_id not in allowed):
             raise HTTPException(404, "知识库不存在")
-        return [doc_json(d) for d in session.query(Document)
-                .filter_by(kb_id=kb_id).order_by(Document.id)]
+        docs = session.query(Document).filter_by(kb_id=kb_id).order_by(Document.id).all()
+        have = embedding_map(session, [d.id for d in docs])      # 一次分组查询，不做 N+1
+        return [doc_json(d, have.get(d.id, False)) for d in docs]
 
     return router

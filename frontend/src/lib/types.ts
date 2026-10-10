@@ -1,6 +1,8 @@
 export type DocStatus = "pending" | "parsing" | "ready" | "failed";
 export interface KbOut { id: number; name: string; description: string | null }
-export interface DocOut { id: number; kb_id: number; name: string; status: DocStatus; error: string | null; size_bytes: number | null; created_at: string }
+// has_embedding：这篇是否有向量（≥1 个切块带向量）。没有向量＝当时没有可用的向量模型，
+// 只能按字面搜——界面据此提示"去配向量模型 / 重建索引"（先传文档后配模型是会真实发生的顺序）。
+export interface DocOut { id: number; kb_id: number; name: string; status: DocStatus; error: string | null; size_bytes: number | null; created_at: string; has_embedding: boolean }
 // 批量上传逐项结果（部分成功：坏文件只在自己这行有 error）
 export interface BatchUploadItem { name: string; document: DocOut | null; error: string | null }
 // 重建索引（换 embedding 模型后全库重算）：documents=本次要重建的文档数，kb_ids null=全部知识库。

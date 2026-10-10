@@ -12,7 +12,7 @@ from app.api.constants import BATCH_MAX
 from app.api.deps import Runtime, allowed_kb_ids, client_ip, get_session, get_user, require_license
 from app.api.schemas import (ERR, ERR_BODY, ERR_GATE, ERR_LOGIN_GATE, BatchUploadItemOut,
                              ChunkPreviewOut, DocOut, DocPatchIn, PathId)
-from app.api.serializers import doc_json
+from app.api.serializers import doc_has_embedding, doc_json, embedding_map
 from app.models import Chunk, Document, KnowledgeBase, User
 from app.services.audit import record as audit_record
 from app.services.ingest import ingest_document, read_stored, supported_ext
@@ -87,10 +87,11 @@ def build_router(rt: Runtime) -> APIRouter:
                 continue
             raw = read_or_fail(session, doc)
             if raw is None:            # 读不出来：这一项以 failed 形态返回，其余照常
-                results.append({"name": name, "document": doc_json(doc), "error": None})
+                results.append({"name": name, "document": doc_json(doc, False), "error": None})
                 continue
             stored.append((doc, raw))
-            results.append({"name": name, "document": doc_json(doc), "error": None})
+            # 刚落库、还没入库：此刻必然没有向量
+            results.append({"name": name, "document": doc_json(doc, False), "error": None})
         session.commit()
         if rt.queue is not None:
             for doc, _raw in stored:
@@ -103,7 +104,7 @@ def build_router(rt: Runtime) -> APIRouter:
                                   vision_fn=rt.vision_fn,
                                   caption_images=rt.cfg.effective()["doc_image_caption"],
                                   **rt.chunk_params(kb))
-            done[doc.id] = doc_json(doc)
+            done[doc.id] = doc_json(doc, doc_has_embedding(session, doc.id))
         return [{**item,
                  "document": (done.get(item["document"]["id"], item["document"])
                               if item["document"] else None)}
@@ -126,15 +127,15 @@ def build_router(rt: Runtime) -> APIRouter:
         session.commit()
         if rt.queue is not None:
             rt.queue.enqueue_import(doc.id)
-            return doc_json(doc)  # pending，worker 接手
+            return doc_json(doc, False)  # pending，worker 接手（此刻还没有向量）
         raw = read_or_fail(session, doc)
         if raw is None:
-            return doc_json(doc)      # failed 带着原因回给前端，不是 500
+            return doc_json(doc, False)   # failed 带着原因回给前端，不是 500
         doc = ingest_document(session, doc, raw, embedder=rt.embedder, mineru=rt.mineru,
                               vision_fn=rt.vision_fn,
                               caption_images=rt.cfg.effective()["doc_image_caption"],
                               **rt.chunk_params(kb))
-        return doc_json(doc)
+        return doc_json(doc, doc_has_embedding(session, doc.id))
 
     @router.delete("/api/v1/documents/{doc_id}", status_code=204,
                    responses={**ERR(404, "文档不存在"), **ERR_GATE})
@@ -175,7 +176,8 @@ def build_router(rt: Runtime) -> APIRouter:
                 responses={**ERR(404, "文档不存在"), **ERR_LOGIN_GATE})
     def get_document(doc_id: PathId, user: User = Depends(get_user),
                      session: Session = Depends(get_session)):
-        return doc_json(visible_doc(session, user, doc_id))
+        doc = visible_doc(session, user, doc_id)
+        return doc_json(doc, doc_has_embedding(session, doc.id))
 
     @router.get("/api/v1/documents/{doc_id}/chunks", response_model=list[ChunkPreviewOut],
                 responses={**ERR(404, "文档不存在"), **ERR_LOGIN_GATE})
@@ -201,7 +203,7 @@ def build_router(rt: Runtime) -> APIRouter:
             doc.status = body.status
         doc.error = body.error
         session.commit()
-        return doc_json(doc)
+        return doc_json(doc, doc_has_embedding(session, doc.id))
 
     @router.post("/api/v1/documents/{doc_id}/reprocess", status_code=202, response_model=DocOut,
                  responses={**ERR(404, "文档不存在"), **ERR_GATE})
@@ -220,14 +222,14 @@ def build_router(rt: Runtime) -> APIRouter:
             doc.status, doc.error = "pending", None
             session.commit()
             rt.queue.enqueue_import(doc.id)
-            return doc_json(doc)
+            return doc_json(doc, False)   # 重排队中：向量会被重新算，此刻不声称有
         raw = read_or_fail(session, doc)
         if raw is None:
-            return doc_json(doc)
+            return doc_json(doc, doc_has_embedding(session, doc.id))
         doc = ingest_document(session, doc, raw, embedder=rt.embedder,
                               mineru=rt.mineru, vision_fn=rt.vision_fn,
                               caption_images=rt.cfg.effective()["doc_image_caption"],
                               **rt.chunk_params(session.get(KnowledgeBase, doc.kb_id)))
-        return doc_json(doc)
+        return doc_json(doc, doc_has_embedding(session, doc.id))
 
     return router

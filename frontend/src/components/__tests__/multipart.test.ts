@@ -14,7 +14,7 @@ describe("uploadDocument", () => {
     const fakeFetch = (async (req: Request) => {
       captured = req;
       return new Response(JSON.stringify({ id: 7, kb_id: 1, name: "a.txt",
-        status: "pending", error: null, size_bytes: 3 }),
+      status: "pending", error: null, size_bytes: 3, has_embedding: false }),
         { status: 201, headers: { "content-type": "application/json" } });
     }) as unknown as typeof fetch;
     const client = createApiClient("http://test.local", { fetch: fakeFetch }) as Client;

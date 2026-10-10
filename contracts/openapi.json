@@ -1014,6 +1014,10 @@
             ],
             "title": "Error"
           },
+          "has_embedding": {
+            "title": "Has Embedding",
+            "type": "boolean"
+          },
           "id": {
             "title": "Id",
             "type": "integer"
@@ -1055,7 +1059,8 @@
           "status",
           "error",
           "size_bytes",
-          "created_at"
+          "created_at",
+          "has_embedding"
         ],
         "title": "DocOut",
         "type": "object"

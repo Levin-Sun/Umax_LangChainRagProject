@@ -5,9 +5,9 @@ import { describe, expect, it, vi } from "vitest";
 import KbAdmin from "@/components/KbAdmin";
 import { P } from "@/lib/paths";
 import { fail, fakeApi, ok } from "@/lib/testkit";
-import type { DocOut, JobOut } from "@/lib/types";
+import type { DocOut, JobOut, ModelOut } from "@/lib/types";
 
-const pending: DocOut = { id: 1, kb_id: 1, name: "ops.txt", status: "pending", error: null, size_bytes: 5, created_at: "2026-10-07T10:00:00+00:00" };
+const pending: DocOut = { id: 1, kb_id: 1, name: "ops.txt", status: "pending", error: null, size_bytes: 5, created_at: "2026-10-07T10:00:00+00:00", has_embedding: false };
 const ready: DocOut = { ...pending, status: "ready" };
 
 describe("KbAdmin 轮询", () => {
@@ -82,7 +82,7 @@ it("多选文件 → 走批量端点，坏文件逐行报错", async () => {
     if (u === P.kbDocsBatch) {
       // 服务端逐项结果：一个成功、一个失败（部分成功语义）
       return ok([
-        { name: "好的.txt", document: { id: 1, kb_id: 1, name: "好的.txt", status: "ready", error: null, size_bytes: 10, created_at: "2026-10-07T10:00:00+00:00" }, error: null },
+      { name: "好的.txt", document: { id: 1, kb_id: 1, name: "好的.txt", status: "ready", error: null, size_bytes: 10, created_at: "2026-10-07T10:00:00+00:00", has_embedding: true }, error: null },
         { name: "坏掉.txt", document: null, error: "暂不支持的文件类型：坏掉.txt" },
       ]);
     }
@@ -90,7 +90,7 @@ it("多选文件 → 走批量端点，坏文件逐行报错", async () => {
   });
   render(<KbAdmin api={fakeApi({
     GET: (u) => (u === P.kb ? ok([{ id: 1, name: "库A", description: null }])
-      : ok([{ id: 1, kb_id: 1, name: "好的.txt", status: "ready", error: null, size_bytes: 10, created_at: "2026-10-07T10:00:00+00:00" }])),
+      : ok([{ id: 1, kb_id: 1, name: "好的.txt", status: "ready", error: null, size_bytes: 10, created_at: "2026-10-07T10:00:00+00:00", has_embedding: true }])),
     POST,
   })} />);
   await screen.findByText("库A");
@@ -106,7 +106,7 @@ it("多选文件 → 走批量端点，坏文件逐行报错", async () => {
 });
 
 it("单文件仍走单文件端点（不批量）", async () => {
-  const POST = vi.fn(() => ok({ id: 9, kb_id: 1, name: "单个.txt", status: "ready", error: null, size_bytes: 3, created_at: "2026-10-07T10:00:00+00:00" }));
+    const POST = vi.fn(() => ok({ id: 9, kb_id: 1, name: "单个.txt", status: "ready", error: null, size_bytes: 3, created_at: "2026-10-07T10:00:00+00:00", has_embedding: true }));
   render(<KbAdmin api={fakeApi({
     GET: (u) => (u === P.kb ? ok([{ id: 1, name: "库A", description: null }]) : ok([])),
     POST,
@@ -129,8 +129,8 @@ it("分块抽屉标出图片描述来源", async () => {
   ];
   render(<KbAdmin api={fakeApi({
     GET: (u) => (u === P.kb ? ok([{ id: 1, name: "图库", description: null }])
-      : u === P.kbDocs ? ok([{ id: 1, kb_id: 1, name: "流程.docx", status: "ready", error: null, size_bytes: 100, created_at: "2026-10-07T10:00:00+00:00" }])
-      : u === P.docChunks ? ok(chunks) : u === P.jobs ? ok([]) : undefined),
+      : u === P.kbDocs ? ok([{ id: 1, kb_id: 1, name: "流程.docx", status: "ready", error: null, size_bytes: 100, created_at: "2026-10-07T10:00:00+00:00", has_embedding: true }])
+      : u === P.docChunks ? ok(chunks) : u === P.jobs ? ok([]) : u === P.models ? ok([]) : undefined),
   })} />);
   await screen.findByText("图库");
   await userEvent.click(screen.getByText("图库"));
@@ -192,7 +192,7 @@ it("上传区只有一个可见入口（按钮），原生控件不渲染多余�
 
 it("拖拽文件到上传区即上传（多个走批量端点）", async () => {
   const POST = vi.fn((u: string) => (u === P.kbDocsBatch
-    ? ok([{ name: "拖一.txt", document: { id: 1, kb_id: 1, name: "拖一.txt", status: "ready", error: null, size_bytes: 5, created_at: "2026-10-07T10:00:00+00:00" }, error: null }])
+      ? ok([{ name: "拖一.txt", document: { id: 1, kb_id: 1, name: "拖一.txt", status: "ready", error: null, size_bytes: 5, created_at: "2026-10-07T10:00:00+00:00", has_embedding: true }, error: null }])
     : ok({})));
   render(<KbAdmin api={fakeApi({
     GET: (u) => (u === P.kb ? ok([{ id: 1, name: "库A", description: null }]) : ok([])),
@@ -211,7 +211,7 @@ it("拖拽文件到上传区即上传（多个走批量端点）", async () => {
 // ---- 大小单位（体验反馈）：≥0.1MB 用 MB 一位小数，不足才用 KB ----
 it("大小按 0.1MB 分档：大文件用 MB，小文件用 KB", async () => {
   const mk = (id: number, name: string, size: number): DocOut => ({
-    id, kb_id: 1, name, status: "ready", error: null, size_bytes: size,
+        id, kb_id: 1, name, status: "ready", error: null, size_bytes: size, has_embedding: true,
     created_at: "2026-10-07T10:00:00+00:00" });
   render(<KbAdmin api={fakeApi({
     GET: (u) => (u === P.kb ? ok([{ id: 1, name: "库A", description: null }])
@@ -312,7 +312,7 @@ describe("重建索引", () => {
 
   it("进度条就地取材自文档状态（排队/解析中一多就显示已完成比例）", async () => {
     const mk = (id: number, status: string): DocOut => ({ id, kb_id: 1, name: `d${id}.txt`,
-      status: status as DocOut["status"], error: null, size_bytes: 10,
+        status: status as DocOut["status"], error: null, size_bytes: 10, has_embedding: true,
       created_at: "2026-10-08T10:00:00+00:00" });
     render(<KbAdmin api={fakeApi({
       GET: (u) => (u === P.kb ? ok([lib])
@@ -327,7 +327,7 @@ describe("重建索引", () => {
 
   it("没有在跑的文档时不显示进度行（不制造虚假的「正在忙」）", async () => {
     const done: DocOut = { id: 1, kb_id: 1, name: "ok.txt", status: "ready", error: null,
-      size_bytes: 10, created_at: "2026-10-08T10:00:00+00:00" };
+      size_bytes: 10, created_at: "2026-10-08T10:00:00+00:00", has_embedding: true };
     render(<KbAdmin api={fakeApi({
       GET: (u) => (u === P.kb ? ok([lib]) : u === P.jobs ? ok([]) : ok([done])),
     })} />);
@@ -408,5 +408,38 @@ describe("后台作业", () => {
     await userEvent.click(await screen.findByText("运营库"));
     const row = (await screen.findByText("#7")).closest("li") as HTMLElement;
     expect(within(row).getByText(/已删除的库 #42 · 3\/3/)).toBeInTheDocument();
+  });
+});
+
+// 顺序引导（真机讨论过的返工场景）：先配模型再传文档；先传了文档、后配好模型要给可点的下一步。
+describe("向量模型的顺序引导", () => {
+  const lib = { id: 1, name: "库A", description: null };
+  const emb: ModelOut = { id: 5, scenario: "embedding", provider: "阿里百炼",
+    base_url: "https://ds/compatible-mode/v1", model_name: "text-embedding-v4",
+    capabilities: {}, is_default: false, fallback_rank: 0, enabled: true, api_key_masked: "****a" };
+
+  it("没有向量模型时说明代价并指路去「模型」页", async () => {
+    const api = fakeApi({
+      GET: (u: string) => (u === P.kb ? ok([lib]) : u === P.models ? ok([]) : ok([])),
+    });
+    render(<KbAdmin api={api} />);
+    await userEvent.click(await screen.findByText("库A"));
+    expect(await screen.findByText(/还没接入「语义检索」模型/)).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: /去接入模型/ })).toHaveAttribute("href", "/admin/models");
+  });
+
+  it("先传了文档、后配好向量模型：标出无向量文档并给可点的重建入口", async () => {
+    const noVec: DocOut = { ...ready, has_embedding: false };
+    const api = fakeApi({
+      GET: (u: string) => (u === P.kb ? ok([lib]) : u === P.models ? ok([emb])
+        : u === P.kbDocs ? ok([noVec]) : ok([])),
+    });
+    render(<KbAdmin api={api} />);
+    await userEvent.click(await screen.findByText("库A"));
+    expect(await screen.findByText(/有 1 篇文档还没有向量/)).toBeInTheDocument();
+    const row = await screen.findByRole("row", { name: /ops\.txt/ });
+    expect(within(row).getByText(/无向量/)).toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: "重建本库索引补齐" }));
+    expect(await screen.findByRole("dialog", { name: "重建索引确认" })).toBeInTheDocument();
   });
 });

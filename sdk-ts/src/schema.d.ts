@@ -1113,6 +1113,8 @@ export interface components {
             created_at: string;
             /** Error */
             error: string | null;
+            /** Has Embedding */
+            has_embedding: boolean;
             /** Id */
             id: number;
             /** Kb Id */
